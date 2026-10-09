@@ -1,0 +1,809 @@
+--- attr.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+use crate::parser::SelectorImpl;
+use cssparser::ToCss;
+use std::fmt;
+
+#[cfg(feature = "to_shmem")]
+use to_shmem_derive::ToShmem;
+
+#[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "to_shmem", derive(ToShmem))]
+#[cfg_attr(feature = "to_shmem", shmem(no_bounds))]
+pub struct AttrSelectorWithOptionalNamespace<Impl: SelectorImpl> {
+    #[cfg_attr(feature = "to_shmem", shmem(field_bound))]
+    pub namespace: Option<NamespaceConstraint<(Impl::NamespacePrefix, Impl::NamespaceUrl)>>,
+    #[cfg_attr(feature = "to_shmem", shmem(field_bound))]
+    pub local_name: Impl::LocalName,
+    pub local_name_lower: Impl::LocalName,
+    #[cfg_attr(feature = "to_shmem", shmem(field_bound))]
+    pub operation: ParsedAttrSelectorOperation<Impl::AttrValue>,
+}
+
+impl<Impl: SelectorImpl> AttrSelectorWithOptionalNamespace<Impl> {
+    pub fn namespace(&self) -> Option<NamespaceConstraint<&Impl::NamespaceUrl>> {
+        self.namespace.as_ref().map(|ns| match ns {
+            NamespaceConstraint::Any => NamespaceConstraint::Any,
+            NamespaceConstraint::Specific((_, ref url)) => NamespaceConstraint::Specific(url),
+        })
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "to_shmem", derive(ToShmem))]
+pub enum NamespaceConstraint<NamespaceUrl> {
+    Any,
+
+    /// Empty string for no namespace
+    Specific(NamespaceUrl),
+}
+
+#[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "to_shmem", derive(ToShmem))]
+pub enum ParsedAttrSelectorOperation<AttrValue> {
+    Exists,
+    WithValue {
+        operator: AttrSelectorOperator,
+        case_sensitivity: ParsedCaseSensitivity,
+        value: AttrValue,
+    },
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub enum AttrSelectorOperation<AttrValue> {
+
+--- bloom.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+//! Counting and non-counting Bloom filters tuned for use as ancestor filters
+//! for selector matching.
+
+use std::fmt::{self, Debug};
+
+// The top 8 bits of the 32-bit hash value are not used by the bloom filter.
+// Consumers may rely on this to pack hashes more efficiently.
+pub const BLOOM_HASH_MASK: u32 = 0x00ffffff;
+const KEY_SIZE: usize = 12;
+
+const ARRAY_SIZE: usize = 1 << KEY_SIZE;
+const KEY_MASK: u32 = (1 << KEY_SIZE) - 1;
+
+/// A counting Bloom filter with 8-bit counters.
+pub type BloomFilter = CountingBloomFilter<BloomStorageU8>;
+
+/// A counting Bloom filter with parameterized storage to handle
+/// counters of different sizes.  For now we assume that having two hash
+/// functions is enough, but we may revisit that decision later.
+///
+/// The filter uses an array with 2**KeySize entries.
+///
+/// Assuming a well-distributed hash function, a Bloom filter with
+/// array size M containing N elements and
+/// using k hash function has expected false positive rate exactly
+///
+/// $  (1 - (1 - 1/M)^{kN})^k  $
+///
+/// because each array slot has a
+///
+/// $  (1 - 1/M)^{kN}  $
+///
+/// chance of being 0, and the expected false positive rate is the
+/// probability that all of the k hash functions will hit a nonzero
+/// slot.
+///
+/// For reasonable assumptions (M large, kN large, which should both
+/// hold if we're worried about false positives) about M and kN this
+/// becomes approximately
+///
+/// $$  (1 - \exp(-kN/M))^k   $$
+///
+/// For our special case of k == 2, that's $(1 - \exp(-2N/M))^2$,
+/// or in other words
+///
+/// $$    N/M = -0.5 * \ln(1 - \sqrt(r))   $$
+///
+/// where r is the false positive rate.  This can be used to compute
+/// the desired KeySize for a given load N and false positive rate r.
+///
+/// If N/M is assumed small, then the false positive rate can
+
+--- build.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+extern crate phf_codegen;
+
+use std::env;
+use std::fs::File;
+use std::io::{BufWriter, Write};
+use std::path::Path;
+
+fn main() {
+    let path = Path::new(&env::var_os("OUT_DIR").unwrap())
+        .join("ascii_case_insensitive_html_attributes.rs");
+    let mut file = BufWriter::new(File::create(&path).unwrap());
+
+    let mut set = phf_codegen::Set::new();
+    for name in ASCII_CASE_INSENSITIVE_HTML_ATTRIBUTES.split_whitespace() {
+        set.entry(name);
+    }
+    write!(
+        &mut file,
+        "{{ static SET: ::phf::Set<&'static str> = {}; &SET }}",
+        set.build(),
+    )
+    .unwrap();
+}
+
+/// <https://html.spec.whatwg.org/multipage/#selectors>
+static ASCII_CASE_INSENSITIVE_HTML_ATTRIBUTES: &str = r#"
+    accept
+    accept-charset
+    align
+    alink
+    axis
+    bgcolor
+    charset
+    checked
+    clear
+    codetype
+    color
+    compact
+    declare
+    defer
+    dir
+    direction
+    disabled
+    enctype
+    face
+    frame
+    hreflang
+    http-equiv
+    lang
+    language
+    link
+
+--- builder.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+//! Helper module to build up a selector safely and efficiently.
+//!
+//! Our selector representation is designed to optimize matching, and has
+//! several requirements:
+//! * All simple selectors and combinators are stored inline in the same buffer as Component
+//!   instances.
+//! * We store the top-level compound selectors from right to left, i.e. in matching order.
+//! * We store the simple selectors for each combinator from left to right, so that we match the
+//!   cheaper simple selectors first.
+//!
+//! For example, the selector:
+//!
+//!   .bar:hover > .baz:nth-child(2) + .qux
+//!
+//! Gets stored as:
+//!
+//!   [.qux,  + , .baz, :nth-child(2),  > , .bar, :hover]
+//!
+//! Meeting all these constraints without extra memmove traffic during parsing is non-trivial. This
+//! module encapsulates those details and presents an easy-to-use API for the parser.
+
+use crate::parser::{
+    Combinator, Component, ParseRelative, RelativeSelector, Selector, SelectorData, SelectorImpl,
+};
+use crate::sink::Push;
+use bitflags::bitflags;
+use derive_more::{Add, AddAssign};
+use servo_arc::Arc;
+use smallvec::SmallVec;
+use std::cmp;
+use std::slice;
+
+#[cfg(feature = "to_shmem")]
+use to_shmem_derive::ToShmem;
+
+/// Top-level SelectorBuilder struct. This should be stack-allocated by the consumer and never
+/// moved (because it contains a lot of inline data that would be slow to memmove).
+///
+/// After instantiation, callers may call the push_simple_selector() and push_combinator() methods
+/// to append selector data as it is encountered (from left to right). Once the process is
+/// complete, callers should invoke build(), which transforms the contents of the SelectorBuilder
+/// into a heap- allocated Selector and leaves the builder in a drained state.
+#[derive(Debug)]
+pub struct SelectorBuilder<Impl: SelectorImpl> {
+    /// The entire sequence of components. We make this large because the result of parsing a
+    /// selector is fed into a new Arc-ed allocation, so any spilled vec would be a wasted
+    /// allocation. Also, Components are large enough that we don't have much cache locality
+    /// benefit from reserving stack space for fewer of them.
+    components: SmallVec<[Component<Impl>; 32]>,
+    last_compound_start: Option<usize>,
+}
+
+--- context.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+use crate::attr::CaseSensitivity;
+use crate::bloom::BloomFilter;
+use crate::nth_index_cache::{NthIndexCache, NthIndexCacheInner};
+use crate::parser::{Selector, SelectorImpl};
+use crate::relative_selector::cache::RelativeSelectorCache;
+use crate::relative_selector::filter::RelativeSelectorFilterMap;
+use crate::tree::{Element, OpaqueElement};
+
+/// What kind of selector matching mode we should use.
+///
+/// There are two modes of selector matching. The difference is only noticeable
+/// in presence of pseudo-elements.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MatchingMode {
+    /// Don't ignore any pseudo-element selectors.
+    Normal,
+
+    /// Ignores any stateless pseudo-element selectors in the rightmost sequence
+    /// of simple selectors.
+    ///
+    /// This is useful, for example, to match against ::before when you aren't a
+    /// pseudo-element yourself.
+    ///
+    /// For example, in presence of `::before:hover`, it would never match, but
+    /// `::before` would be ignored as in "matching".
+    ///
+    /// It's required for all the selectors you match using this mode to have a
+    /// pseudo-element.
+    ForStatelessPseudoElement,
+}
+
+/// The mode to use when matching unvisited and visited links.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VisitedHandlingMode {
+    /// All links are matched as if they are unvisted.
+    AllLinksUnvisited,
+    /// All links are matched as if they are visited and unvisited (both :link
+    /// and :visited match).
+    ///
+    /// This is intended to be used from invalidation code, to be conservative
+    /// about whether we need to restyle a link.
+    AllLinksVisitedAndUnvisited,
+    /// A element's "relevant link" is the element being matched if it is a link
+    /// or the nearest ancestor link. The relevant link is matched as though it
+    /// is visited, and all other links are matched as if they are unvisited.
+    RelevantLinkVisited,
+}
+
+impl VisitedHandlingMode {
+    #[inline]
+    pub fn matches_visited(&self) -> bool {
+
+--- kleene_value.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+//! Kleen logic: https://en.wikipedia.org/wiki/Three-valued_logic#Kleene_and_Priest_logics
+
+/// A "trilean" value based on Kleen logic.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KleeneValue {
+    /// False
+    False = 0,
+    /// True
+    True = 1,
+    /// Either true or false, but we’re not sure which yet.
+    Unknown,
+}
+
+impl From<bool> for KleeneValue {
+    fn from(b: bool) -> Self {
+        if b {
+            Self::True
+        } else {
+            Self::False
+        }
+    }
+}
+
+impl KleeneValue {
+    /// Turns this Kleene value to a bool, taking the unknown value as an
+    /// argument.
+    pub fn to_bool(self, unknown: bool) -> bool {
+        match self {
+            Self::True => true,
+            Self::False => false,
+            Self::Unknown => unknown,
+        }
+    }
+
+    /// Return true if any result of f() is definitely true.
+    /// Otherwise, return the `or` of all values.
+    /// Returns false if empty, like that of `Iterator`.
+    #[inline(always)]
+    pub fn any<T>(iter: impl Iterator<Item = T>, f: impl FnMut(T) -> Self) -> Self {
+        Self::any_value(iter, Self::True, Self::False, |a, b| a | b, f)
+    }
+
+    /// Return false if any results of f() is definitely false.
+    /// Otherwise, return the `and` of all values.
+    /// Returns true if empty, opposite of `Iterator`.
+    #[inline(always)]
+    pub fn any_false<T>(iter: impl Iterator<Item = T>, f: impl FnMut(T) -> Self) -> Self {
+        Self::any_value(iter, Self::False, Self::True, |a, b| a & b, f)
+    }
+
+    #[inline(always)]
+
+--- lib.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+// Make |cargo bench| work.
+#![cfg_attr(feature = "bench", feature(test))]
+
+pub mod attr;
+pub mod bloom;
+mod builder;
+pub mod context;
+pub mod kleene_value;
+pub mod matching;
+mod nth_index_cache;
+pub mod parser;
+pub mod relative_selector;
+pub mod sink;
+mod tree;
+pub mod visitor;
+
+pub use crate::nth_index_cache::NthIndexCache;
+pub use crate::parser::{Parser, SelectorImpl, SelectorList};
+pub use crate::tree::{Element, OpaqueElement};
+
+
+--- matching.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+use crate::attr::{
+    AttrSelectorOperation, AttrSelectorWithOptionalNamespace, CaseSensitivity, NamespaceConstraint,
+    ParsedAttrSelectorOperation, ParsedCaseSensitivity,
+};
+use crate::bloom::{BloomFilter, BLOOM_HASH_MASK};
+use crate::kleene_value::KleeneValue;
+use crate::parser::{
+    AncestorHashes, Combinator, Component, LocalName, MatchesFeaturelessHost, NthSelectorData,
+    RelativeSelectorMatchHint,
+};
+use crate::parser::{
+    NonTSPseudoClass, RelativeSelector, Selector, SelectorImpl, SelectorIter, SelectorList,
+};
+use crate::relative_selector::cache::RelativeSelectorCachedMatch;
+use crate::tree::Element;
+use bitflags::bitflags;
+use debug_unreachable::debug_unreachable;
+use log::debug;
+use smallvec::SmallVec;
+use std::borrow::Borrow;
+
+pub use crate::context::*;
+
+// The bloom filter for descendant CSS selectors will have a <1% false
+// positive rate until it has this many selectors in it, then it will
+// rapidly increase.
+pub static RECOMMENDED_SELECTOR_BLOOM_FILTER_SIZE: usize = 4096;
+
+bitflags! {
+    /// Set of flags that are set on either the element or its parent (depending
+    /// on the flag) if the element could potentially match a selector.
+    #[derive(Clone, Copy)]
+    pub struct ElementSelectorFlags: usize {
+        /// When a child is added or removed from the parent, all the children
+        /// must be restyled, because they may match :nth-last-child,
+        /// :last-of-type, :nth-last-of-type, or :only-of-type.
+        const HAS_SLOW_SELECTOR = 1 << 0;
+
+        /// When a child is added or removed from the parent, any later
+        /// children must be restyled, because they may match :nth-child,
+        /// :first-of-type, or :nth-of-type.
+        const HAS_SLOW_SELECTOR_LATER_SIBLINGS = 1 << 1;
+
+        /// HAS_SLOW_SELECTOR* was set by the presence of :nth (But not of).
+        const HAS_SLOW_SELECTOR_NTH = 1 << 2;
+
+        /// When a DOM mutation occurs on a child that might be matched by
+        /// :nth-last-child(.. of <selector list>), earlier children must be
+        /// restyled, and HAS_SLOW_SELECTOR will be set (which normally
+        /// indicates that all children will be restyled).
+        ///
+
+--- nth_index_cache.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+use std::hash::Hash;
+
+use crate::{parser::Selector, tree::OpaqueElement, SelectorImpl};
+use rustc_hash::FxHashMap;
+
+/// A cache to speed up matching of nth-index-like selectors.
+///
+/// See [1] for some discussion around the design tradeoffs.
+///
+/// [1] https://bugzilla.mozilla.org/show_bug.cgi?id=1401855#c3
+#[derive(Default)]
+pub struct NthIndexCache {
+    nth: NthIndexCacheInner,
+    nth_of_selectors: NthIndexOfSelectorsCaches,
+    nth_last: NthIndexCacheInner,
+    nth_last_of_selectors: NthIndexOfSelectorsCaches,
+    nth_of_type: NthIndexCacheInner,
+    nth_last_of_type: NthIndexCacheInner,
+}
+
+impl NthIndexCache {
+    /// Gets the appropriate cache for the given parameters.
+    pub fn get<Impl: SelectorImpl>(
+        &mut self,
+        is_of_type: bool,
+        is_from_end: bool,
+        selectors: &[Selector<Impl>],
+    ) -> &mut NthIndexCacheInner {
+        if is_of_type {
+            return if is_from_end {
+                &mut self.nth_last_of_type
+            } else {
+                &mut self.nth_of_type
+            };
+        }
+        if !selectors.is_empty() {
+            return if is_from_end {
+                self.nth_last_of_selectors.lookup(selectors)
+            } else {
+                self.nth_of_selectors.lookup(selectors)
+            };
+        }
+        if is_from_end {
+            &mut self.nth_last
+        } else {
+            &mut self.nth
+        }
+    }
+}
+
+#[derive(Hash, Eq, PartialEq)]
+
+--- parser.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+use crate::attr::{AttrSelectorOperator, AttrSelectorWithOptionalNamespace};
+use crate::attr::{NamespaceConstraint, ParsedAttrSelectorOperation, ParsedCaseSensitivity};
+use crate::bloom::BLOOM_HASH_MASK;
+use crate::builder::{
+    relative_selector_list_specificity_and_flags, selector_list_specificity_and_flags,
+    SelectorBuilder, SelectorFlags, Specificity, SpecificityAndFlags,
+};
+use crate::context::QuirksMode;
+use crate::sink::Push;
+use crate::visitor::SelectorListKind;
+pub use crate::visitor::SelectorVisitor;
+use bitflags::bitflags;
+use cssparser::match_ignore_ascii_case;
+use cssparser::parse_nth;
+use cssparser::{BasicParseError, BasicParseErrorKind, ParseError, ParseErrorKind};
+use cssparser::{CowRcStr, Delimiter, SourceLocation};
+use cssparser::{Parser as CssParser, ToCss, Token};
+use debug_unreachable::debug_unreachable;
+use precomputed_hash::PrecomputedHash;
+use servo_arc::{Arc, ArcUnionBorrow, ThinArc, ThinArcUnion, UniqueArc};
+use smallvec::SmallVec;
+use std::borrow::{Borrow, Cow};
+use std::fmt::{self, Debug};
+use std::iter::Rev;
+use std::slice;
+
+#[cfg(feature = "to_shmem")]
+use to_shmem_derive::ToShmem;
+
+/// A trait that represents a pseudo-element.
+pub trait PseudoElement: Sized + ToCss {
+    /// The `SelectorImpl` this pseudo-element is used for.
+    type Impl: SelectorImpl;
+
+    /// Whether the pseudo-element supports a given state selector to the right
+    /// of it.
+    fn accepts_state_pseudo_classes(&self) -> bool {
+        false
+    }
+
+    /// Whether this pseudo-element is valid after a ::slotted(..) pseudo.
+    fn valid_after_slotted(&self) -> bool {
+        false
+    }
+
+    /// Whether this pseudo-element is valid when directly after a ::before/::after pseudo.
+    fn valid_after_before_or_after(&self) -> bool {
+        false
+    }
+
+    /// Whether this pseudo-element is element-backed.
+
+--- relative_selector/cache.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+use rustc_hash::FxHashMap;
+/// Relative selector cache. This is useful for following cases.
+/// First case is non-subject relative selector: Imagine `.anchor:has(<..>) ~ .foo`, with DOM
+/// `.anchor + .foo + .. + .foo`. Each match on `.foo` triggers `:has()` traversal that
+/// yields the same result. This is simple enough, since we just need to store
+/// the exact match on that anchor pass/fail.
+/// Second case is `querySelectorAll`: Imagine `querySelectorAll(':has(.a)')`, with DOM
+/// `div > .. > div > .a`. When the we perform the traversal at the top div,
+/// we basically end up evaluating `:has(.a)` for all anchors, which could be reused.
+/// Also consider the sibling version: `querySelectorAll(':has(~ .a)')` with DOM
+/// `div + .. + div + .a`.
+/// TODO(dshin): Second case is not yet handled. That is tracked in Bug 1845291.
+use std::hash::Hash;
+
+use crate::parser::{RelativeSelector, SelectorKey};
+use crate::{tree::OpaqueElement, SelectorImpl};
+
+/// Match data for a given element and a selector.
+#[derive(Clone, Copy)]
+pub enum RelativeSelectorCachedMatch {
+    /// This selector matches this element.
+    Matched,
+    /// This selector does not match this element.
+    NotMatched,
+}
+
+impl RelativeSelectorCachedMatch {
+    /// Is the cached result a match?
+    pub fn matched(&self) -> bool {
+        matches!(*self, Self::Matched)
+    }
+}
+
+#[derive(Clone, Copy, Hash, Eq, PartialEq)]
+struct Key {
+    element: OpaqueElement,
+    selector: SelectorKey,
+}
+
+impl Key {
+    pub fn new<Impl: SelectorImpl>(
+        element: OpaqueElement,
+        selector: &RelativeSelector<Impl>,
+    ) -> Self {
+        Key {
+            element,
+            selector: SelectorKey::new(&selector.selector),
+        }
+    }
+}
+
+
+--- relative_selector/filter.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+/// Bloom filter for relative selectors.
+use rustc_hash::FxHashMap;
+
+use crate::bloom::BloomFilter;
+use crate::context::QuirksMode;
+use crate::parser::{collect_selector_hashes, RelativeSelector, RelativeSelectorMatchHint};
+use crate::tree::{Element, OpaqueElement};
+use crate::SelectorImpl;
+
+enum Entry {
+    /// Filter lookup happened once. Construction of the filter is expensive,
+    /// so this is set when the element for subtree traversal is encountered.
+    Lookup,
+    /// Filter lookup happened more than once, and the filter for this element's
+    /// subtree traversal is constructed. Could use special handlings for pseudo-classes
+    /// such as `:hover` and `:focus`, see Bug 1845503.
+    HasFilter(Box<BloomFilter>),
+}
+
+#[derive(Clone, Copy, Hash, Eq, PartialEq)]
+enum TraversalKind {
+    Children,
+    Descendants,
+}
+
+fn add_to_filter<E: Element>(element: &E, filter: &mut BloomFilter, kind: TraversalKind) -> bool {
+    let mut child = element.first_element_child();
+    while let Some(e) = child {
+        if !e.add_element_unique_hashes(filter) {
+            return false;
+        }
+        if kind == TraversalKind::Descendants {
+            if !add_to_filter(&e, filter, kind) {
+                return false;
+            }
+        }
+        child = e.next_sibling_element();
+    }
+    true
+}
+
+#[derive(Clone, Copy, Hash, Eq, PartialEq)]
+struct Key(OpaqueElement, TraversalKind);
+
+/// Map of bloom filters for fast-rejecting relative selectors.
+#[derive(Default)]
+pub struct RelativeSelectorFilterMap {
+    map: FxHashMap<Key, Entry>,
+}
+
+fn fast_reject<Impl: SelectorImpl>(
+
+--- relative_selector/mod.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+pub mod cache;
+pub mod filter;
+
+
+--- sink.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+//! Small helpers to abstract over different containers.
+#![deny(missing_docs)]
+
+use smallvec::{Array, SmallVec};
+
+/// A trait to abstract over a `push` method that may be implemented for
+/// different kind of types.
+///
+/// Used to abstract over `Array`, `SmallVec` and `Vec`, and also to implement a
+/// type which `push` method does only tweak a byte when we only need to check
+/// for the presence of something.
+pub trait Push<T> {
+    /// Push a value into self.
+    fn push(&mut self, value: T);
+}
+
+impl<T> Push<T> for Vec<T> {
+    fn push(&mut self, value: T) {
+        Vec::push(self, value);
+    }
+}
+
+impl<A: Array> Push<A::Item> for SmallVec<A> {
+    fn push(&mut self, value: A::Item) {
+        SmallVec::push(self, value);
+    }
+}
+
+
+--- tree.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+//! Traits that nodes must implement. Breaks the otherwise-cyclic dependency
+//! between layout and style.
+
+use crate::attr::{AttrSelectorOperation, CaseSensitivity, NamespaceConstraint};
+use crate::bloom::BloomFilter;
+use crate::matching::{ElementSelectorFlags, MatchingContext};
+use crate::parser::SelectorImpl;
+use std::fmt::Debug;
+use std::ptr::NonNull;
+
+/// Opaque representation of an Element, for identity comparisons.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct OpaqueElement(NonNull<()>);
+
+unsafe impl Send for OpaqueElement {}
+// This should be safe given that we do not provide a way to recover
+// the original reference.
+unsafe impl Sync for OpaqueElement {}
+
+impl OpaqueElement {
+    /// Creates a new OpaqueElement from an arbitrarily-typed pointer.
+    pub fn new<T>(ptr: &T) -> Self {
+        unsafe {
+            OpaqueElement(NonNull::new_unchecked(
+                ptr as *const T as *const () as *mut (),
+            ))
+        }
+    }
+
+    /// Creates a new OpaqueElement from a type-erased non-null pointer
+    pub fn from_non_null_ptr(ptr: NonNull<()>) -> Self {
+        Self(ptr)
+    }
+
+    /// Returns a const ptr to the contained reference. Unsafe especially
+    /// since Element can be recovered and potentially-mutated.
+    pub unsafe fn as_const_ptr<T>(&self) -> *const T {
+        self.0.as_ptr() as *const T
+    }
+}
+
+pub trait Element: Sized + Clone + Debug {
+    type Impl: SelectorImpl;
+
+    /// Converts self into an opaque representation.
+    fn opaque(&self) -> OpaqueElement;
+
+    fn parent_element(&self) -> Option<Self>;
+
+    /// Whether the parent node of this element is a shadow root.
+    fn parent_node_is_shadow_root(&self) -> bool;
+
+--- visitor.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+//! Visitor traits for selectors.
+
+#![deny(missing_docs)]
+
+use crate::attr::NamespaceConstraint;
+use crate::parser::{Combinator, Component, RelativeSelector, Selector, SelectorImpl};
+use bitflags::bitflags;
+
+/// A trait to visit selector properties.
+///
+/// All the `visit_foo` methods return a boolean indicating whether the
+/// traversal should continue or not.
+pub trait SelectorVisitor: Sized {
+    /// The selector implementation this visitor wants to visit.
+    type Impl: SelectorImpl;
+
+    /// Visit an attribute selector that may match (there are other selectors
+    /// that may never match, like those containing whitespace or the empty
+    /// string).
+    fn visit_attribute_selector(
+        &mut self,
+        _namespace: &NamespaceConstraint<&<Self::Impl as SelectorImpl>::NamespaceUrl>,
+        _local_name: &<Self::Impl as SelectorImpl>::LocalName,
+        _local_name_lower: &<Self::Impl as SelectorImpl>::LocalName,
+    ) -> bool {
+        true
+    }
+
+    /// Visit a simple selector.
+    fn visit_simple_selector(&mut self, _: &Component<Self::Impl>) -> bool {
+        true
+    }
+
+    /// Visit a nested relative selector list. The caller is responsible to call visit
+    /// into the internal selectors if / as needed.
+    ///
+    /// The default implementation skips it altogether.
+    fn visit_relative_selector_list(&mut self, _list: &[RelativeSelector<Self::Impl>]) -> bool {
+        true
+    }
+
+    /// Visit a nested selector list. The caller is responsible to call visit
+    /// into the internal selectors if / as needed.
+    ///
+    /// The default implementation does this.
+    fn visit_selector_list(
+        &mut self,
+        _list_kind: SelectorListKind,
+        list: &[Selector<Self::Impl>],
+    ) -> bool {
+        for nested in list {

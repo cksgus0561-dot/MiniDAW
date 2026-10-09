@@ -1,0 +1,55 @@
+--- lib.rs ---
+// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! Fork of Arc for Servo. This has the following advantages over std::sync::Arc:
+//!
+//! * We don't waste storage on the weak reference count.
+//! * We don't do extra RMU operations to handle the possibility of weak references.
+//! * We can experiment with arena allocation (todo).
+//! * We can add methods to support our custom use cases [1].
+//! * We have support for dynamically-sized types (see from_header_and_iter).
+//! * We have support for thin arcs to unsized types (see ThinArc).
+//! * We have support for references to static data, which don't do any
+//!   refcounting.
+//!
+//! [1]: https://bugzilla.mozilla.org/show_bug.cgi?id=1360883
+
+// The semantics of `Arc` are already documented in the Rust docs, so we don't
+// duplicate those here.
+#![allow(missing_docs)]
+
+#[cfg(feature = "servo")]
+use serde::{Deserialize, Serialize};
+use stable_deref_trait::{CloneStableDeref, StableDeref};
+use std::alloc::{self, Layout};
+use std::borrow;
+use std::cmp::Ordering;
+use std::fmt;
+use std::hash::{Hash, Hasher};
+use std::marker::PhantomData;
+use std::mem::{self, align_of, size_of};
+use std::ops::{Deref, DerefMut};
+use std::os::raw::c_void;
+use std::process;
+use std::ptr;
+use std::sync::atomic;
+use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
+use std::{isize, usize};
+
+/// A soft limit on the amount of references that may be made to an `Arc`.
+///
+/// Going above this limit will abort your program (although not
+/// necessarily) at _exactly_ `MAX_REFCOUNT + 1` references.
+const MAX_REFCOUNT: usize = (isize::MAX) as usize;
+
+/// Special refcount value that means the data is not reference counted,
+/// and that the `Arc` is really acting as a read-only static reference.
+const STATIC_REFCOUNT: usize = usize::MAX;

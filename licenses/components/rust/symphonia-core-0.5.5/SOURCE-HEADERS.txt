@@ -1,0 +1,1491 @@
+--- src/audio.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The `audio` module provides primitives for working with multi-channel audio buffers of varying
+//! sample formats.
+
+use std::borrow::Cow;
+use std::fmt;
+use std::marker::PhantomData;
+use std::mem;
+use std::vec::Vec;
+
+use arrayvec::ArrayVec;
+use bitflags::bitflags;
+
+use crate::conv::{ConvertibleSample, FromSample, IntoSample};
+use crate::errors::Result;
+use crate::sample::{i24, u24, Sample};
+use crate::units::Duration;
+
+/// The maximum number of audio plane slices `AudioPlanes` or `AudioPlanesMut` will store on the
+/// stack before storing the slices on the heap.
+const AUDIO_PLANES_STORAGE_STACK_LIMIT: usize = 8;
+
+bitflags! {
+    /// A bitmask representing the audio channels in an audio buffer or signal.
+    ///
+    /// The first 18 defined channels are guaranteed to be identical to those specified by
+    /// Microsoft's WAVEFORMATEXTENSIBLE structure. Channels after 18 are defined by Symphonia and
+    /// no order is guaranteed.
+    #[derive(Default)]
+    pub struct Channels: u32 {
+        /// Front-left (left) or the Mono channel.
+        const FRONT_LEFT         = 0x0000_0001;
+        /// Front-right (right) channel.
+        const FRONT_RIGHT        = 0x0000_0002;
+        /// Front-centre (centre) channel.
+        const FRONT_CENTRE       = 0x0000_0004;
+        /// Low frequency channel 1.
+        const LFE1               = 0x0000_0008;
+        /// Rear-left (surround rear left) channel.
+        const REAR_LEFT          = 0x0000_0010;
+        /// Rear-right (surround rear right) channel.
+        const REAR_RIGHT         = 0x0000_0020;
+        /// Front left-of-centre (left center) channel.
+        const FRONT_LEFT_CENTRE  = 0x0000_0040;
+        /// Front right-of-centre (right center) channel.
+        const FRONT_RIGHT_CENTRE = 0x0000_0080;
+        /// Rear-centre (surround rear centre) channel.
+        const REAR_CENTRE        = 0x0000_0100;
+        /// Side left (surround left) channel.
+
+--- src/checksum/crc16.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use crate::io::Monitor;
+
+// Credit: This table was extracted from the reference FLAC decoder.
+#[rustfmt::skip]
+const CRC16_ANSI: [[u16; 256]; 8] =
+[
+    [
+        0x0000,  0x8005,  0x800f,  0x000a,  0x801b,  0x001e,  0x0014,  0x8011,
+        0x8033,  0x0036,  0x003c,  0x8039,  0x0028,  0x802d,  0x8027,  0x0022,
+        0x8063,  0x0066,  0x006c,  0x8069,  0x0078,  0x807d,  0x8077,  0x0072,
+        0x0050,  0x8055,  0x805f,  0x005a,  0x804b,  0x004e,  0x0044,  0x8041,
+        0x80c3,  0x00c6,  0x00cc,  0x80c9,  0x00d8,  0x80dd,  0x80d7,  0x00d2,
+        0x00f0,  0x80f5,  0x80ff,  0x00fa,  0x80eb,  0x00ee,  0x00e4,  0x80e1,
+        0x00a0,  0x80a5,  0x80af,  0x00aa,  0x80bb,  0x00be,  0x00b4,  0x80b1,
+        0x8093,  0x0096,  0x009c,  0x8099,  0x0088,  0x808d,  0x8087,  0x0082,
+        0x8183,  0x0186,  0x018c,  0x8189,  0x0198,  0x819d,  0x8197,  0x0192,
+        0x01b0,  0x81b5,  0x81bf,  0x01ba,  0x81ab,  0x01ae,  0x01a4,  0x81a1,
+        0x01e0,  0x81e5,  0x81ef,  0x01ea,  0x81fb,  0x01fe,  0x01f4,  0x81f1,
+        0x81d3,  0x01d6,  0x01dc,  0x81d9,  0x01c8,  0x81cd,  0x81c7,  0x01c2,
+        0x0140,  0x8145,  0x814f,  0x014a,  0x815b,  0x015e,  0x0154,  0x8151,
+        0x8173,  0x0176,  0x017c,  0x8179,  0x0168,  0x816d,  0x8167,  0x0162,
+        0x8123,  0x0126,  0x012c,  0x8129,  0x0138,  0x813d,  0x8137,  0x0132,
+        0x0110,  0x8115,  0x811f,  0x011a,  0x810b,  0x010e,  0x0104,  0x8101,
+        0x8303,  0x0306,  0x030c,  0x8309,  0x0318,  0x831d,  0x8317,  0x0312,
+        0x0330,  0x8335,  0x833f,  0x033a,  0x832b,  0x032e,  0x0324,  0x8321,
+        0x0360,  0x8365,  0x836f,  0x036a,  0x837b,  0x037e,  0x0374,  0x8371,
+        0x8353,  0x0356,  0x035c,  0x8359,  0x0348,  0x834d,  0x8347,  0x0342,
+        0x03c0,  0x83c5,  0x83cf,  0x03ca,  0x83db,  0x03de,  0x03d4,  0x83d1,
+        0x83f3,  0x03f6,  0x03fc,  0x83f9,  0x03e8,  0x83ed,  0x83e7,  0x03e2,
+        0x83a3,  0x03a6,  0x03ac,  0x83a9,  0x03b8,  0x83bd,  0x83b7,  0x03b2,
+        0x0390,  0x8395,  0x839f,  0x039a,  0x838b,  0x038e,  0x0384,  0x8381,
+        0x0280,  0x8285,  0x828f,  0x028a,  0x829b,  0x029e,  0x0294,  0x8291,
+        0x82b3,  0x02b6,  0x02bc,  0x82b9,  0x02a8,  0x82ad,  0x82a7,  0x02a2,
+        0x82e3,  0x02e6,  0x02ec,  0x82e9,  0x02f8,  0x82fd,  0x82f7,  0x02f2,
+        0x02d0,  0x82d5,  0x82df,  0x02da,  0x82cb,  0x02ce,  0x02c4,  0x82c1,
+        0x8243,  0x0246,  0x024c,  0x8249,  0x0258,  0x825d,  0x8257,  0x0252,
+        0x0270,  0x8275,  0x827f,  0x027a,  0x826b,  0x026e,  0x0264,  0x8261,
+        0x0220,  0x8225,  0x822f,  0x022a,  0x823b,  0x023e,  0x0234,  0x8231,
+        0x8213,  0x0216,  0x021c,  0x8219,  0x0208,  0x820d,  0x8207,  0x0202,
+    ],
+    [
+        0x0000,  0x8603,  0x8c03,  0x0a00,  0x9803,  0x1e00,  0x1400,  0x9203,
+        0xb003,  0x3600,  0x3c00,  0xba03,  0x2800,  0xae03,  0xa403,  0x2200,
+        0xe003,  0x6600,  0x6c00,  0xea03,  0x7800,  0xfe03,  0xf403,  0x7200,
+        0x5000,  0xd603,  0xdc03,  0x5a00,  0xc803,  0x4e00,  0x4400,  0xc203,
+        0x4003,  0xc600,  0xcc00,  0x4a03,  0xd800,  0x5e03,  0x5403,  0xd200,
+        0xf000,  0x7603,  0x7c03,  0xfa00,  0x6803,  0xee00,  0xe400,  0x6203,
+        0xa000,  0x2603,  0x2c03,  0xaa00,  0x3803,  0xbe00,  0xb400,  0x3203,
+
+--- src/checksum/crc32.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use crate::io::Monitor;
+
+#[rustfmt::skip]
+const CRC32: [[u32; 256]; 8] =
+[
+    [
+        0x00000000, 0x04c11db7, 0x09823b6e, 0x0d4326d9,
+        0x130476dc, 0x17c56b6b, 0x1a864db2, 0x1e475005,
+        0x2608edb8, 0x22c9f00f, 0x2f8ad6d6, 0x2b4bcb61,
+        0x350c9b64, 0x31cd86d3, 0x3c8ea00a, 0x384fbdbd,
+        0x4c11db70, 0x48d0c6c7, 0x4593e01e, 0x4152fda9,
+        0x5f15adac, 0x5bd4b01b, 0x569796c2, 0x52568b75,
+        0x6a1936c8, 0x6ed82b7f, 0x639b0da6, 0x675a1011,
+        0x791d4014, 0x7ddc5da3, 0x709f7b7a, 0x745e66cd,
+        0x9823b6e0, 0x9ce2ab57, 0x91a18d8e, 0x95609039,
+        0x8b27c03c, 0x8fe6dd8b, 0x82a5fb52, 0x8664e6e5,
+        0xbe2b5b58, 0xbaea46ef, 0xb7a96036, 0xb3687d81,
+        0xad2f2d84, 0xa9ee3033, 0xa4ad16ea, 0xa06c0b5d,
+        0xd4326d90, 0xd0f37027, 0xddb056fe, 0xd9714b49,
+        0xc7361b4c, 0xc3f706fb, 0xceb42022, 0xca753d95,
+        0xf23a8028, 0xf6fb9d9f, 0xfbb8bb46, 0xff79a6f1,
+        0xe13ef6f4, 0xe5ffeb43, 0xe8bccd9a, 0xec7dd02d,
+        0x34867077, 0x30476dc0, 0x3d044b19, 0x39c556ae,
+        0x278206ab, 0x23431b1c, 0x2e003dc5, 0x2ac12072,
+        0x128e9dcf, 0x164f8078, 0x1b0ca6a1, 0x1fcdbb16,
+        0x018aeb13, 0x054bf6a4, 0x0808d07d, 0x0cc9cdca,
+        0x7897ab07, 0x7c56b6b0, 0x71159069, 0x75d48dde,
+        0x6b93dddb, 0x6f52c06c, 0x6211e6b5, 0x66d0fb02,
+        0x5e9f46bf, 0x5a5e5b08, 0x571d7dd1, 0x53dc6066,
+        0x4d9b3063, 0x495a2dd4, 0x44190b0d, 0x40d816ba,
+        0xaca5c697, 0xa864db20, 0xa527fdf9, 0xa1e6e04e,
+        0xbfa1b04b, 0xbb60adfc, 0xb6238b25, 0xb2e29692,
+        0x8aad2b2f, 0x8e6c3698, 0x832f1041, 0x87ee0df6,
+        0x99a95df3, 0x9d684044, 0x902b669d, 0x94ea7b2a,
+        0xe0b41de7, 0xe4750050, 0xe9362689, 0xedf73b3e,
+        0xf3b06b3b, 0xf771768c, 0xfa325055, 0xfef34de2,
+        0xc6bcf05f, 0xc27dede8, 0xcf3ecb31, 0xcbffd686,
+        0xd5b88683, 0xd1799b34, 0xdc3abded, 0xd8fba05a,
+        0x690ce0ee, 0x6dcdfd59, 0x608edb80, 0x644fc637,
+        0x7a089632, 0x7ec98b85, 0x738aad5c, 0x774bb0eb,
+        0x4f040d56, 0x4bc510e1, 0x46863638, 0x42472b8f,
+        0x5c007b8a, 0x58c1663d, 0x558240e4, 0x51435d53,
+        0x251d3b9e, 0x21dc2629, 0x2c9f00f0, 0x285e1d47,
+        0x36194d42, 0x32d850f5, 0x3f9b762c, 0x3b5a6b9b,
+        0x0315d626, 0x07d4cb91, 0x0a97ed48, 0x0e56f0ff,
+        0x1011a0fa, 0x14d0bd4d, 0x19939b94, 0x1d528623,
+        0xf12f560e, 0xf5ee4bb9, 0xf8ad6d60, 0xfc6c70d7,
+        0xe22b20d2, 0xe6ea3d65, 0xeba91bbc, 0xef68060b,
+
+--- src/checksum/crc8.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use crate::io::Monitor;
+
+// Credit: This table was extracted from the reference FLAC decoder.
+#[rustfmt::skip]
+const CRC8_CCITT: [u8; 256] =
+[
+    0x00, 0x07, 0x0e, 0x09, 0x1c, 0x1b, 0x12, 0x15, 0x38, 0x3f, 0x36, 0x31, 0x24, 0x23, 0x2a, 0x2d,
+    0x70, 0x77, 0x7e, 0x79, 0x6c, 0x6b, 0x62, 0x65, 0x48, 0x4f, 0x46, 0x41, 0x54, 0x53, 0x5a, 0x5d,
+    0xe0, 0xe7, 0xee, 0xe9, 0xfc, 0xfb, 0xf2, 0xf5, 0xd8, 0xdf, 0xd6, 0xd1, 0xc4, 0xc3, 0xca, 0xcd,
+    0x90, 0x97, 0x9e, 0x99, 0x8c, 0x8b, 0x82, 0x85, 0xa8, 0xaf, 0xa6, 0xa1, 0xb4, 0xb3, 0xba, 0xbd,
+    0xc7, 0xc0, 0xc9, 0xce, 0xdb, 0xdc, 0xd5, 0xd2, 0xff, 0xf8, 0xf1, 0xf6, 0xe3, 0xe4, 0xed, 0xea,
+    0xb7, 0xb0, 0xb9, 0xbe, 0xab, 0xac, 0xa5, 0xa2, 0x8f, 0x88, 0x81, 0x86, 0x93, 0x94, 0x9d, 0x9a,
+    0x27, 0x20, 0x29, 0x2e, 0x3b, 0x3c, 0x35, 0x32, 0x1f, 0x18, 0x11, 0x16, 0x03, 0x04, 0x0d, 0x0a,
+    0x57, 0x50, 0x59, 0x5e, 0x4b, 0x4c, 0x45, 0x42, 0x6f, 0x68, 0x61, 0x66, 0x73, 0x74, 0x7d, 0x7a,
+    0x89, 0x8e, 0x87, 0x80, 0x95, 0x92, 0x9b, 0x9c, 0xb1, 0xb6, 0xbf, 0xb8, 0xad, 0xaa, 0xa3, 0xa4,
+    0xf9, 0xfe, 0xf7, 0xf0, 0xe5, 0xe2, 0xeb, 0xec, 0xc1, 0xc6, 0xcf, 0xc8, 0xdd, 0xda, 0xd3, 0xd4,
+    0x69, 0x6e, 0x67, 0x60, 0x75, 0x72, 0x7b, 0x7c, 0x51, 0x56, 0x5f, 0x58, 0x4d, 0x4a, 0x43, 0x44,
+    0x19, 0x1e, 0x17, 0x10, 0x05, 0x02, 0x0b, 0x0c, 0x21, 0x26, 0x2f, 0x28, 0x3d, 0x3a, 0x33, 0x34,
+    0x4e, 0x49, 0x40, 0x47, 0x52, 0x55, 0x5c, 0x5b, 0x76, 0x71, 0x78, 0x7f, 0x6a, 0x6d, 0x64, 0x63,
+    0x3e, 0x39, 0x30, 0x37, 0x22, 0x25, 0x2c, 0x2b, 0x06, 0x01, 0x08, 0x0f, 0x1a, 0x1d, 0x14, 0x13,
+    0xae, 0xa9, 0xa0, 0xa7, 0xb2, 0xb5, 0xbc, 0xbb, 0x96, 0x91, 0x98, 0x9f, 0x8a, 0x8d, 0x84, 0x83,
+    0xde, 0xd9, 0xd0, 0xd7, 0xc2, 0xc5, 0xcc, 0xcb, 0xe6, 0xe1, 0xe8, 0xef, 0xfa, 0xfd, 0xf4, 0xf3,
+];
+
+/// `Crc8Ccitt` implements the CRC-8 algorithm using the CCITT polynominal.
+///
+/// * Polynomial = 0x07
+/// * RefIn = false
+/// * RefOut = false
+/// * XorOut = false
+pub struct Crc8Ccitt {
+    state: u8,
+}
+
+impl Crc8Ccitt {
+    /// Instantiate a `Crc8Ccitt` instance with an initial state.
+    pub fn new(state: u8) -> Self {
+        Crc8Ccitt { state }
+    }
+
+    /// Returns the computed CRC.
+    pub fn crc(&self) -> u8 {
+        self.state
+    }
+}
+
+impl Monitor for Crc8Ccitt {
+    #[inline(always)]
+
+--- src/checksum/md5.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::cmp;
+
+use crate::io::Monitor;
+
+fn transform(state: &mut [u32; 4], buf: &[u8]) {
+    // Assert to hopefully force the compiler to elide bounds checks on buf.
+    assert!(buf.len() == 64);
+
+    let mut input = [0u32; 16];
+
+    // Collect 4 bytes from an input buffer and store as a u32 in the output buffer. Note: input
+    // bytes are considered little-endian for MD5.
+    macro_rules! collect {
+        ($output:ident, $input:ident, $idx:expr) => {
+            $output[$idx] = u32::from_le_bytes([
+                $input[$idx * 4 + 0],
+                $input[$idx * 4 + 1],
+                $input[$idx * 4 + 2],
+                $input[$idx * 4 + 3],
+            ]);
+        };
+    }
+
+    collect!(input, buf, 0);
+    collect!(input, buf, 1);
+    collect!(input, buf, 2);
+    collect!(input, buf, 3);
+    collect!(input, buf, 4);
+    collect!(input, buf, 5);
+    collect!(input, buf, 6);
+    collect!(input, buf, 7);
+    collect!(input, buf, 8);
+    collect!(input, buf, 9);
+    collect!(input, buf, 10);
+    collect!(input, buf, 11);
+    collect!(input, buf, 12);
+    collect!(input, buf, 13);
+    collect!(input, buf, 14);
+    collect!(input, buf, 15);
+
+    // The transformation for a single step of a round: A = B + ROTL32(F + A + K[i] + M[g], S).
+    macro_rules! round_step {
+        ($a:ident, $b:ident, $f:expr, $m:expr, $s:expr, $k:expr) => {
+            $a = $f.wrapping_add($a).wrapping_add($k).wrapping_add($m);
+            $a = $b.wrapping_add($a.rotate_left($s));
+        };
+    }
+
+
+--- src/checksum/mod.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The `checksum` module provides implementations of common error-detecting codes and hashing
+//! algorithms.
+
+mod crc16;
+mod crc32;
+mod crc8;
+mod md5;
+
+pub use crc16::{Crc16Ansi, Crc16AnsiLe};
+pub use crc32::Crc32;
+pub use crc8::Crc8Ccitt;
+pub use md5::Md5;
+
+
+--- src/codecs.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The `codec` module provides the traits and support structures necessary to implement audio codec
+//! decoders.
+
+use std::collections::HashMap;
+use std::default::Default;
+use std::fmt;
+
+use crate::audio::{AudioBufferRef, Channels, Layout};
+use crate::errors::{unsupported_error, Result};
+use crate::formats::Packet;
+use crate::sample::SampleFormat;
+use crate::units::TimeBase;
+
+/// A `CodecType` is a unique identifier used to identify a specific codec.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct CodecType(u32);
+
+/// Declares a new `CodecType` given a character code. A character code is an ASCII string
+/// containing a maximum of 5 alphanumeric characters.
+///
+/// Note: Due to the current limitations of const fn, this function is not able to panic on error.
+/// Therefore, if the character code contains an invalid character, then the character is dropped.
+/// Additionally, any extra characters will be truncated.
+pub const fn decl_codec_type(cc: &[u8]) -> CodecType {
+    /// Map alphanumeric ASCII characters into a 6-bit code.
+    const fn map_ascii_to_bits(cc: u8) -> u32 {
+        // The mapping is defined as:
+        //  b'0'..=b'9' maps to  1..=10
+        //  b'a'..=b'z' maps to 11..=36
+        //  b'A'..=b'Z' maps to 37..=62
+        if cc.is_ascii_digit() {
+            1 + (cc - b'0') as u32
+        }
+        else if cc.is_ascii_lowercase() {
+            11 + (cc - b'a') as u32
+        }
+        else if cc.is_ascii_uppercase() {
+            37 + (cc - b'A') as u32
+        }
+        else {
+            0
+        }
+    }
+
+    // TODO: assert!(cc.len() <= 5);
+
+    // The upper-bit indicates the user codec namespace.
+    let mut id = 0x8000_0000;
+
+--- src/conv.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The `conv` module provides methods to convert samples between different sample types (formats).
+use crate::sample::{i24, u24, Sample};
+
+pub mod dither {
+    //! The `dither` module provides methods to apply a dither to a sample.
+    //!
+    //! Dithering is the process of adding noise to the least significant digits of a sample before
+    //! down-converting (quantizing) it to a smaller sample type. The purpose of dithering is to
+    //! decorrelate the quantization error of the down-conversion from the source signal.
+    //!
+    //! Dithering is only applied on lossy conversions. Therefore the `dither` module will only
+    //! apply a dither to the following down-conversions:
+    //!
+    //! * { `i32`, `u32` } to { `i24`, `u24`, `i16`, `u16`, `i8`, `u8` }
+    //! * { `i24`, `u24` } to { `i16`, `u16`, `i8`, `u8` }
+    //! * { `i16`, `u16` } to { `i8`, `u8` }
+    //!
+    //! Multiple dithering algorithms are provided, each drawing noise from a different probability
+    //! distribution. In addition to different distributions, a dithering algorithm may also shape
+    //! the noise such that the bulk of the noise is placed in an inaudible frequency range.
+    use super::FromSample;
+    use crate::sample::Sample;
+    use crate::sample::{i24, u24};
+    use std::marker::PhantomData;
+
+    mod prng {
+        #[inline]
+        fn split_mix_64(x: &mut u64) -> u64 {
+            *x = x.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut z = *x;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            z ^ (z >> 31)
+        }
+
+        /// `Xoshiro128pp` implements the xoshiro128++ pseudo-random number generator.
+        ///
+        /// This PRNG is the basis for all built-in dithering algorithms. It is one of, if not the
+        /// most, performant PRNGs that generate statistically valid random numbers. Note that it is
+        /// not cryptographically secure, but for dithering audio it is more than sufficient.
+        ///
+        /// `Xoshiro128pp` should be initialized with a reasonably random 64-bit seed, however the
+        /// seed will be further randomized via the SplitMix64 algorithm.
+        pub struct Xoshiro128pp {
+            s: [u32; 4],
+        }
+
+        impl Xoshiro128pp {
+
+--- src/dsp/complex.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The `complex` module implements a 32-bit floating point complex number.
+
+/// A complex number.
+#[derive(Copy, Clone, Default, Debug, PartialEq)]
+#[repr(C)]
+pub struct Complex {
+    /// The real component.
+    pub re: f32,
+    /// The imaginary component.
+    pub im: f32,
+}
+
+impl Complex {
+    /// Create a new complex number.
+    #[inline(always)]
+    pub fn new(re: f32, im: f32) -> Self {
+        Self { re, im }
+    }
+
+    /// Create a complex number with a value of `0 + j1`.
+    #[inline(always)]
+    pub fn j() -> Self {
+        Self { re: 0.0, im: 1.0 }
+    }
+
+    /// Scale the complex number.
+    #[inline(always)]
+    pub fn scale(&self, scale: f32) -> Self {
+        Self { re: self.re * scale, im: self.im * scale }
+    }
+
+    /// Take the complex conjugate of `self`.
+    ///
+    /// For a complex number defined as `a + jb` the complex conjugate is defined to be `a - jb`.
+    #[inline(always)]
+    pub fn conj(&self) -> Self {
+        Self { re: self.re, im: -self.im }
+    }
+}
+
+impl core::ops::Add for Complex {
+    type Output = Complex;
+
+    #[inline(always)]
+    fn add(self, rhs: Self) -> Self::Output {
+        Self::Output { re: self.re + rhs.re, im: self.im + rhs.im }
+    }
+}
+
+--- src/dsp/fft.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The `fft` module implements the Fast Fourier Transform (FFT).
+//!
+//! The complex (I)FFT in this module supports a size up-to 65536. The FFT is implemented using the
+//! radix-2 Cooley-Tukey algorithm.
+
+use std::convert::TryInto;
+use std::f32;
+
+use lazy_static::lazy_static;
+
+use super::complex::Complex;
+
+macro_rules! fft_twiddle_table {
+    ($bi:expr, $name:ident) => {
+        lazy_static! {
+            static ref $name: [Complex; (1 << $bi) >> 1] = {
+                const N: usize = 1 << $bi;
+
+                let mut table = [Default::default(); N >> 1];
+
+                let theta = std::f64::consts::PI / (N >> 1) as f64;
+
+                for (k, t) in table.iter_mut().enumerate() {
+                    let angle = theta * k as f64;
+                    *t = Complex::new(angle.cos() as f32, -angle.sin() as f32);
+                }
+
+                table
+            };
+        }
+    };
+}
+
+fft_twiddle_table!(6, FFT_TWIDDLE_TABLE_64);
+fft_twiddle_table!(7, FFT_TWIDDLE_TABLE_128);
+fft_twiddle_table!(8, FFT_TWIDDLE_TABLE_256);
+fft_twiddle_table!(9, FFT_TWIDDLE_TABLE_512);
+fft_twiddle_table!(10, FFT_TWIDDLE_TABLE_1024);
+fft_twiddle_table!(11, FFT_TWIDDLE_TABLE_2048);
+fft_twiddle_table!(12, FFT_TWIDDLE_TABLE_4096);
+fft_twiddle_table!(13, FFT_TWIDDLE_TABLE_8192);
+fft_twiddle_table!(14, FFT_TWIDDLE_TABLE_16384);
+fft_twiddle_table!(15, FFT_TWIDDLE_TABLE_32768);
+fft_twiddle_table!(16, FFT_TWIDDLE_TABLE_65536);
+
+/// Get the twiddle factors for a FFT of size `n`.
+fn fft_twiddle_factors(n: usize) -> &'static [Complex] {
+    // FFT sizes <= 32 use unrolled FFT implementations with hard-coded twiddle factors.
+
+--- src/dsp/mdct/mod.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The `mdct` module implements the Modified Discrete Cosine Transform (MDCT).
+//!
+//! The MDCT in this module is implemented in-terms of a forward FFT.
+
+#[cfg(any(feature = "opt-simd-sse", feature = "opt-simd-avx", feature = "opt-simd-neon"))]
+mod simd;
+
+#[cfg(any(feature = "opt-simd-sse", feature = "opt-simd-avx", feature = "opt-simd-neon"))]
+pub use simd::*;
+
+#[cfg(not(any(feature = "opt-simd-sse", feature = "opt-simd-avx", feature = "opt-simd-neon")))]
+mod no_simd;
+#[cfg(not(any(
+    feature = "opt-simd-sse",
+    feature = "opt-simd-avx",
+    feature = "opt-simd-neon"
+)))]
+pub use no_simd::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::f64;
+
+    fn imdct_analytical(x: &[f32], y: &mut [f32], scale: f64) {
+        assert!(y.len() == 2 * x.len());
+
+        // Generates 2N outputs from N inputs.
+        let n_in = x.len();
+        let n_out = x.len() << 1;
+
+        let pi_2n = f64::consts::PI / (2 * n_out) as f64;
+
+        for (i, item) in y.iter_mut().enumerate().take(n_out) {
+            let accum: f64 = x
+                .iter()
+                .copied()
+                .map(f64::from)
+                .enumerate()
+                .take(n_in)
+                .map(|(j, jtem)| jtem * (pi_2n * ((2 * i + 1 + n_in) * (2 * j + 1)) as f64).cos())
+                .sum();
+
+            *item = (scale * accum) as f32;
+        }
+    }
+
+    #[test]
+
+--- src/dsp/mdct/no_simd.rs ---
+// Symphonia
+// Copyright (c) 2019-2023 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The Modified Discrete Cosine Transform (MDCT) implemented without SIMD optimizations.
+
+use crate::dsp::complex::Complex;
+use crate::dsp::fft::*;
+
+/// The Inverse Modified Discrete Transform (IMDCT).
+pub struct Imdct {
+    fft: Fft,
+    fft_in: Box<[Complex]>,
+    fft_out: Box<[Complex]>,
+    twiddle: Box<[Complex]>,
+}
+
+impl Imdct {
+    /// Instantiate a N-point IMDCT with no scaling.
+    ///
+    /// The value of `n` is the number of spectral samples and must be a power-of-2 and less-than or
+    /// equal to `2 * Fft::MAX_SIZE`.
+    pub fn new(n: usize) -> Self {
+        Imdct::new_scaled(n, 1.0)
+    }
+
+    /// Instantiate a N-point IMDCT with scaling.
+    ///
+    /// The value of `n` is the number of spectral samples and must be a power-of-2 and less-than or
+    /// equal to `2 * Fft::MAX_SIZE`.
+    pub fn new_scaled(n: usize, scale: f64) -> Self {
+        // The FFT requires a power-of-two N.
+        assert!(n.is_power_of_two(), "n must be a power of two");
+        // A complex FFT of size N/2 is used to compute the IMDCT. Therefore, the maximum value of N
+        // is 2 * Fft::MAX_SIZE.
+        assert!(n <= 2 * Fft::MAX_SIZE, "maximum size exceeded");
+
+        let n2 = n / 2;
+        let mut twiddle = Vec::with_capacity(n2);
+
+        let alpha = 1.0 / 8.0 + if scale.is_sign_positive() { 0.0 } else { n2 as f64 };
+        let pi_n = std::f64::consts::PI / n as f64;
+        let sqrt_scale = scale.abs().sqrt();
+
+        for k in 0..n2 {
+            let theta = pi_n * (alpha + k as f64);
+            let re = sqrt_scale * theta.cos();
+            let im = sqrt_scale * theta.sin();
+            twiddle.push(Complex::new(re as f32, im as f32));
+        }
+
+        let fft_in = vec![Default::default(); n2].into_boxed_slice();
+
+--- src/dsp/mdct/simd.rs ---
+// Symphonia
+// Copyright (c) 2019-2023 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The Modified Discrete Cosine Transform (MDCT) implemented with SIMD optimizations.
+
+use std::sync::Arc;
+
+use rustfft::num_complex::Complex;
+
+/// The Inverse Modified Discrete Transform (IMDCT).
+pub struct Imdct {
+    fft: Arc<dyn rustfft::Fft<f32>>,
+    fft_scratch: Box<[Complex<f32>]>,
+    scratch: Box<[Complex<f32>]>,
+    twiddle: Box<[Complex<f32>]>,
+}
+
+impl Imdct {
+    /// Instantiate a N-point IMDCT with no scaling.
+    ///
+    /// The value of `n` is the number of spectral samples and must be a power-of-2 and less-than or
+    /// equal to `2 * Fft::MAX_SIZE`.
+    pub fn new(n: usize) -> Self {
+        Imdct::new_scaled(n, 1.0)
+    }
+
+    /// Instantiate a N-point IMDCT with scaling.
+    ///
+    /// The value of `n` is the number of spectral samples and must be a power-of-2 and less-than or
+    /// equal to `2 * Fft::MAX_SIZE`.
+    pub fn new_scaled(n: usize, scale: f64) -> Self {
+        // The algorithm requires a power-of-two N.
+        assert!(n.is_power_of_two(), "n must be a power of two");
+
+        let n2 = n / 2;
+
+        // Pre-compute the twiddle factors.
+        let mut twiddle = Vec::with_capacity(n2);
+
+        let alpha = 1.0 / 8.0 + if scale.is_sign_positive() { 0.0 } else { n2 as f64 };
+        let pi_n = std::f64::consts::PI / n as f64;
+        let sqrt_scale = scale.abs().sqrt();
+
+        for k in 0..n2 {
+            let theta = pi_n * (alpha + k as f64);
+            let re = sqrt_scale * theta.cos();
+            let im = sqrt_scale * theta.sin();
+            twiddle.push(Complex::new(re as f32, im as f32));
+        }
+
+        // Instantiate a half-length forward FFT.
+
+--- src/dsp/mod.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The `dsp` module provides efficient implementations of common signal processing algorithms.
+
+pub mod complex;
+pub mod fft;
+pub mod mdct;
+
+
+--- src/errors.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The `errors` module defines the common error type.
+
+use std::error;
+use std::fmt;
+use std::io;
+use std::result;
+
+/// `SeekErrorKind` is a list of generic reasons why a seek may fail.
+#[derive(Debug)]
+pub enum SeekErrorKind {
+    /// The stream is not seekable at all.
+    Unseekable,
+    /// The stream can only be seeked forward.
+    ForwardOnly,
+    /// The timestamp to seek to is out of range.
+    OutOfRange,
+    /// The track ID provided is invalid.
+    InvalidTrack,
+}
+
+impl SeekErrorKind {
+    fn as_str(&self) -> &'static str {
+        match *self {
+            SeekErrorKind::Unseekable => "stream is not seekable",
+            SeekErrorKind::ForwardOnly => "stream can only be seeked forward",
+            SeekErrorKind::OutOfRange => "requested seek timestamp is out-of-range for stream",
+            SeekErrorKind::InvalidTrack => "invalid track id",
+        }
+    }
+}
+
+/// `Error` provides an enumeration of all possible errors reported by Symphonia.
+#[derive(Debug)]
+pub enum Error {
+    /// An IO error occured while reading, writing, or seeking the stream.
+    IoError(std::io::Error),
+    /// The stream contained malformed data and could not be decoded or demuxed.
+    DecodeError(&'static str),
+    /// The stream could not be seeked.
+    SeekError(SeekErrorKind),
+    /// An unsupported container or codec feature was encounted.
+    Unsupported(&'static str),
+    /// A default or user-defined limit was reached while decoding or demuxing the stream. Limits
+    /// are used to prevent denial-of-service attacks from malicious streams.
+    LimitError(&'static str),
+    /// The demuxer or decoder needs to be reset before continuing.
+    ResetRequired,
+}
+
+--- src/formats.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The `format` module provides the traits and support structures necessary to implement media
+//! demuxers.
+
+use crate::codecs::CodecParameters;
+use crate::errors::Result;
+use crate::io::{BufReader, MediaSourceStream};
+use crate::meta::{Metadata, Tag};
+use crate::units::{Time, TimeStamp};
+
+pub mod prelude {
+    //! The `formats` module prelude.
+
+    pub use crate::units::{Duration, TimeBase, TimeStamp};
+
+    pub use super::{Cue, FormatOptions, FormatReader, Packet, SeekMode, SeekTo, SeekedTo, Track};
+}
+
+/// `SeekTo` specifies a position to seek to.
+pub enum SeekTo {
+    /// Seek to a `Time` in regular time units.
+    Time {
+        /// The `Time` to seek to.
+        time: Time,
+        /// If `Some`, specifies which track's timestamp should be returned after the seek. If
+        /// `None`, then the default track's timestamp is returned. If the container does not have
+        /// a default track, then the first track's timestamp is returned.
+        track_id: Option<u32>,
+    },
+    /// Seek to a track's `TimeStamp` in that track's timebase units.
+    TimeStamp {
+        /// The `TimeStamp` to seek to.
+        ts: TimeStamp,
+        /// Specifies which track `ts` is relative to.
+        track_id: u32,
+    },
+}
+
+/// `SeekedTo` is the result of a seek.
+#[derive(Copy, Clone, Debug)]
+pub struct SeekedTo {
+    /// The track the seek was relative to.
+    pub track_id: u32,
+    /// The `TimeStamp` required for the requested seek.
+    pub required_ts: TimeStamp,
+    /// The `TimeStamp` that was seeked to.
+    pub actual_ts: TimeStamp,
+}
+
+
+--- src/io/bit.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::cmp::min;
+use std::io;
+
+use crate::io::ReadBytes;
+use crate::util::bits::*;
+
+fn end_of_bitstream_error<T>() -> io::Result<T> {
+    Err(io::Error::new(io::ErrorKind::Other, "unexpected end of bitstream"))
+}
+
+pub mod vlc {
+    //! The `vlc` module provides support for decoding variable-length codes (VLC).
+
+    use std::cmp::max;
+    use std::collections::{BTreeMap, VecDeque};
+    use std::io;
+
+    fn codebook_error<T>(desc: &'static str) -> io::Result<T> {
+        Err(io::Error::new(io::ErrorKind::Other, desc))
+    }
+
+    /// `BitOrder` describes the relationship between the order of bits in the provided codewords
+    /// and the order in which bits are read.
+    #[derive(Copy, Clone)]
+    pub enum BitOrder {
+        /// The provided codewords have bits in the same order as the order in which they're being
+        /// read.
+        Verbatim,
+        /// The provided codeword have bits in the reverse order as the order in which they're
+        /// being read.
+        Reverse,
+    }
+
+    /// `CodebookEntry` provides the functions required for an entry in the `Codebook`.
+    pub trait CodebookEntry: Copy + Clone + Default {
+        /// The type of a value in this entry.
+        type ValueType: Copy + From<u8>;
+        /// The type of a jump offset in this entry.
+        type OffsetType: Copy;
+
+        /// The maximum jump offset.
+        const JUMP_OFFSET_MAX: u32;
+
+        /// Creates a new value entry.
+        fn new_value(value: Self::ValueType, len: u8) -> Self;
+
+        /// Create a new jump entry.
+        fn new_jump(offset: u32, len: u8) -> Self;
+
+--- src/io/buf_reader.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::cmp;
+use std::io;
+
+use super::{FiniteStream, ReadBytes};
+
+#[inline(always)]
+fn underrun_error<T>() -> io::Result<T> {
+    Err(io::Error::new(io::ErrorKind::UnexpectedEof, "buffer underrun"))
+}
+
+/// A `BufReader` reads bytes from a byte buffer.
+pub struct BufReader<'a> {
+    buf: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> BufReader<'a> {
+    /// Instantiate a new `BufReader` with a given byte buffer.
+    pub fn new(buf: &'a [u8]) -> Self {
+        BufReader { buf, pos: 0 }
+    }
+
+    /// Scans up-to `scan_len` bytes from the stream until a byte pattern is matched. A reference to
+    /// scanned bytes including the matched pattern are returned. If `scan_len` bytes are scanned
+    /// without matching the pattern, a reference to the scanned bytes are also returned. Likewise,
+    /// if the underlying buffer is exhausted before matching the pattern, remainder of the buffer
+    /// is returned.
+    #[inline(always)]
+    pub fn scan_bytes_ref(&mut self, pattern: &[u8], scan_len: usize) -> io::Result<&'a [u8]> {
+        self.scan_bytes_aligned_ref(pattern, 1, scan_len)
+    }
+
+    /// Scans up-to `scan_len` bytes from the stream until a byte pattern is matched on the
+    /// specified byte alignment boundary. Operation is otherwise identical to `scan_bytes_ref`.
+    pub fn scan_bytes_aligned_ref(
+        &mut self,
+        pattern: &[u8],
+        align: usize,
+        scan_len: usize,
+    ) -> io::Result<&'a [u8]> {
+        // The pattern must be atleast one byte.
+        debug_assert!(!pattern.is_empty());
+
+        let start = self.pos;
+        let remaining = self.buf.len() - start;
+        let end = start + cmp::min(remaining, scan_len);
+
+        // If the pattern is longer than amount of bytes remaining, or the scan length is shorter
+
+--- src/io/media_source_stream.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::cmp;
+use std::io;
+use std::io::{IoSliceMut, Read, Seek};
+use std::ops::Sub;
+
+use super::SeekBuffered;
+use super::{MediaSource, ReadBytes};
+
+#[inline(always)]
+fn end_of_stream_error<T>() -> io::Result<T> {
+    Err(io::Error::new(io::ErrorKind::UnexpectedEof, "end of stream"))
+}
+
+/// `MediaSourceStreamOptions` specifies the buffering behaviour of a `MediaSourceStream`.
+pub struct MediaSourceStreamOptions {
+    /// The maximum buffer size. Must be a power of 2. Must be > 32kB.
+    pub buffer_len: usize,
+}
+
+impl Default for MediaSourceStreamOptions {
+    fn default() -> Self {
+        MediaSourceStreamOptions { buffer_len: 64 * 1024 }
+    }
+}
+
+/// `MediaSourceStream` is the main reader type for Symphonia.
+///
+/// By using type erasure and dynamic dispatch, `MediaSourceStream` wraps and hides the inner
+/// reader from the consumer, allowing any typical `Read`er to be used with Symphonia in a generic
+/// way, selectable at runtime.
+///
+/// `MediaSourceStream` is designed to provide speed and flexibility in a number of challenging I/O
+/// scenarios.
+///
+/// First, to minimize system call and dynamic dispatch overhead on the inner reader, and to
+/// amortize that overhead over many bytes, `MediaSourceStream` implements an exponentially growing
+/// read-ahead buffer. The read-ahead length starts at 1kB, and doubles in length as more sequential
+/// reads are performed until it reaches 32kB. Growing the read-ahead length over time reduces the
+/// excess data buffered on consecutive `seek()` calls.
+///
+/// Second, to better support non-seekable sources, `MediaSourceStream` implements a configurable
+/// length buffer cache. By default, the buffer caches allows backtracking by up-to the minimum of
+/// either `buffer_len - 32kB` or the total number of bytes read since instantiation or the last
+/// buffer cache invalidation. Note that regular a `seek()` will invalidate the buffer cache.
+pub struct MediaSourceStream {
+    /// The source reader.
+    inner: Box<dyn MediaSource>,
+    /// The ring buffer.
+
+--- src/io/mod.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The `io` module implements composable bit- and byte-level I/O.
+//!
+//! The following nomenclature is used to denote where the data being read is sourced from:
+//!  * A `Stream` consumes any source implementing [`ReadBytes`] one byte at a time.
+//!  * A `Reader` consumes a `&[u8]`.
+//!
+//! The sole exception to this rule is [`MediaSourceStream`] which consumes sources implementing
+//! [`MediaSource`] (aka. [`std::io::Read`]).
+//!
+//! All `Reader`s and `Stream`s operating on bytes of data at a time implement the [`ReadBytes`]
+//! trait. Likewise, all `Reader`s and `Stream`s operating on bits of data at a time implement
+//! either the [`ReadBitsLtr`] or [`ReadBitsRtl`] traits depending on the order in which they
+//! consume bits.
+
+use std::io;
+use std::mem;
+
+mod bit;
+mod buf_reader;
+mod media_source_stream;
+mod monitor_stream;
+mod scoped_stream;
+
+pub use bit::*;
+pub use buf_reader::BufReader;
+pub use media_source_stream::{MediaSourceStream, MediaSourceStreamOptions};
+pub use monitor_stream::{Monitor, MonitorStream};
+pub use scoped_stream::ScopedStream;
+
+/// `MediaSource` is a composite trait of [`std::io::Read`] and [`std::io::Seek`]. A source *must*
+/// implement this trait to be used by [`MediaSourceStream`].
+///
+/// Despite requiring the [`std::io::Seek`] trait, seeking is an optional capability that can be
+/// queried at runtime.
+pub trait MediaSource: io::Read + io::Seek + Send + Sync {
+    /// Returns if the source is seekable. This may be an expensive operation.
+    fn is_seekable(&self) -> bool;
+
+    /// Returns the length in bytes, if available. This may be an expensive operation.
+    fn byte_len(&self) -> Option<u64>;
+}
+
+impl MediaSource for std::fs::File {
+    /// Returns if the `std::io::File` backing the `MediaSource` is seekable.
+    ///
+    /// Note: This operation involves querying the underlying file descriptor for information and
+    /// may be moderately expensive. Therefore it is recommended to cache this value if used often.
+    fn is_seekable(&self) -> bool {
+
+--- src/io/monitor_stream.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::io;
+
+use super::ReadBytes;
+
+/// A `Monitor` provides a common interface to examine the operations observed be
+/// a [`MonitorStream`].
+pub trait Monitor {
+    fn process_byte(&mut self, byte: u8);
+
+    #[inline(always)]
+    fn process_double_bytes(&mut self, buf: [u8; 2]) {
+        self.process_byte(buf[0]);
+        self.process_byte(buf[1]);
+    }
+
+    #[inline(always)]
+    fn process_triple_bytes(&mut self, buf: [u8; 3]) {
+        self.process_byte(buf[0]);
+        self.process_byte(buf[1]);
+        self.process_byte(buf[2]);
+    }
+
+    #[inline(always)]
+    fn process_quad_bytes(&mut self, buf: [u8; 4]) {
+        self.process_byte(buf[0]);
+        self.process_byte(buf[1]);
+        self.process_byte(buf[2]);
+        self.process_byte(buf[3]);
+    }
+
+    fn process_buf_bytes(&mut self, buf: &[u8]);
+}
+
+/// A `MonitorStream` is a passive stream that observes all operations performed on the inner
+/// stream and forwards an immutable reference of the result to a [`Monitor`].
+pub struct MonitorStream<B: ReadBytes, M: Monitor> {
+    inner: B,
+    monitor: M,
+}
+
+impl<B: ReadBytes, M: Monitor> MonitorStream<B, M> {
+    pub fn new(inner: B, monitor: M) -> MonitorStream<B, M> {
+        MonitorStream { inner, monitor }
+    }
+
+    pub fn inner(&self) -> &B {
+        &self.inner
+    }
+
+--- src/io/scoped_stream.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::cmp;
+use std::io;
+
+use super::{FiniteStream, ReadBytes, SeekBuffered};
+
+#[inline(always)]
+fn out_of_bounds_error<T>() -> io::Result<T> {
+    Err(io::Error::new(io::ErrorKind::UnexpectedEof, "out of bounds"))
+}
+
+/// A `ScopedStream` restricts the number of bytes that may be read to an upper limit.
+pub struct ScopedStream<B: ReadBytes> {
+    inner: B,
+    start: u64,
+    len: u64,
+    read: u64,
+}
+
+impl<B: ReadBytes> ScopedStream<B> {
+    /// Instantiates a new `ScopedStream` with an upper limit on the number of bytes that can be
+    /// read from the inner source.
+    pub fn new(inner: B, len: u64) -> Self {
+        ScopedStream { start: inner.pos(), inner, len, read: 0 }
+    }
+
+    /// Returns an immutable reference to the inner stream.
+    pub fn inner(&self) -> &B {
+        &self.inner
+    }
+
+    /// Returns a mutable reference to the inner stream.
+    pub fn inner_mut(&mut self) -> &mut B {
+        &mut self.inner
+    }
+
+    /// Ignores the remainder of the `ScopedStream`.
+    pub fn ignore(&mut self) -> io::Result<()> {
+        self.inner.ignore_bytes(self.len - self.read)
+    }
+
+    /// Convert the `ScopedStream` to the inner stream.
+    pub fn into_inner(self) -> B {
+        self.inner
+    }
+}
+
+impl<B: ReadBytes> FiniteStream for ScopedStream<B> {
+    /// Returns the length of the the `ScopedStream`.
+
+--- src/lib.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#![forbid(unsafe_code)]
+// The following lints are allowed in all Symphonia crates. Please see clippy.toml for their
+// justification.
+#![allow(clippy::comparison_chain)]
+#![allow(clippy::excessive_precision)]
+#![allow(clippy::identity_op)]
+#![allow(clippy::manual_range_contains)]
+
+pub mod audio;
+pub mod checksum;
+pub mod codecs;
+pub mod conv;
+pub mod dsp;
+pub mod errors;
+pub mod formats;
+pub mod io;
+pub mod meta;
+pub mod probe;
+pub mod sample;
+pub mod units;
+pub mod util;
+
+
+--- src/meta.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The `meta` module defines basic metadata elements, and management structures.
+
+use std::borrow::Cow;
+use std::collections::VecDeque;
+use std::convert::From;
+use std::fmt;
+use std::num::NonZeroU32;
+
+use crate::errors::Result;
+use crate::io::MediaSourceStream;
+
+/// `Limit` defines an upper-bound on how much of a resource should be allocated when the amount to
+/// be allocated is specified by the media stream, which is untrusted. A limit will place an
+/// upper-bound on this allocation at the risk of breaking potentially valid streams. Limits are
+/// used to prevent denial-of-service attacks.
+///
+/// All limits can be defaulted to a reasonable value specific to the situation. These defaults will
+/// generally not break any normal streams.
+#[derive(Copy, Clone, Debug)]
+pub enum Limit {
+    /// Do not impose any limit.
+    None,
+    /// Use the a reasonable default specified by the `FormatReader` or `Decoder` implementation.
+    Default,
+    /// Specify the upper limit of the resource. Units are case specific.
+    Maximum(usize),
+}
+
+impl Limit {
+    /// Gets the numeric limit of the limit, or default value. If there is no limit, None is
+    /// returned.
+    pub fn limit_or_default(&self, default: usize) -> Option<usize> {
+        match self {
+            Limit::None => None,
+            Limit::Default => Some(default),
+            Limit::Maximum(max) => Some(*max),
+        }
+    }
+}
+
+impl Default for Limit {
+    fn default() -> Self {
+        Limit::Default
+    }
+}
+
+/// `MetadataOptions` is a common set of options that all metadata readers use.
+#[derive(Copy, Clone, Debug, Default)]
+
+--- src/probe.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The `probe` module provides methods and traits to support auto-detection of media formats from
+//! arbitrary media streams.
+
+use crate::errors::{unsupported_error, Result};
+use crate::formats::{FormatOptions, FormatReader};
+use crate::io::{MediaSourceStream, ReadBytes, SeekBuffered};
+use crate::meta::{Metadata, MetadataLog, MetadataOptions, MetadataReader};
+
+use log::{debug, error};
+
+mod bloom {
+
+    fn fnv1a32(value: &[u8; 2]) -> u32 {
+        const INIT: u32 = 0x811c_9dc5;
+        const PRIME: u32 = 0x0100_0193;
+
+        let mut state = INIT;
+
+        for byte in value.iter() {
+            state = (state ^ u32::from(*byte)).wrapping_mul(PRIME);
+        }
+
+        state
+    }
+
+    pub struct BloomFilter {
+        filter: Box<[u64]>,
+    }
+
+    impl Default for BloomFilter {
+        fn default() -> Self {
+            BloomFilter { filter: vec![0; BloomFilter::M >> 6].into_boxed_slice() }
+        }
+    }
+
+    impl BloomFilter {
+        /// The number of bits, m, used by the bloom filter. Use 16384 bits (2KiB) by default.
+        const M: usize = 2 * 1024 * 8;
+
+        pub fn insert(&mut self, key: &[u8; 2]) {
+            let hash = fnv1a32(key);
+
+            let h0 = (hash >> 16) as u16;
+            let h1 = (hash >> 0) as u16;
+
+            let i0 = h0 as usize & (BloomFilter::M - 1);
+            let i1 = h0.wrapping_add(h1.wrapping_mul(1)) as usize & (BloomFilter::M - 1);
+            let i2 = h0.wrapping_add(h1.wrapping_mul(2)) as usize & (BloomFilter::M - 1);
+
+--- src/sample.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The `sample` module defines the core audio sample trait and any non-primitive sample data types.
+
+use std::fmt;
+
+use crate::util::clamp::{clamp_f32, clamp_f64, clamp_i24, clamp_u24};
+
+/// SampleFormat describes the data encoding for an audio sample.
+#[derive(Copy, Clone, Debug)]
+pub enum SampleFormat {
+    /// Unsigned 8-bit integer.
+    U8,
+    /// Unsigned 16-bit integer.
+    U16,
+    /// Unsigned 24-bit integer.
+    U24,
+    /// Unsigned 32-bit integer.
+    U32,
+    /// Signed 8-bit integer.
+    S8,
+    /// Signed 16-bit integer.
+    S16,
+    /// Signed 24-bit integer.
+    S24,
+    /// Signed 32-bit integer.
+    S32,
+    /// Single precision (32-bit) floating point.
+    F32,
+    /// Double precision (64-bit) floating point.
+    F64,
+}
+
+/// `Sample` provides a common interface for manipulating sample's regardless of the
+/// underlying data type. Additionally, `Sample` provides information regarding the
+/// format of underlying data types representing the sample when in memory, but also
+/// when exported.
+pub trait Sample:
+    Copy
+    + Clone
+    + core::ops::Add<Output = Self>
+    + core::ops::Sub<Output = Self>
+    + Default
+    + PartialOrd
+    + PartialEq
+    + Sized
+{
+    /// A unique enum value representing the sample format. This constant may be used to dynamically
+    /// choose how to process the sample at runtime.
+    const FORMAT: SampleFormat;
+
+--- src/units.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The `units` module provides definitions for common units.
+
+use std::fmt;
+
+/// A `TimeStamp` represents an instantenous instant in time since the start of a stream. One
+/// `TimeStamp` "tick" is equivalent to the stream's `TimeBase` in seconds.
+pub type TimeStamp = u64;
+
+/// A `Duration` indicates a positive span of time.
+pub type Duration = u64;
+
+/// `Time` represents a duration of time in seconds, or the number of seconds since an arbitrary
+/// epoch. `Time` is stored as an integer number of seconds plus any remaining fraction of a second
+/// as a floating point value.
+#[derive(Copy, Clone, Debug, Default, PartialEq, PartialOrd)]
+pub struct Time {
+    pub seconds: u64,
+    pub frac: f64,
+}
+
+impl Time {
+    const SECONDS_PER_MINUTE: u64 = 60;
+    const SECONDS_PER_HOUR: u64 = 60 * 60;
+    const NANOSECONDS_PER_SECOND: u32 = 1_000_000_000;
+    const NANOSECONDS_PER_SECOND_INV: f64 = 1.0 / 1_000_000_000.0;
+
+    pub fn new(seconds: u64, frac: f64) -> Self {
+        Time { seconds, frac }
+    }
+
+    pub fn from_ss(s: u8, ns: u32) -> Option<Time> {
+        if s > 59 || ns >= Time::NANOSECONDS_PER_SECOND {
+            return None;
+        }
+
+        let seconds = u64::from(s);
+        let frac = Time::NANOSECONDS_PER_SECOND_INV * f64::from(ns);
+
+        Some(Time { seconds, frac })
+    }
+
+    pub fn from_mmss(m: u8, s: u8, ns: u32) -> Option<Time> {
+        if m > 59 || s > 59 || ns >= Time::NANOSECONDS_PER_SECOND {
+            return None;
+        }
+
+        let seconds = (Time::SECONDS_PER_MINUTE * u64::from(m)) + u64::from(s);
+        let frac = Time::NANOSECONDS_PER_SECOND_INV * f64::from(ns);
+
+--- src/util.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The `util` module provides a repository of commonly used utility functions sorted into distinct
+//! categories.
+//!
+//! If a function is used all-over the codebase, and does not belong to specific top-level module,
+//! it should be placed here.
+
+pub mod bits {
+    //! Utilities for bit manipulation.
+
+    /// Sign extends an arbitrary, 8-bit or less, signed two's complement integer stored within an
+    /// u8 to a full width i8.
+    #[inline(always)]
+    pub fn sign_extend_leq8_to_i8(value: u8, width: u32) -> i8 {
+        // Rust uses an arithmetic shift right (the original sign bit is repeatedly shifted on) for
+        // signed integer types. Therefore, shift the value to the right-hand side of the integer,
+        // then shift it back to extend the sign bit.
+        (value.wrapping_shl(8 - width) as i8).wrapping_shr(8 - width)
+    }
+
+    /// Sign extends an arbitrary, 16-bit or less, signed two's complement integer stored within an
+    /// u16 to a full width i16.
+    #[inline(always)]
+    pub fn sign_extend_leq16_to_i16(value: u16, width: u32) -> i16 {
+        (value.wrapping_shl(16 - width) as i16).wrapping_shr(16 - width)
+    }
+
+    /// Sign extends an arbitrary, 32-bit or less, signed two's complement integer stored within an
+    /// u32 to a full width i32.
+    #[inline(always)]
+    pub fn sign_extend_leq32_to_i32(value: u32, width: u32) -> i32 {
+        (value.wrapping_shl(32 - width) as i32).wrapping_shr(32 - width)
+    }
+
+    /// Sign extends an arbitrary, 64-bit or less, signed two's complement integer stored within an
+    /// u64 to a full width i64.
+    #[inline(always)]
+    pub fn sign_extend_leq64_to_i64(value: u64, width: u32) -> i64 {
+        (value.wrapping_shl(64 - width) as i64).wrapping_shr(64 - width)
+    }
+
+    /// Masks the bit at the specified bit index.
+    #[inline(always)]
+    pub fn mask_at(idx: u32) -> u8 {
+        debug_assert!(idx <= 7);
+        1 << idx
+    }
+
+    /// Masks all bits with an index greater than or equal to idx.

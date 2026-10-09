@@ -1,0 +1,2263 @@
+--- src/array.rs ---
+// Copyright 2013-2015 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::base::{Boolean, CFAllocatorRef, CFComparatorFunction, CFIndex, CFRange, CFTypeID};
+use crate::string::CFStringRef;
+
+pub type CFArrayRetainCallBack =
+    extern "C" fn(allocator: CFAllocatorRef, value: *const c_void) -> *const c_void;
+pub type CFArrayReleaseCallBack = extern "C" fn(allocator: CFAllocatorRef, value: *const c_void);
+pub type CFArrayCopyDescriptionCallBack = extern "C" fn(value: *const c_void) -> CFStringRef;
+pub type CFArrayEqualCallBack =
+    extern "C" fn(value1: *const c_void, value2: *const c_void) -> Boolean;
+pub type CFArrayApplierFunction = extern "C" fn(value: *const c_void, context: *mut c_void);
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct CFArrayCallBacks {
+    pub version: CFIndex,
+    pub retain: CFArrayRetainCallBack,
+    pub release: CFArrayReleaseCallBack,
+    pub copyDescription: CFArrayCopyDescriptionCallBack,
+    pub equal: CFArrayEqualCallBack,
+}
+
+#[repr(C)]
+pub struct __CFArray(c_void);
+
+pub type CFArrayRef = *const __CFArray;
+pub type CFMutableArrayRef = *mut __CFArray;
+
+extern "C" {
+    /*
+     * CFArray.h
+     */
+
+    pub static kCFTypeArrayCallBacks: CFArrayCallBacks;
+
+    /* CFArray */
+    /* Creating an Array */
+    pub fn CFArrayCreate(
+        allocator: CFAllocatorRef,
+        values: *const *const c_void,
+        numValues: CFIndex,
+        callBacks: *const CFArrayCallBacks,
+    ) -> CFArrayRef;
+    pub fn CFArrayCreateCopy(allocator: CFAllocatorRef, theArray: CFArrayRef) -> CFArrayRef;
+
+
+--- src/attributed_string.rs ---
+// Copyright 2013 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::base::{Boolean, CFAllocatorRef, CFIndex, CFRange, CFTypeID, CFTypeRef};
+use crate::dictionary::CFDictionaryRef;
+use crate::string::CFMutableStringRef;
+use crate::string::CFStringRef;
+use std::os::raw::c_void;
+
+#[repr(C)]
+pub struct __CFAttributedString(c_void);
+
+pub type CFAttributedStringRef = *const __CFAttributedString;
+pub type CFMutableAttributedStringRef = *mut __CFAttributedString;
+
+extern "C" {
+    /*
+     * CFAttributedString.h
+     */
+
+    /* CFAttributedString */
+    /* Creating a CFAttributedString */
+    pub fn CFAttributedStringCreate(
+        allocator: CFAllocatorRef,
+        str: CFStringRef,
+        attributes: CFDictionaryRef,
+    ) -> CFAttributedStringRef;
+    pub fn CFAttributedStringCreateCopy(
+        alloc: CFAllocatorRef,
+        aStr: CFAttributedStringRef,
+    ) -> CFAttributedStringRef;
+    pub fn CFAttributedStringCreateWithSubstring(
+        alloc: CFAllocatorRef,
+        aStr: CFAttributedStringRef,
+        range: CFRange,
+    ) -> CFAttributedStringRef;
+    pub fn CFAttributedStringGetLength(astr: CFAttributedStringRef) -> CFIndex;
+    pub fn CFAttributedStringGetString(aStr: CFAttributedStringRef) -> CFStringRef;
+
+    /* Accessing Attributes */
+    pub fn CFAttributedStringGetAttribute(
+        aStr: CFAttributedStringRef,
+        loc: CFIndex,
+        attrName: CFStringRef,
+        effectiveRange: *mut CFRange,
+    ) -> CFTypeRef;
+    pub fn CFAttributedStringGetAttributes(
+        aStr: CFAttributedStringRef,
+        loc: CFIndex,
+
+--- src/bag.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::base::{Boolean, CFAllocatorRef, CFHashCode, CFIndex, CFTypeID};
+use crate::string::CFStringRef;
+
+#[repr(C)]
+pub struct __CFBag(c_void);
+
+pub type CFBagRef = *const __CFBag;
+pub type CFMutableBagRef = *mut __CFBag;
+
+pub type CFBagRetainCallBack =
+    extern "C" fn(allocator: CFAllocatorRef, value: *const c_void) -> *const c_void;
+pub type CFBagReleaseCallBack = extern "C" fn(allocator: CFAllocatorRef, value: *const c_void);
+pub type CFBagCopyDescriptionCallBack = extern "C" fn(value: *const c_void) -> CFStringRef;
+pub type CFBagEqualCallBack =
+    extern "C" fn(value1: *const c_void, value2: *const c_void) -> Boolean;
+pub type CFBagHashCallBack = extern "C" fn(value: *const c_void) -> CFHashCode;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct CFBagCallBacks {
+    pub version: CFIndex,
+    pub retain: CFBagRetainCallBack,
+    pub release: CFBagReleaseCallBack,
+    pub copyDescription: CFBagCopyDescriptionCallBack,
+    pub equal: CFBagEqualCallBack,
+    pub hash: CFBagHashCallBack,
+}
+
+pub type CFBagApplierFunction = extern "C" fn(value: *const c_void, context: *mut c_void);
+
+extern "C" {
+    /*
+     * CFBag.h
+     */
+    /* Predefined Callback Structures */
+    pub static kCFTypeBagCallBacks: CFBagCallBacks;
+    pub static kCFCopyStringBagCallBacks: CFBagCallBacks;
+
+    /* CFBag */
+    /* Creating a Bag */
+    pub fn CFBagCreate(
+        allocator: CFAllocatorRef,
+        values: *const *const c_void,
+        numValues: CFIndex,
+
+--- src/base.rs ---
+// Copyright 2013-2015 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::string::CFStringRef;
+use std::cmp::Ordering;
+use std::os::raw::{c_int, c_short, c_uchar, c_uint, c_ushort, c_void};
+
+pub type Boolean = u8;
+pub type mach_port_t = c_uint;
+pub type CFAllocatorRef = *const c_void;
+pub type CFNullRef = *const c_void;
+pub type CFTypeRef = *const c_void;
+pub type ConstStr255Param = *const c_uchar;
+pub type StringPtr = *mut c_uchar;
+pub type ConstStringPtr = *const c_uchar;
+pub type OSStatus = i32;
+pub type UInt8 = c_uchar;
+pub type UInt16 = c_ushort;
+pub type SInt16 = c_short;
+pub type SInt32 = c_int;
+pub type UInt32 = c_uint;
+pub type CFTypeID = usize;
+pub type CFOptionFlags = usize;
+pub type CFHashCode = usize;
+pub type CFIndex = isize;
+pub type LangCode = SInt16;
+pub type RegionCode = SInt16;
+pub type UTF32Char = c_uint;
+pub type UTF16Char = c_ushort;
+pub type UTF8Char = c_uchar;
+
+#[repr(isize)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CFComparisonResult {
+    LessThan = -1,
+    EqualTo = 0,
+    GreaterThan = 1,
+}
+
+pub type CFComparatorFunction = extern "C" fn(
+    val1: *const c_void,
+    val2: *const c_void,
+    context: *mut c_void,
+) -> CFComparisonResult;
+
+impl From<CFComparisonResult> for Ordering {
+    fn from(val: CFComparisonResult) -> Self {
+        match val {
+            CFComparisonResult::LessThan => Ordering::Less,
+
+--- src/binary_heap.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::base::{Boolean, CFAllocatorRef, CFComparisonResult, CFIndex, CFTypeID};
+use crate::string::CFStringRef;
+
+#[repr(C)]
+pub struct __CFBinaryHeap(c_void);
+
+pub type CFBinaryHeapRef = *mut __CFBinaryHeap;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct CFBinaryHeapCompareContext {
+    pub version: CFIndex,
+    pub info: *mut c_void,
+    pub retain: extern "C" fn(info: *const c_void) -> *const c_void,
+    pub release: extern "C" fn(info: *const c_void),
+    pub copyDescription: extern "C" fn(info: *const c_void) -> CFStringRef,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct CFBinaryHeapCallBacks {
+    pub version: CFIndex,
+    pub retain: extern "C" fn(allocator: CFAllocatorRef, ptr: *const c_void) -> *const c_void,
+    pub release: extern "C" fn(allocator: CFAllocatorRef, ptr: *const c_void),
+    pub copyDescription: extern "C" fn(ptr: *const c_void) -> CFStringRef,
+    pub compare: extern "C" fn(
+        ptr1: *const c_void,
+        ptr2: *const c_void,
+        context: *mut c_void,
+    ) -> CFComparisonResult,
+}
+
+pub type CFBinaryHeapApplierFunction = extern "C" fn(val: *const c_void, context: *const c_void);
+
+extern "C" {
+    /*
+     * CFBinaryHeap.h
+     */
+    /* Predefined Callback Structures */
+    pub static kCFStringBinaryHeapCallBacks: CFBinaryHeapCallBacks;
+
+    /* CFBinaryHeap Miscellaneous Functions */
+    pub fn CFBinaryHeapAddValue(heap: CFBinaryHeapRef, value: *const c_void);
+    pub fn CFBinaryHeapApplyFunction(
+
+--- src/bit_vector.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::base::{Boolean, CFAllocatorRef, CFIndex, CFRange, CFTypeID, UInt32, UInt8};
+
+#[repr(C)]
+pub struct __CFBitVector(c_void);
+
+pub type CFBitVectorRef = *const __CFBitVector;
+pub type CFMutableBitVectorRef = *mut __CFBitVector;
+pub type CFBit = UInt32;
+
+extern "C" {
+    /*
+     * CFBitVector.h
+     */
+
+    /* CFBitVector */
+    /* Creating a Bit Vector */
+    pub fn CFBitVectorCreate(
+        allocator: CFAllocatorRef,
+        bytes: *const UInt8,
+        numBits: CFIndex,
+    ) -> CFBitVectorRef;
+    pub fn CFBitVectorCreateCopy(allocator: CFAllocatorRef, bv: CFBitVectorRef) -> CFBitVectorRef;
+
+    /* Getting Information About a Bit Vector */
+    pub fn CFBitVectorContainsBit(bv: CFBitVectorRef, range: CFRange, value: CFBit) -> Boolean;
+    pub fn CFBitVectorGetBitAtIndex(bv: CFBitVectorRef, idx: CFIndex) -> CFBit;
+    pub fn CFBitVectorGetBits(bv: CFBitVectorRef, range: CFRange, bytes: *mut UInt8);
+    pub fn CFBitVectorGetCount(bv: CFBitVectorRef) -> CFIndex;
+    pub fn CFBitVectorGetCountOfBit(bv: CFBitVectorRef, range: CFRange, value: CFBit) -> CFIndex;
+    pub fn CFBitVectorGetFirstIndexOfBit(
+        bv: CFBitVectorRef,
+        range: CFRange,
+        value: CFBit,
+    ) -> CFIndex;
+    pub fn CFBitVectorGetLastIndexOfBit(
+        bv: CFBitVectorRef,
+        range: CFRange,
+        value: CFBit,
+    ) -> CFIndex;
+
+    /* Getting the CFBitVector Type ID */
+    pub fn CFBitVectorGetTypeID() -> CFTypeID;
+
+    /* CFMutableBitVector */
+
+--- src/bundle.rs ---
+// Copyright 2013-2015 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::array::CFArrayRef;
+#[cfg(target_os = "macos")]
+use crate::base::SInt32;
+use crate::base::{Boolean, CFAllocatorRef, CFTypeID, CFTypeRef, UInt32};
+use crate::dictionary::CFDictionaryRef;
+use crate::error::CFErrorRef;
+use crate::string::CFStringRef;
+use crate::url::CFURLRef;
+use std::os::raw::{c_int, c_uint};
+
+#[repr(C)]
+pub struct __CFBundle(c_void);
+
+pub type CFBundleRef = *mut __CFBundle;
+pub type CFPlugInRef = *mut __CFBundle;
+pub type CFBundleRefNum = c_int;
+
+#[allow(unused)]
+#[inline(always)]
+pub unsafe fn CFCopyLocalizedString(key: CFStringRef, comment: CFStringRef) -> CFStringRef {
+    CFBundleCopyLocalizedString(CFBundleGetMainBundle(), key, key, std::ptr::null())
+}
+#[allow(unused)]
+#[inline(always)]
+pub unsafe fn CFCopyLocalizedStringFromTable(
+    key: CFStringRef,
+    tbl: CFStringRef,
+    comment: CFStringRef,
+) -> CFStringRef {
+    CFBundleCopyLocalizedString(CFBundleGetMainBundle(), key, key, tbl)
+}
+#[allow(unused)]
+#[inline(always)]
+pub unsafe fn CFCopyLocalizedStringFromTableInBundle(
+    key: CFStringRef,
+    tbl: CFStringRef,
+    bundle: CFBundleRef,
+    comment: CFStringRef,
+) -> CFStringRef {
+    CFBundleCopyLocalizedString(bundle, key, key, tbl)
+}
+#[allow(unused)]
+#[inline(always)]
+pub unsafe fn CFCopyLocalizedStringWithDefaultValue(
+
+--- src/calendar.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::{c_char, c_void};
+
+use crate::base::{Boolean, CFAllocatorRef, CFIndex, CFOptionFlags, CFRange, CFTypeID};
+use crate::date::{CFAbsoluteTime, CFTimeInterval};
+use crate::locale::{CFCalendarIdentifier, CFLocaleRef};
+use crate::timezone::CFTimeZoneRef;
+
+#[repr(C)]
+pub struct __CFCalendar(c_void);
+pub type CFCalendarRef = *mut __CFCalendar;
+
+pub type CFCalendarUnit = CFOptionFlags;
+pub const kCFCalendarUnitEra: CFCalendarUnit = 1 << 1;
+pub const kCFCalendarUnitYear: CFCalendarUnit = 1 << 2;
+pub const kCFCalendarUnitMonth: CFCalendarUnit = 1 << 3;
+pub const kCFCalendarUnitDay: CFCalendarUnit = 1 << 4;
+pub const kCFCalendarUnitHour: CFCalendarUnit = 1 << 5;
+pub const kCFCalendarUnitMinute: CFCalendarUnit = 1 << 6;
+pub const kCFCalendarUnitSecond: CFCalendarUnit = 1 << 7;
+pub const kCFCalendarUnitWeek: CFCalendarUnit = 1 << 8; // deprecated since macos 10.10
+pub const kCFCalendarUnitWeekday: CFCalendarUnit = 1 << 9;
+pub const kCFCalendarUnitWeekdayOrdinal: CFCalendarUnit = 1 << 10;
+pub const kCFCalendarUnitQuarter: CFCalendarUnit = 1 << 11;
+pub const kCFCalendarUnitWeekOfMonth: CFCalendarUnit = 1 << 12;
+pub const kCFCalendarUnitWeekOfYear: CFCalendarUnit = 1 << 13;
+pub const kCFCalendarUnitYearForWeekOfYear: CFCalendarUnit = 1 << 14;
+
+pub const kCFCalendarComponentsWrap: CFOptionFlags = 1 << 0;
+
+extern "C" {
+    /*
+     * CFCalendar.h
+     */
+
+    /* Creating a Calendar */
+    pub fn CFCalendarCopyCurrent() -> CFCalendarRef;
+    pub fn CFCalendarCreateWithIdentifier(
+        allocator: CFAllocatorRef,
+        identifier: CFCalendarIdentifier,
+    ) -> CFCalendarRef;
+
+    /* Calendrical Calculations */
+    pub fn CFCalendarAddComponents(
+        identifier: CFCalendarIdentifier,
+        /* inout */ at: *mut CFAbsoluteTime,
+        options: CFOptionFlags,
+
+--- src/characterset.rs ---
+// Copyright 2019 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::base::{Boolean, CFAllocatorRef, CFIndex, CFRange, CFTypeID, UTF32Char};
+use crate::data::CFDataRef;
+use crate::string::{CFStringRef, UniChar};
+use std::os::raw::c_void;
+
+pub type CFCharacterSetPredefinedSet = CFIndex;
+
+// Members of CFCharacterSetPredefinedSet enum
+pub static kCFCharacterSetControl: CFCharacterSetPredefinedSet = 1;
+pub static kCFCharacterSetWhitespace: CFCharacterSetPredefinedSet = 2;
+pub static kCFCharacterSetWhitespaceAndNewline: CFCharacterSetPredefinedSet = 3;
+pub static kCFCharacterSetDecimalDigit: CFCharacterSetPredefinedSet = 4;
+pub static kCFCharacterSetLetter: CFCharacterSetPredefinedSet = 5;
+pub static kCFCharacterSetLowercaseLetter: CFCharacterSetPredefinedSet = 6;
+pub static kCFCharacterSetUppercaseLetter: CFCharacterSetPredefinedSet = 7;
+pub static kCFCharacterSetNonBase: CFCharacterSetPredefinedSet = 8;
+pub static kCFCharacterSetDecomposable: CFCharacterSetPredefinedSet = 9;
+pub static kCFCharacterSetAlphaNumeric: CFCharacterSetPredefinedSet = 10;
+pub static kCFCharacterSetPunctuation: CFCharacterSetPredefinedSet = 11;
+pub static kCFCharacterSetIllegal: CFCharacterSetPredefinedSet = 12;
+pub static kCFCharacterSetCapitalizedLetter: CFCharacterSetPredefinedSet = 13;
+pub static kCFCharacterSetSymbol: CFCharacterSetPredefinedSet = 14;
+pub static kCFCharacterSetNewline: CFCharacterSetPredefinedSet = 15;
+
+#[repr(C)]
+pub struct __CFCharacterSet(c_void);
+
+pub type CFCharacterSetRef = *const __CFCharacterSet;
+pub type CFMutableCharacterSetRef = *mut __CFCharacterSet;
+
+extern "C" {
+    /*
+     * CFCharacterSet.h
+     */
+
+    /* CFCharacterSet */
+    /* Creating Character Sets */
+    pub fn CFCharacterSetCreateCopy(
+        alloc: CFAllocatorRef,
+        theSet: CFCharacterSetRef,
+    ) -> CFCharacterSetRef;
+    pub fn CFCharacterSetCreateInvertedSet(
+        alloc: CFAllocatorRef,
+        theSet: CFCharacterSetRef,
+    ) -> CFCharacterSetRef;
+    pub fn CFCharacterSetCreateWithCharactersInRange(
+
+--- src/data.rs ---
+// Copyright 2013-2015 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::base::{CFAllocatorRef, CFIndex, CFOptionFlags, CFRange, CFTypeID};
+use std::os::raw::c_void;
+
+#[repr(C)]
+pub struct __CFData(c_void);
+
+pub type CFDataRef = *const __CFData;
+pub type CFMutableDataRef = *mut __CFData;
+pub type CFDataSearchFlags = CFOptionFlags;
+
+// typedef CF_OPTIONS(CFOptionFlags, CFDataSearchFlags)
+pub const kCFDataSearchBackwards: CFDataSearchFlags = 1usize << 0;
+pub const kCFDataSearchAnchored: CFDataSearchFlags = 1usize << 1;
+
+extern "C" {
+    /*
+     * CFData.h
+     */
+
+    /* CFData */
+    /* Creating a CFData Object */
+    pub fn CFDataCreate(allocator: CFAllocatorRef, bytes: *const u8, length: CFIndex) -> CFDataRef;
+    pub fn CFDataCreateCopy(allocator: CFAllocatorRef, theData: CFDataRef) -> CFDataRef;
+    pub fn CFDataCreateWithBytesNoCopy(
+        allocator: CFAllocatorRef,
+        bytes: *const u8,
+        length: CFIndex,
+        bytesDeallocator: CFAllocatorRef,
+    ) -> CFDataRef;
+
+    /* Examining a CFData Object */
+    pub fn CFDataGetBytePtr(theData: CFDataRef) -> *const u8;
+    pub fn CFDataGetBytes(theData: CFDataRef, range: CFRange, buffer: *mut u8);
+    pub fn CFDataGetLength(theData: CFDataRef) -> CFIndex;
+    pub fn CFDataFind(
+        theData: CFDataRef,
+        dataToFind: CFDataRef,
+        searchRange: CFRange,
+        compareOptions: CFDataSearchFlags,
+    ) -> CFRange;
+
+    /* Getting the CFData Type ID */
+    pub fn CFDataGetTypeID() -> CFTypeID;
+
+    /* CFMutableData */
+    /* Creating a Mutable Data Object */
+
+--- src/date_formatter.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::base::{Boolean, CFAllocatorRef, CFIndex, CFOptionFlags, CFRange, CFTypeID, CFTypeRef};
+use crate::date::{CFAbsoluteTime, CFDateRef};
+use crate::locale::CFLocaleRef;
+use crate::string::CFStringRef;
+
+#[repr(C)]
+pub struct __CFDateFormatter(c_void);
+pub type CFDateFormatterRef = *mut __CFDateFormatter;
+
+pub type CFDateFormatterKey = CFStringRef;
+pub type CFDateFormatterStyle = CFIndex;
+pub type CFISO8601DateFormatOptions = CFOptionFlags;
+
+/* Date Formatter Styles */
+pub const kCFDateFormatterNoStyle: CFDateFormatterStyle = 0;
+pub const kCFDateFormatterShortStyle: CFDateFormatterStyle = 1;
+pub const kCFDateFormatterMediumStyle: CFDateFormatterStyle = 2;
+pub const kCFDateFormatterLongStyle: CFDateFormatterStyle = 3;
+pub const kCFDateFormatterFullStyle: CFDateFormatterStyle = 4;
+
+//pub const kCFISO8601DateFormatWithYear: CFISO8601DateFormatOptions = 1 << 0; // macosx(10.12)+
+//pub const kCFISO8601DateFormatWithMonth: CFISO8601DateFormatOptions = 1 << 1; // macosx(10.12)+
+//pub const kCFISO8601DateFormatWithWeekOfYear: CFISO8601DateFormatOptions = 1 << 2; // macosx(10.12)+
+//pub const kCFISO8601DateFormatWithDay: CFISO8601DateFormatOptions = 1 << 4; // macosx(10.12)+
+//pub const kCFISO8601DateFormatWithTime: CFISO8601DateFormatOptions = 1 << 5; // macosx(10.12)+
+//pub const kCFISO8601DateFormatWithTimeZone: CFISO8601DateFormatOptions = 1 << 6; // macosx(10.12)+
+//pub const kCFISO8601DateFormatWithSpaceBetweenDateAndTime: CFISO8601DateFormatOptions = 1 << 7; // macosx(10.12)+
+//pub const kCFISO8601DateFormatWithDashSeparatorInDate: CFISO8601DateFormatOptions = 1 << 8; // macosx(10.12)+
+//pub const kCFISO8601DateFormatWithColonSeparatorInTime: CFISO8601DateFormatOptions = 1 << 9; // macosx(10.12)+
+//pub const kCFISO8601DateFormatWithColonSeparatorInTimeZone: CFISO8601DateFormatOptions = 1 << 10; // macosx(10.12)+
+//pub const kCFISO8601DateFormatWithFractionalSeconds: CFISO8601DateFormatOptions = 1 << 11; // macosx(10.13)+
+//pub const kCFISO8601DateFormatWithFullDate: CFISO8601DateFormatOptions = kCFISO8601DateFormatWithYear | kCFISO8601DateFormatWithMonth | kCFISO8601DateFormatWithDay | kCFISO8601DateFormatWithDashSeparatorInDate; // macosx(10.12)+
+//pub const kCFISO8601DateFormatWithFullTime: CFISO8601DateFormatOptions = kCFISO8601DateFormatWithTime | kCFISO8601DateFormatWithColonSeparatorInTime | kCFISO8601DateFormatWithTimeZone | kCFISO8601DateFormatWithColonSeparatorInTimeZone; // macosx(10.12)+
+//pub const kCFISO8601DateFormatWithInternetDateTime: CFISO8601DateFormatOptions = kCFISO8601DateFormatWithFullDate | kCFISO8601DateFormatWithFullTime; // macosx(10.12)+
+
+extern "C" {
+    /*
+     * CFDateFormatter.h
+     */
+
+    /* Date Formatter Property Keys */
+    // The values for these keys are all CFType objects.
+    // The specific types for each key are specified above.
+    pub static kCFDateFormatterIsLenient: CFDateFormatterKey; // CFBoolean
+
+--- src/date.rs ---
+// Copyright 2013-2015 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::base::{CFAllocatorRef, CFComparisonResult, CFTypeID};
+
+#[repr(C)]
+pub struct __CFDate(c_void);
+
+pub type CFDateRef = *const __CFDate;
+
+pub type CFTimeInterval = f64;
+pub type CFAbsoluteTime = CFTimeInterval;
+
+extern "C" {
+    pub static kCFAbsoluteTimeIntervalSince1904: CFTimeInterval;
+    pub static kCFAbsoluteTimeIntervalSince1970: CFTimeInterval;
+
+    pub fn CFAbsoluteTimeGetCurrent() -> CFAbsoluteTime;
+
+    pub fn CFDateCreate(allocator: CFAllocatorRef, at: CFAbsoluteTime) -> CFDateRef;
+    pub fn CFDateGetAbsoluteTime(date: CFDateRef) -> CFAbsoluteTime;
+    pub fn CFDateGetTimeIntervalSinceDate(date: CFDateRef, other: CFDateRef) -> CFTimeInterval;
+    pub fn CFDateCompare(
+        date: CFDateRef,
+        other: CFDateRef,
+        context: *mut c_void,
+    ) -> CFComparisonResult;
+
+    pub fn CFDateGetTypeID() -> CFTypeID;
+}
+
+
+--- src/dictionary.rs ---
+// Copyright 2013-2015 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::base::{Boolean, CFAllocatorRef, CFHashCode, CFIndex, CFTypeID};
+use crate::string::CFStringRef;
+
+pub type CFDictionaryApplierFunction =
+    extern "C" fn(key: *const c_void, value: *const c_void, context: *mut c_void);
+
+pub type CFDictionaryRetainCallBack =
+    extern "C" fn(allocator: CFAllocatorRef, value: *const c_void) -> *const c_void;
+pub type CFDictionaryReleaseCallBack =
+    extern "C" fn(allocator: CFAllocatorRef, value: *const c_void);
+pub type CFDictionaryCopyDescriptionCallBack = extern "C" fn(value: *const c_void) -> CFStringRef;
+pub type CFDictionaryEqualCallBack =
+    extern "C" fn(value1: *const c_void, value2: *const c_void) -> Boolean;
+pub type CFDictionaryHashCallBack = extern "C" fn(value: *const c_void) -> CFHashCode;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CFDictionaryKeyCallBacks {
+    pub version: CFIndex,
+    pub retain: CFDictionaryRetainCallBack,
+    pub release: CFDictionaryReleaseCallBack,
+    pub copyDescription: CFDictionaryCopyDescriptionCallBack,
+    pub equal: CFDictionaryEqualCallBack,
+    pub hash: CFDictionaryHashCallBack,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CFDictionaryValueCallBacks {
+    pub version: CFIndex,
+    pub retain: CFDictionaryRetainCallBack,
+    pub release: CFDictionaryReleaseCallBack,
+    pub copyDescription: CFDictionaryCopyDescriptionCallBack,
+    pub equal: CFDictionaryEqualCallBack,
+}
+
+#[repr(C)]
+pub struct __CFDictionary(c_void);
+
+pub type CFDictionaryRef = *const __CFDictionary;
+pub type CFMutableDictionaryRef = *mut __CFDictionary;
+
+extern "C" {
+    /*
+
+--- src/error.rs ---
+// Copyright 2016 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::base::{CFAllocatorRef, CFIndex, CFTypeID};
+use crate::dictionary::CFDictionaryRef;
+use crate::string::CFStringRef;
+
+#[repr(C)]
+pub struct __CFError(c_void);
+
+pub type CFErrorRef = *mut __CFError;
+pub type CFErrorDomain = CFStringRef;
+
+extern "C" {
+    /*
+     * CFError.h
+     */
+
+    /* Error domains */
+    pub static kCFErrorDomainPOSIX: CFStringRef;
+    pub static kCFErrorDomainOSStatus: CFStringRef;
+    pub static kCFErrorDomainMach: CFStringRef;
+    pub static kCFErrorDomainCocoa: CFStringRef;
+
+    /* Keys for the user info dictionary */
+    pub static kCFErrorLocalizedDescriptionKey: CFStringRef;
+    // pub static kCFErrorLocalizedFailureKey: CFStringRef; // macos(10.13)+
+    pub static kCFErrorLocalizedFailureReasonKey: CFStringRef;
+    pub static kCFErrorLocalizedRecoverySuggestionKey: CFStringRef;
+    pub static kCFErrorDescriptionKey: CFStringRef;
+    pub static kCFErrorUnderlyingErrorKey: CFStringRef;
+    pub static kCFErrorURLKey: CFStringRef;
+    pub static kCFErrorFilePathKey: CFStringRef;
+
+    /* Creating a CFError */
+    pub fn CFErrorCreate(
+        allocator: CFAllocatorRef,
+        domain: CFErrorDomain,
+        code: CFIndex,
+        userInfo: CFDictionaryRef,
+    ) -> CFErrorRef;
+    //pub fn CFErrorCreateWithUserInfoKeysAndValues
+
+    /* Getting Information About an Error */
+    pub fn CFErrorGetDomain(err: CFErrorRef) -> CFStringRef;
+    pub fn CFErrorGetCode(err: CFErrorRef) -> CFIndex;
+    pub fn CFErrorCopyUserInfo(err: CFErrorRef) -> CFDictionaryRef;
+
+--- src/file_security.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+#[cfg(feature = "mac_os_10_8_features")]
+use crate::base::CFOptionFlags;
+use crate::base::{Boolean, CFAllocatorRef, CFTypeID};
+use crate::uuid::CFUUIDRef;
+
+#[repr(C)]
+pub struct __CFFileSecurity(c_void);
+pub type CFFileSecurityRef = *mut __CFFileSecurity;
+
+#[cfg(feature = "mac_os_10_8_features")]
+pub type CFFileSecurityClearOptions = CFOptionFlags;
+#[cfg(feature = "mac_os_10_8_features")]
+pub const kCFFileSecurityClearOwner: CFFileSecurityClearOptions = 1 << 0;
+#[cfg(feature = "mac_os_10_8_features")]
+pub const kCFFileSecurityClearGroup: CFFileSecurityClearOptions = 1 << 1;
+#[cfg(feature = "mac_os_10_8_features")]
+pub const kCFFileSecurityClearMode: CFFileSecurityClearOptions = 1 << 2;
+#[cfg(feature = "mac_os_10_8_features")]
+pub const kCFFileSecurityClearOwnerUUID: CFFileSecurityClearOptions = 1 << 3;
+#[cfg(feature = "mac_os_10_8_features")]
+pub const kCFFileSecurityClearGroupUUID: CFFileSecurityClearOptions = 1 << 4;
+#[cfg(feature = "mac_os_10_8_features")]
+pub const kCFFileSecurityClearAccessControlList: CFFileSecurityClearOptions = 1 << 5;
+
+extern "C" {
+    /*
+     * CFFileSecurity.h
+     */
+    pub fn CFFileSecurityGetTypeID() -> CFTypeID;
+    pub fn CFFileSecurityCreate(allocator: CFAllocatorRef) -> CFFileSecurityRef;
+    pub fn CFFileSecurityCreateCopy(
+        allocator: CFAllocatorRef,
+        fileSec: CFFileSecurityRef,
+    ) -> CFFileSecurityRef;
+    pub fn CFFileSecurityCopyOwnerUUID(
+        fileSec: CFFileSecurityRef,
+        ownerUUID: *mut CFUUIDRef,
+    ) -> Boolean;
+    pub fn CFFileSecuritySetOwnerUUID(fileSec: CFFileSecurityRef, ownerUUID: CFUUIDRef) -> Boolean;
+    pub fn CFFileSecurityCopyGroupUUID(
+        fileSec: CFFileSecurityRef,
+        groupUUID: *mut CFUUIDRef,
+    ) -> Boolean;
+    pub fn CFFileSecuritySetGroupUUID(fileSec: CFFileSecurityRef, groupUUID: CFUUIDRef) -> Boolean;
+
+--- src/filedescriptor.rs ---
+// Copyright 2013-2015 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::{c_int, c_void};
+
+use crate::base::{Boolean, CFAllocatorRef, CFIndex, CFOptionFlags, CFTypeID};
+use crate::runloop::CFRunLoopSourceRef;
+use crate::string::CFStringRef;
+
+pub type CFFileDescriptorNativeDescriptor = c_int;
+
+#[repr(C)]
+pub struct __CFFileDescriptor(c_void);
+
+pub type CFFileDescriptorRef = *mut __CFFileDescriptor;
+
+/* Callback Reason Types */
+pub const kCFFileDescriptorReadCallBack: CFOptionFlags = 1 << 0;
+pub const kCFFileDescriptorWriteCallBack: CFOptionFlags = 1 << 1;
+
+pub type CFFileDescriptorCallBack =
+    extern "C" fn(f: CFFileDescriptorRef, callBackTypes: CFOptionFlags, info: *mut c_void);
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct CFFileDescriptorContext {
+    pub version: CFIndex,
+    pub info: *mut c_void,
+    pub retain: Option<extern "C" fn(info: *const c_void) -> *const c_void>,
+    pub release: Option<extern "C" fn(info: *const c_void)>,
+    pub copyDescription: Option<extern "C" fn(info: *const c_void) -> CFStringRef>,
+}
+
+extern "C" {
+    /*
+     * CFFileDescriptor.h
+     */
+
+    /* Creating a CFFileDescriptor */
+    pub fn CFFileDescriptorCreate(
+        allocator: CFAllocatorRef,
+        fd: CFFileDescriptorNativeDescriptor,
+        closeOnInvalidate: Boolean,
+        callout: CFFileDescriptorCallBack,
+        context: *const CFFileDescriptorContext,
+    ) -> CFFileDescriptorRef;
+
+    /* Getting Information About a File Descriptor */
+    pub fn CFFileDescriptorGetNativeDescriptor(
+
+--- src/lib.rs ---
+// Copyright 2013-2015 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+#![allow(
+    non_snake_case,
+    non_camel_case_types,
+    non_upper_case_globals,
+    improper_ctypes
+)]
+#![cfg_attr(
+    all(feature = "mac_os_10_7_support", feature = "mac_os_10_8_features"),
+    feature(linkage)
+)] // back-compat requires weak linkage
+
+// Link to CoreFoundation on any Apple device.
+//
+// We don't use `target_vendor` since that is going to be deprecated:
+// https://github.com/rust-lang/lang-team/issues/102
+#[cfg_attr(
+    all(
+        any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "tvos",
+            target_os = "watchos",
+            target_os = "visionos"
+        ),
+        feature = "link"
+    ),
+    link(name = "CoreFoundation", kind = "framework")
+)]
+extern "C" {}
+
+pub mod array;
+pub mod attributed_string;
+pub mod bag;
+pub mod base;
+pub mod binary_heap;
+pub mod bit_vector;
+pub mod bundle;
+pub mod calendar;
+pub mod characterset;
+pub mod data;
+pub mod date;
+pub mod date_formatter;
+pub mod dictionary;
+pub mod error;
+pub mod file_security;
+pub mod filedescriptor;
+pub mod locale;
+
+--- src/locale.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::array::CFArrayRef;
+use crate::base::{CFAllocatorRef, CFIndex, CFTypeID, CFTypeRef, LangCode, RegionCode};
+use crate::dictionary::CFDictionaryRef;
+use crate::notification_center::CFNotificationName;
+use crate::string::CFStringRef;
+use std::os::raw::c_void;
+
+#[repr(C)]
+pub struct __CFLocale(c_void);
+pub type CFLocaleRef = *const __CFLocale;
+
+pub type CFLocaleIdentifier = CFStringRef;
+pub type CFLocaleKey = CFStringRef;
+pub type CFCalendarIdentifier = CFStringRef;
+pub type CFLocaleLanguageDirection = CFIndex;
+
+pub const kCFLocaleLanguageDirectionUnknown: CFLocaleLanguageDirection = 0;
+pub const kCFLocaleLanguageDirectionLeftToRight: CFLocaleLanguageDirection = 1;
+pub const kCFLocaleLanguageDirectionRightToLeft: CFLocaleLanguageDirection = 2;
+pub const kCFLocaleLanguageDirectionTopToBottom: CFLocaleLanguageDirection = 3;
+pub const kCFLocaleLanguageDirectionBottomToTop: CFLocaleLanguageDirection = 4;
+
+extern "C" {
+    /*
+     * CFLocale.h
+     */
+
+    /* Locale Change Notification */
+    pub static kCFLocaleCurrentLocaleDidChangeNotification: CFNotificationName;
+
+    /* Locale Property Keys */
+    pub static kCFLocaleIdentifier: CFLocaleKey;
+    pub static kCFLocaleLanguageCode: CFLocaleKey;
+    pub static kCFLocaleCountryCode: CFLocaleKey;
+    pub static kCFLocaleScriptCode: CFLocaleKey;
+    pub static kCFLocaleVariantCode: CFLocaleKey;
+
+    pub static kCFLocaleExemplarCharacterSet: CFLocaleKey;
+    pub static kCFLocaleCalendarIdentifier: CFLocaleKey;
+    pub static kCFLocaleCalendar: CFLocaleKey;
+    pub static kCFLocaleCollationIdentifier: CFLocaleKey;
+    pub static kCFLocaleUsesMetricSystem: CFLocaleKey;
+    pub static kCFLocaleMeasurementSystem: CFLocaleKey;
+    pub static kCFLocaleDecimalSeparator: CFLocaleKey;
+    pub static kCFLocaleGroupingSeparator: CFLocaleKey;
+    pub static kCFLocaleCurrencySymbol: CFLocaleKey;
+
+--- src/mach_port.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::base::{mach_port_t, Boolean};
+pub use crate::base::{CFAllocatorRef, CFIndex, CFTypeID};
+use crate::runloop::CFRunLoopSourceRef;
+use crate::string::CFStringRef;
+use std::os::raw::c_void;
+
+#[repr(C)]
+pub struct __CFMachPort(c_void);
+pub type CFMachPortRef = *mut __CFMachPort;
+
+pub type CFMachPortCallBack =
+    extern "C" fn(port: CFMachPortRef, msg: *mut c_void, size: CFIndex, info: *mut c_void);
+pub type CFMachPortInvalidationCallBack = extern "C" fn(port: CFMachPortRef, info: *mut c_void);
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CFMachPortContext {
+    pub version: CFIndex,
+    pub info: *mut c_void,
+    pub retain: extern "C" fn(info: *const c_void) -> *const c_void,
+    pub release: extern "C" fn(info: *const c_void),
+    pub copyDescription: extern "C" fn(info: *const c_void) -> CFStringRef,
+}
+
+extern "C" {
+    /*
+     * CFMachPort.h
+     */
+
+    /* Creating a CFMachPort Object */
+    pub fn CFMachPortCreate(
+        allocator: CFAllocatorRef,
+        callout: CFMachPortCallBack,
+        context: *mut CFMachPortContext,
+        shouldFreeInfo: *mut Boolean,
+    ) -> CFMachPortRef;
+    pub fn CFMachPortCreateWithPort(
+        allocator: CFAllocatorRef,
+        portNum: mach_port_t,
+        callout: CFMachPortCallBack,
+        context: *mut CFMachPortContext,
+        shouldFreeInfo: *mut Boolean,
+    ) -> CFMachPortRef;
+
+    /* Configuring a CFMachPort Object */
+    pub fn CFMachPortInvalidate(port: CFMachPortRef);
+
+--- src/messageport.rs ---
+// Copyright 2013-2015 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::base::{Boolean, CFAllocatorRef, CFIndex, CFTypeID, SInt32};
+use crate::data::CFDataRef;
+use crate::date::CFTimeInterval;
+use crate::runloop::CFRunLoopSourceRef;
+use crate::string::CFStringRef;
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct CFMessagePortContext {
+    pub version: CFIndex,
+    pub info: *mut c_void,
+    pub retain: Option<unsafe extern "C" fn(info: *const c_void) -> *const c_void>,
+    pub release: Option<unsafe extern "C" fn(info: *const c_void)>,
+    pub copyDescription: Option<unsafe extern "C" fn(info: *const c_void) -> CFStringRef>,
+}
+
+pub type CFMessagePortCallBack = Option<
+    unsafe extern "C" fn(
+        local: CFMessagePortRef,
+        msgid: i32,
+        data: CFDataRef,
+        info: *mut c_void,
+    ) -> CFDataRef,
+>;
+
+pub type CFMessagePortInvalidationCallBack =
+    Option<unsafe extern "C" fn(ms: CFMessagePortRef, info: *mut c_void)>;
+
+/* CFMessagePortSendRequest Error Codes */
+pub const kCFMessagePortSuccess: SInt32 = 0;
+pub const kCFMessagePortSendTimeout: SInt32 = -1;
+pub const kCFMessagePortReceiveTimeout: SInt32 = -2;
+pub const kCFMessagePortIsInvalid: SInt32 = -3;
+pub const kCFMessagePortTransportError: SInt32 = -4;
+pub const kCFMessagePortBecameInvalidError: SInt32 = -5;
+
+#[repr(C)]
+pub struct __CFMessagePort(c_void);
+pub type CFMessagePortRef = *mut __CFMessagePort;
+
+extern "C" {
+    /*
+     * CFMessagePort.h
+     */
+
+--- src/notification_center.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::base::{Boolean, CFIndex, CFOptionFlags, CFTypeID};
+use crate::dictionary::CFDictionaryRef;
+use crate::string::CFStringRef;
+
+#[repr(C)]
+pub struct __CFNotificationCenter(c_void);
+
+pub type CFNotificationCenterRef = *mut __CFNotificationCenter;
+
+pub type CFNotificationName = CFStringRef;
+pub type CFNotificationCallback = extern "C" fn(
+    center: CFNotificationCenterRef,
+    observer: *mut c_void,
+    name: CFNotificationName,
+    object: *const c_void,
+    userInfo: CFDictionaryRef,
+);
+pub type CFNotificationSuspensionBehavior = CFIndex;
+
+pub const CFNotificationSuspensionBehaviorDrop: CFNotificationSuspensionBehavior = 1;
+pub const CFNotificationSuspensionBehaviorCoalesce: CFNotificationSuspensionBehavior = 2;
+pub const CFNotificationSuspensionBehaviorHold: CFNotificationSuspensionBehavior = 3;
+pub const CFNotificationSuspensionBehaviorDeliverImmediately: CFNotificationSuspensionBehavior = 4;
+
+/* Notification Posting Options */
+pub const kCFNotificationDeliverImmediately: CFOptionFlags = 1usize << 0;
+pub const kCFNotificationPostToAllSessions: CFOptionFlags = 1usize << 1;
+
+extern "C" {
+    /*
+     *  CFNotificationCenter.h
+     */
+
+    /* Accessing a Notification Center */
+    pub fn CFNotificationCenterGetDarwinNotifyCenter() -> CFNotificationCenterRef;
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    pub fn CFNotificationCenterGetDistributedCenter() -> CFNotificationCenterRef;
+    pub fn CFNotificationCenterGetLocalCenter() -> CFNotificationCenterRef;
+
+    /* Posting a Notification */
+    pub fn CFNotificationCenterPostNotification(
+        center: CFNotificationCenterRef,
+        name: CFNotificationName,
+        object: *const c_void,
+
+--- src/number_formatter.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::{c_double, c_void};
+
+use crate::base::{Boolean, CFAllocatorRef, CFIndex, CFOptionFlags, CFRange, CFTypeID, CFTypeRef};
+use crate::locale::CFLocaleRef;
+use crate::number::{CFNumberRef, CFNumberType};
+use crate::string::CFStringRef;
+
+#[repr(C)]
+pub struct __CFNumberFormatter(c_void);
+
+pub type CFNumberFormatterRef = *mut __CFNumberFormatter;
+
+pub type CFNumberFormatterKey = CFStringRef;
+pub type CFNumberFormatterStyle = CFIndex;
+pub type CFNumberFormatterOptionFlags = CFOptionFlags;
+pub type CFNumberFormatterRoundingMode = CFIndex;
+pub type CFNumberFormatterPadPosition = CFIndex;
+
+/* Number Formatter Styles */
+pub const kCFNumberFormatterNoStyle: CFNumberFormatterStyle = 0;
+pub const kCFNumberFormatterDecimalStyle: CFNumberFormatterStyle = 1;
+pub const kCFNumberFormatterCurrencyStyle: CFNumberFormatterStyle = 2;
+pub const kCFNumberFormatterPercentStyle: CFNumberFormatterStyle = 3;
+pub const kCFNumberFormatterScientificStyle: CFNumberFormatterStyle = 4;
+pub const kCFNumberFormatterSpellOutStyle: CFNumberFormatterStyle = 5;
+//pub const kCFNumberFormatterOrdinalStyle: CFNumberFormatterStyle = 6; // macos(10.11)+
+//pub const kCFNumberFormatterCurrencyISOCodeStyle: CFNumberFormatterStyle = 8; // macos(10.11)+
+//pub const kCFNumberFormatterCurrencyPluralStyle: CFNumberFormatterStyle = 9; // macos(10.11)+
+//pub const kCFNumberFormatterCurrencyAccountingStyle: CFNumberFormatterStyle = 10; // macos(10.11)+
+
+/* Number Format Options */
+pub const kCFNumberFormatterParseIntegersOnly: CFNumberFormatterOptionFlags = 1;
+
+/* CFNumberFormatterRoundingMode */
+pub const kCFNumberFormatterRoundCeiling: CFNumberFormatterRoundingMode = 0;
+pub const kCFNumberFormatterRoundFloor: CFNumberFormatterRoundingMode = 1;
+pub const kCFNumberFormatterRoundDown: CFNumberFormatterRoundingMode = 2;
+pub const kCFNumberFormatterRoundUp: CFNumberFormatterRoundingMode = 3;
+pub const kCFNumberFormatterRoundHalfEven: CFNumberFormatterRoundingMode = 4;
+pub const kCFNumberFormatterRoundHalfDown: CFNumberFormatterRoundingMode = 5;
+pub const kCFNumberFormatterRoundHalfUp: CFNumberFormatterRoundingMode = 6;
+
+/* Padding Positions */
+pub const kCFNumberFormatterPadBeforePrefix: CFNumberFormatterPadPosition = 0;
+pub const kCFNumberFormatterPadAfterPrefix: CFNumberFormatterPadPosition = 1;
+pub const kCFNumberFormatterPadBeforeSuffix: CFNumberFormatterPadPosition = 2;
+
+--- src/number.rs ---
+// Copyright 2013-2015 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::base::{Boolean, CFAllocatorRef, CFComparisonResult, CFIndex, CFTypeID};
+
+#[repr(C)]
+pub struct __CFBoolean(c_void);
+
+pub type CFBooleanRef = *const __CFBoolean;
+
+pub type CFNumberType = u32;
+
+// members of enum CFNumberType
+pub const kCFNumberSInt8Type: CFNumberType = 1;
+pub const kCFNumberSInt16Type: CFNumberType = 2;
+pub const kCFNumberSInt32Type: CFNumberType = 3;
+pub const kCFNumberSInt64Type: CFNumberType = 4;
+pub const kCFNumberFloat32Type: CFNumberType = 5;
+pub const kCFNumberFloat64Type: CFNumberType = 6;
+pub const kCFNumberCharType: CFNumberType = 7;
+pub const kCFNumberShortType: CFNumberType = 8;
+pub const kCFNumberIntType: CFNumberType = 9;
+pub const kCFNumberLongType: CFNumberType = 10;
+pub const kCFNumberLongLongType: CFNumberType = 11;
+pub const kCFNumberFloatType: CFNumberType = 12;
+pub const kCFNumberDoubleType: CFNumberType = 13;
+pub const kCFNumberCFIndexType: CFNumberType = 14;
+pub const kCFNumberNSIntegerType: CFNumberType = 15;
+pub const kCFNumberCGFloatType: CFNumberType = 16;
+pub const kCFNumberMaxType: CFNumberType = 16;
+
+// This is an enum due to zero-sized types warnings.
+// For more details see https://github.com/rust-lang/rust/issues/27303
+pub enum __CFNumber {}
+
+pub type CFNumberRef = *const __CFNumber;
+
+extern "C" {
+    /*
+     * CFNumber.h
+     */
+    pub static kCFBooleanTrue: CFBooleanRef;
+    pub static kCFBooleanFalse: CFBooleanRef;
+    pub static kCFNumberPositiveInfinity: CFNumberRef;
+    pub static kCFNumberNegativeInfinity: CFNumberRef;
+    pub static kCFNumberNaN: CFNumberRef;
+
+
+--- src/plugin.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::array::CFArrayRef;
+use crate::base::{Boolean, CFAllocatorRef, CFIndex, CFTypeID};
+use crate::bundle::{CFBundleRef, CFPlugInRef};
+use crate::string::CFStringRef;
+use crate::url::CFURLRef;
+use crate::uuid::CFUUIDRef;
+
+#[repr(C)]
+pub struct __CFPlugInInstance(c_void);
+pub type CFPlugInInstanceRef = *mut __CFPlugInInstance;
+
+pub type CFPlugInDynamicRegisterFunction = extern "C" fn(plugIn: CFPlugInRef);
+pub type CFPlugInUnloadFunction = extern "C" fn(plugIn: CFPlugInRef);
+pub type CFPlugInFactoryFunction =
+    extern "C" fn(allocator: CFAllocatorRef, typeUUID: CFUUIDRef) -> *mut c_void;
+
+pub type CFPlugInInstanceGetInterfaceFunction = extern "C" fn(
+    instance: CFPlugInInstanceRef,
+    interfaceName: CFStringRef,
+    ftbl: *mut *mut c_void,
+) -> Boolean;
+pub type CFPlugInInstanceDeallocateInstanceDataFunction = extern "C" fn(instanceData: *mut c_void);
+
+extern "C" {
+    /*
+     * CFPlugIn.h
+     */
+
+    /* CFPlugIn */
+    /* Information Property List Keys */
+    pub static kCFPlugInDynamicRegistrationKey: CFStringRef;
+    pub static kCFPlugInDynamicRegisterFunctionKey: CFStringRef;
+    pub static kCFPlugInUnloadFunctionKey: CFStringRef;
+    pub static kCFPlugInFactoriesKey: CFStringRef;
+    pub static kCFPlugInTypesKey: CFStringRef;
+
+    /* Creating Plug-ins */
+    pub fn CFPlugInCreate(allocator: CFAllocatorRef, plugInURL: CFURLRef) -> CFPlugInRef;
+    pub fn CFPlugInInstanceCreate(
+        allocator: CFAllocatorRef,
+        factoryUUID: CFUUIDRef,
+        typeUUID: CFUUIDRef,
+    ) -> *mut c_void;
+
+
+--- src/preferences.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::array::CFArrayRef;
+use crate::base::{Boolean, CFIndex};
+use crate::dictionary::CFDictionaryRef;
+use crate::propertylist::CFPropertyListRef;
+use crate::string::CFStringRef;
+
+extern "C" {
+    /*
+     * CFPreferences.h
+     */
+    /* Application, Host, and User Keys */
+    pub static kCFPreferencesAnyApplication: CFStringRef;
+    pub static kCFPreferencesCurrentApplication: CFStringRef;
+    pub static kCFPreferencesAnyHost: CFStringRef;
+    pub static kCFPreferencesCurrentHost: CFStringRef;
+    pub static kCFPreferencesAnyUser: CFStringRef;
+    pub static kCFPreferencesCurrentUser: CFStringRef;
+
+    /* Getting Preference Values */
+    pub fn CFPreferencesCopyAppValue(
+        key: CFStringRef,
+        applicationID: CFStringRef,
+    ) -> CFPropertyListRef;
+    pub fn CFPreferencesCopyKeyList(
+        applicationID: CFStringRef,
+        userName: CFStringRef,
+        hostName: CFStringRef,
+    ) -> CFArrayRef;
+    pub fn CFPreferencesCopyMultiple(
+        keysToFetch: CFArrayRef,
+        applicationID: CFStringRef,
+        userName: CFStringRef,
+        hostName: CFStringRef,
+    ) -> CFDictionaryRef;
+    pub fn CFPreferencesCopyValue(
+        key: CFStringRef,
+        applicationID: CFStringRef,
+        userName: CFStringRef,
+        hostName: CFStringRef,
+    ) -> CFPropertyListRef;
+    pub fn CFPreferencesGetAppBooleanValue(
+        key: CFStringRef,
+        applicationID: CFStringRef,
+        keyExistsAndHasValidFormat: *mut Boolean,
+    ) -> Boolean;
+    pub fn CFPreferencesGetAppIntegerValue(
+
+--- src/propertylist.rs ---
+// Copyright 2013-2015 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::base::{Boolean, CFAllocatorRef, CFIndex, CFOptionFlags, CFTypeRef};
+use crate::data::CFDataRef;
+use crate::error::CFErrorRef;
+use crate::stream::{CFReadStreamRef, CFWriteStreamRef};
+use crate::string::CFStringRef;
+
+pub type CFPropertyListRef = CFTypeRef;
+
+pub type CFPropertyListFormat = CFIndex;
+pub const kCFPropertyListOpenStepFormat: CFPropertyListFormat = 1;
+pub const kCFPropertyListXMLFormat_v1_0: CFPropertyListFormat = 100;
+pub const kCFPropertyListBinaryFormat_v1_0: CFPropertyListFormat = 200;
+
+pub type CFPropertyListMutabilityOptions = CFOptionFlags;
+pub const kCFPropertyListImmutable: CFPropertyListMutabilityOptions = 0;
+pub const kCFPropertyListMutableContainers: CFPropertyListMutabilityOptions = 1;
+pub const kCFPropertyListMutableContainersAndLeaves: CFPropertyListMutabilityOptions = 2;
+
+/* Reading and Writing Error Codes */
+pub const kCFPropertyListReadCorruptError: CFIndex = 3840;
+pub const kCFPropertyListReadUnknownVersionError: CFIndex = 3841;
+pub const kCFPropertyListReadStreamError: CFIndex = 3842;
+pub const kCFPropertyListWriteStreamError: CFIndex = 3851;
+
+extern "C" {
+    /*
+     * CFPropertyList.h
+     */
+
+    /* Creating a Property List */
+    pub fn CFPropertyListCreateWithData(
+        allocator: CFAllocatorRef,
+        data: CFDataRef,
+        options: CFPropertyListMutabilityOptions,
+        format: *mut CFPropertyListFormat,
+        error: *mut CFErrorRef,
+    ) -> CFPropertyListRef;
+    pub fn CFPropertyListCreateWithStream(
+        allocator: CFAllocatorRef,
+        stream: CFReadStreamRef,
+        streamLength: CFIndex,
+        options: CFOptionFlags,
+        format: *mut CFPropertyListFormat,
+        error: *mut CFErrorRef,
+    ) -> CFPropertyListRef;
+    pub fn CFPropertyListCreateDeepCopy(
+
+--- src/runloop.rs ---
+// Copyright 2013-2015 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::array::CFArrayRef;
+use crate::base::{
+    mach_port_t, Boolean, CFAllocatorRef, CFHashCode, CFIndex, CFOptionFlags, CFTypeID,
+};
+use crate::date::{CFAbsoluteTime, CFTimeInterval};
+use crate::string::CFStringRef;
+
+#[repr(C)]
+pub struct __CFRunLoop(c_void);
+
+pub type CFRunLoopRef = *mut __CFRunLoop;
+
+#[repr(C)]
+pub struct __CFRunLoopSource(c_void);
+
+pub type CFRunLoopSourceRef = *mut __CFRunLoopSource;
+
+#[repr(C)]
+pub struct __CFRunLoopObserver(c_void);
+
+pub type CFRunLoopObserverRef = *mut __CFRunLoopObserver;
+
+// Reasons for CFRunLoopRunInMode() to Return
+pub const kCFRunLoopRunFinished: i32 = 1;
+pub const kCFRunLoopRunStopped: i32 = 2;
+pub const kCFRunLoopRunTimedOut: i32 = 3;
+pub const kCFRunLoopRunHandledSource: i32 = 4;
+
+// Run Loop Observer Activities
+//typedef CF_OPTIONS(CFOptionFlags, CFRunLoopActivity) {
+pub type CFRunLoopActivity = CFOptionFlags;
+pub const kCFRunLoopEntry: CFOptionFlags = 1 << 0;
+pub const kCFRunLoopBeforeTimers: CFOptionFlags = 1 << 1;
+pub const kCFRunLoopBeforeSources: CFOptionFlags = 1 << 2;
+pub const kCFRunLoopBeforeWaiting: CFOptionFlags = 1 << 5;
+pub const kCFRunLoopAfterWaiting: CFOptionFlags = 1 << 6;
+pub const kCFRunLoopExit: CFOptionFlags = 1 << 7;
+pub const kCFRunLoopAllActivities: CFOptionFlags = 0x0FFFFFFF;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct CFRunLoopSourceContext {
+    pub version: CFIndex,
+    pub info: *mut c_void,
+
+--- src/set.rs ---
+// Copyright 2013-2015 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::base::{Boolean, CFAllocatorRef, CFHashCode, CFIndex, CFTypeID};
+use crate::string::CFStringRef;
+
+pub type CFSetApplierFunction = extern "C" fn(value: *const c_void, context: *const c_void);
+pub type CFSetRetainCallBack =
+    extern "C" fn(allocator: CFAllocatorRef, value: *const c_void) -> *const c_void;
+pub type CFSetReleaseCallBack = extern "C" fn(allocator: CFAllocatorRef, value: *const c_void);
+pub type CFSetCopyDescriptionCallBack = extern "C" fn(value: *const c_void) -> CFStringRef;
+pub type CFSetEqualCallBack =
+    extern "C" fn(value1: *const c_void, value2: *const c_void) -> Boolean;
+pub type CFSetHashCallBack = extern "C" fn(value: *const c_void) -> CFHashCode;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CFSetCallBacks {
+    pub version: CFIndex,
+    pub retain: CFSetRetainCallBack,
+    pub release: CFSetReleaseCallBack,
+    pub copyDescription: CFSetCopyDescriptionCallBack,
+    pub equal: CFSetEqualCallBack,
+    pub hash: CFSetHashCallBack,
+}
+
+#[repr(C)]
+pub struct __CFSet(c_void);
+
+pub type CFSetRef = *const __CFSet;
+pub type CFMutableSetRef = *mut __CFSet;
+
+extern "C" {
+    /*
+     * CFSet.h
+     */
+
+    pub static kCFTypeSetCallBacks: CFSetCallBacks;
+    pub static kCFCopyStringSetCallBacks: CFSetCallBacks;
+
+    /* CFSet */
+    /* Creating Sets */
+    pub fn CFSetCreate(
+        allocator: CFAllocatorRef,
+        values: *const *const c_void,
+        numValues: CFIndex,
+        callBacks: *const CFSetCallBacks,
+
+--- src/socket.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::base::{Boolean, CFAllocatorRef, CFIndex, CFOptionFlags, CFTypeID, SInt32, UInt16};
+use crate::data::CFDataRef;
+use crate::date::CFTimeInterval;
+use crate::propertylist::CFPropertyListRef;
+use crate::runloop::CFRunLoopSourceRef;
+use crate::string::CFStringRef;
+
+#[repr(C)]
+pub struct __CFSocket(c_void);
+
+pub type CFSocketRef = *mut __CFSocket;
+
+pub type CFSocketError = CFIndex;
+pub type CFSocketCallBackType = CFOptionFlags;
+pub type CFSocketCallBack = extern "C" fn(
+    s: CFSocketRef,
+    _type: CFSocketCallBackType,
+    address: CFDataRef,
+    cdata: *const c_void,
+    info: *mut c_void,
+);
+#[cfg(not(target_os = "windows"))]
+pub type CFSocketNativeHandle = std::os::raw::c_int;
+#[cfg(target_os = "windows")]
+pub type CFSocketNativeHandle = std::os::raw::c_ulong;
+
+pub const kCFSocketSuccess: CFSocketError = 0;
+pub const kCFSocketError: CFSocketError = -1;
+pub const kCFSocketTimeout: CFSocketError = -2;
+
+#[derive(Debug, Copy, Clone)]
+#[repr(C)]
+pub struct CFSocketSignature {
+    pub protocolFamily: SInt32,
+    pub socketType: SInt32,
+    pub protocol: SInt32,
+    pub address: CFDataRef,
+}
+
+#[derive(Debug, Copy, Clone)]
+#[repr(C)]
+pub struct CFSocketContext {
+    pub version: CFIndex,
+    pub info: *mut c_void,
+
+--- src/stream.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::{c_int, c_void};
+
+use crate::base::{
+    Boolean, CFAllocatorRef, CFIndex, CFOptionFlags, CFTypeID, CFTypeRef, SInt32, UInt32, UInt8,
+};
+use crate::error::CFErrorRef;
+use crate::runloop::CFRunLoopRef;
+use crate::socket::{CFSocketNativeHandle, CFSocketSignature};
+use crate::string::CFStringRef;
+use crate::url::CFURLRef;
+
+#[repr(C)]
+pub struct __CFReadStream(c_void);
+
+#[repr(C)]
+pub struct __CFWriteStream(c_void);
+
+pub type CFReadStreamRef = *mut __CFReadStream;
+pub type CFWriteStreamRef = *mut __CFWriteStream;
+pub type CFStreamPropertyKey = CFStringRef;
+pub type CFStreamStatus = CFIndex;
+pub type CFStreamEventType = CFOptionFlags;
+pub type CFStreamErrorDomain = CFIndex;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CFStreamError {
+    pub domain: CFIndex,
+    pub error: SInt32,
+}
+
+/* CFStreamStatus: Constants that describe the status of a stream */
+pub const kCFStreamStatusNotOpen: CFStreamStatus = 0;
+pub const kCFStreamStatusOpening: CFStreamStatus = 1;
+pub const kCFStreamStatusOpen: CFStreamStatus = 2;
+pub const kCFStreamStatusReading: CFStreamStatus = 3;
+pub const kCFStreamStatusWriting: CFStreamStatus = 4;
+pub const kCFStreamStatusAtEnd: CFStreamStatus = 5;
+pub const kCFStreamStatusClosed: CFStreamStatus = 6;
+pub const kCFStreamStatusError: CFStreamStatus = 7;
+
+// deprecated
+pub const kCFStreamErrorDomainCustom: CFStreamErrorDomain = -1;
+pub const kCFStreamErrorDomainPOSIX: CFStreamErrorDomain = 1;
+pub const kCFStreamErrorDomainMacOSStatus: CFStreamErrorDomain = 2;
+
+
+--- src/string_tokenizer.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::array::CFMutableArrayRef;
+use crate::base::{CFAllocatorRef, CFIndex, CFOptionFlags, CFRange, CFTypeID, CFTypeRef};
+use crate::locale::CFLocaleRef;
+use crate::string::CFStringRef;
+
+#[repr(C)]
+pub struct __CFStringTokenizer(c_void);
+pub type CFStringTokenizerRef = *mut __CFStringTokenizer;
+
+pub type CFStringTokenizerTokenType = CFOptionFlags;
+
+pub const kCFStringTokenizerTokenNone: CFStringTokenizerTokenType = 0;
+pub const kCFStringTokenizerTokenNormal: CFStringTokenizerTokenType = 1 << 0;
+pub const kCFStringTokenizerTokenHasSubTokensMask: CFStringTokenizerTokenType = 1 << 1;
+pub const kCFStringTokenizerTokenHasDerivedSubTokensMask: CFStringTokenizerTokenType = 1 << 2;
+pub const kCFStringTokenizerTokenHasHasNumbersMask: CFStringTokenizerTokenType = 1 << 3;
+pub const kCFStringTokenizerTokenHasNonLettersMask: CFStringTokenizerTokenType = 1 << 4;
+pub const kCFStringTokenizerTokenIsCJWordMask: CFStringTokenizerTokenType = 1 << 5;
+
+/* Tokenization Modifiers */
+pub const kCFStringTokenizerUnitWord: CFOptionFlags = 0;
+pub const kCFStringTokenizerUnitSentence: CFOptionFlags = 1;
+pub const kCFStringTokenizerUnitParagraph: CFOptionFlags = 2;
+pub const kCFStringTokenizerUnitLineBreak: CFOptionFlags = 3;
+pub const kCFStringTokenizerUnitWordBoundary: CFOptionFlags = 4;
+pub const kCFStringTokenizerAttributeLatinTranscription: CFOptionFlags = 1 << 16;
+pub const kCFStringTokenizerAttributeLanguage: CFOptionFlags = 1 << 17;
+
+extern "C" {
+    /*
+     * CFStringTokenizer.h
+     */
+
+    /* Creating a Tokenizer */
+    pub fn CFStringTokenizerCreate(
+        alloc: CFAllocatorRef,
+        string: CFStringRef,
+        range: CFRange,
+        options: CFOptionFlags,
+        locale: CFLocaleRef,
+    ) -> CFStringTokenizerRef;
+
+    /* Setting the String */
+    pub fn CFStringTokenizerSetString(
+
+--- src/string.rs ---
+// Copyright 2013-2015 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::array::CFArrayRef;
+use crate::base::{
+    Boolean, CFAllocatorRef, CFComparisonResult, CFIndex, CFOptionFlags, CFRange, CFTypeID,
+    ConstStr255Param, ConstStringPtr, SInt32, StringPtr, UInt32, UInt8, UTF32Char,
+};
+use crate::characterset::CFCharacterSetRef;
+use crate::data::CFDataRef;
+use crate::dictionary::CFDictionaryRef;
+use crate::locale::CFLocaleRef;
+use std::os::raw::{c_char, c_double, c_ulong, c_ushort, c_void};
+
+pub type CFStringCompareFlags = CFOptionFlags;
+pub const kCFCompareCaseInsensitive: CFStringCompareFlags = 1;
+pub const kCFCompareBackwards: CFStringCompareFlags = 4;
+pub const kCFCompareAnchored: CFStringCompareFlags = 8;
+pub const kCFCompareNonliteral: CFStringCompareFlags = 16;
+pub const kCFCompareLocalized: CFStringCompareFlags = 32;
+pub const kCFCompareNumerically: CFStringCompareFlags = 64;
+pub const kCFCompareDiacriticInsensitive: CFStringCompareFlags = 128;
+pub const kCFCompareWidthInsensitive: CFStringCompareFlags = 256;
+pub const kCFCompareForcedOrdering: CFStringCompareFlags = 512;
+
+pub type CFStringEncoding = UInt32;
+pub type UniChar = c_ushort;
+
+// macOS built-in encodings.
+
+pub const kCFStringEncodingMacRoman: CFStringEncoding = 0;
+pub const kCFStringEncodingWindowsLatin1: CFStringEncoding = 0x0500;
+pub const kCFStringEncodingISOLatin1: CFStringEncoding = 0x0201;
+pub const kCFStringEncodingNextStepLatin: CFStringEncoding = 0x0B01;
+pub const kCFStringEncodingASCII: CFStringEncoding = 0x0600;
+pub const kCFStringEncodingUnicode: CFStringEncoding = 0x0100;
+pub const kCFStringEncodingUTF8: CFStringEncoding = 0x08000100;
+pub const kCFStringEncodingNonLossyASCII: CFStringEncoding = 0x0BFF;
+
+pub const kCFStringEncodingUTF16: CFStringEncoding = 0x0100;
+pub const kCFStringEncodingUTF16BE: CFStringEncoding = 0x10000100;
+pub const kCFStringEncodingUTF16LE: CFStringEncoding = 0x14000100;
+pub const kCFStringEncodingUTF32: CFStringEncoding = 0x0c000100;
+pub const kCFStringEncodingUTF32BE: CFStringEncoding = 0x18000100;
+pub const kCFStringEncodingUTF32LE: CFStringEncoding = 0x1c000100;
+
+// CFStringEncodingExt.h
+// External encodings, except those defined above.
+pub const kCFStringEncodingMacJapanese: CFStringEncoding = 1;
+
+--- src/timezone.rs ---
+// Copyright 2013-2015 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::array::CFArrayRef;
+use crate::base::{Boolean, CFAllocatorRef, CFIndex, CFTypeID};
+use crate::data::CFDataRef;
+use crate::date::{CFAbsoluteTime, CFTimeInterval};
+use crate::dictionary::CFDictionaryRef;
+use crate::locale::CFLocaleRef;
+use crate::notification_center::CFNotificationName;
+use crate::string::CFStringRef;
+
+#[repr(C)]
+pub struct __CFTimeZone(c_void);
+
+pub type CFTimeZoneRef = *const __CFTimeZone;
+pub type CFTimeZoneNameStyle = CFIndex;
+
+/* Constants to specify styles for time zone names */
+pub const kCFTimeZoneNameStyleStandard: CFTimeZoneNameStyle = 0;
+pub const kCFTimeZoneNameStyleShortStandard: CFTimeZoneNameStyle = 1;
+pub const kCFTimeZoneNameStyleDaylightSaving: CFTimeZoneNameStyle = 2;
+pub const kCFTimeZoneNameStyleShortDaylightSaving: CFTimeZoneNameStyle = 3;
+pub const kCFTimeZoneNameStyleGeneric: CFTimeZoneNameStyle = 4;
+pub const kCFTimeZoneNameStyleShortGeneric: CFTimeZoneNameStyle = 5;
+
+extern "C" {
+    /*
+     * CFTimeZone.h
+     */
+
+    pub static kCFTimeZoneSystemTimeZoneDidChangeNotification: CFNotificationName;
+
+    /* Creating a Time Zone */
+    pub fn CFTimeZoneCreate(
+        allocator: CFAllocatorRef,
+        name: CFStringRef,
+        data: CFDataRef,
+    ) -> CFTimeZoneRef;
+    pub fn CFTimeZoneCreateWithName(
+        allocator: CFAllocatorRef,
+        name: CFStringRef,
+        tryAbbrev: Boolean,
+    ) -> CFTimeZoneRef;
+    pub fn CFTimeZoneCreateWithTimeIntervalFromGMT(
+        allocator: CFAllocatorRef,
+        interval: CFTimeInterval,
+
+--- src/tree.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::base::{CFAllocatorRef, CFComparatorFunction, CFIndex, CFTypeID};
+use crate::string::CFStringRef;
+
+#[repr(C)]
+pub struct __CFTree(c_void);
+pub type CFTreeRef = *mut __CFTree;
+
+pub type CFTreeRetainCallBack = extern "C" fn(info: *const c_void) -> *const c_void;
+pub type CFTreeReleaseCallBack = extern "C" fn(info: *const c_void);
+pub type CFTreeCopyDescriptionCallBack = extern "C" fn(info: *const c_void) -> CFStringRef;
+pub type CFTreeApplierFunction = extern "C" fn(value: *const c_void, context: *mut c_void);
+
+#[repr(C)]
+pub struct CFTreeContext {
+    pub version: CFIndex,
+    pub info: *mut c_void,
+    pub retain: CFTreeRetainCallBack,
+    pub release: CFTreeReleaseCallBack,
+    pub copyDescription: CFTreeCopyDescriptionCallBack,
+}
+
+extern "C" {
+    /*
+     * CFTree.h
+     */
+    /* Creating Trees */
+    pub fn CFTreeCreate(allocator: CFAllocatorRef, context: *const CFTreeContext) -> CFTreeRef;
+
+    /* Modifying a Tree */
+    pub fn CFTreeAppendChild(tree: CFTreeRef, newChild: CFTreeRef);
+    pub fn CFTreeInsertSibling(tree: CFTreeRef, newSibling: CFTreeRef);
+    pub fn CFTreeRemoveAllChildren(tree: CFTreeRef);
+    pub fn CFTreePrependChild(tree: CFTreeRef, newChild: CFTreeRef);
+    pub fn CFTreeRemove(tree: CFTreeRef);
+    pub fn CFTreeSetContext(tree: CFTreeRef, context: *const CFTreeContext);
+
+    /* Sorting a Tree */
+    pub fn CFTreeSortChildren(
+        tree: CFTreeRef,
+        comparator: CFComparatorFunction,
+        context: *mut c_void,
+    );
+
+    /* Examining a Tree */
+
+--- src/url_enumerator.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::array::CFArrayRef;
+use crate::base::{Boolean, CFAllocatorRef, CFIndex, CFOptionFlags, CFTypeID};
+use crate::error::CFErrorRef;
+use crate::url::CFURLRef;
+
+#[repr(C)]
+pub struct __CFURLEnumerator(c_void);
+
+pub type CFURLEnumeratorRef = *mut __CFURLEnumerator;
+
+pub type CFURLEnumeratorOptions = CFOptionFlags;
+pub const kCFURLEnumeratorDefaultBehavior: CFURLEnumeratorOptions = 0;
+pub const kCFURLEnumeratorDescendRecursively: CFURLEnumeratorOptions = 1 << 0;
+pub const kCFURLEnumeratorSkipInvisibles: CFURLEnumeratorOptions = 1 << 1;
+pub const kCFURLEnumeratorGenerateFileReferenceURLs: CFURLEnumeratorOptions = 1 << 2;
+pub const kCFURLEnumeratorSkipPackageContents: CFURLEnumeratorOptions = 1 << 3;
+pub const kCFURLEnumeratorIncludeDirectoriesPreOrder: CFURLEnumeratorOptions = 1 << 4;
+pub const kCFURLEnumeratorIncludeDirectoriesPostOrder: CFURLEnumeratorOptions = 1 << 5;
+//pub const kCFURLEnumeratorGenerateRelativePathURLs = 1UL << 6; // macos(10.15)+
+
+pub type CFURLEnumeratorResult = CFIndex;
+pub const kCFURLEnumeratorSuccess: CFURLEnumeratorOptions = 1;
+pub const kCFURLEnumeratorEnd: CFURLEnumeratorOptions = 2;
+pub const kCFURLEnumeratorError: CFURLEnumeratorOptions = 3;
+pub const kCFURLEnumeratorDirectoryPostOrderSuccess: CFURLEnumeratorOptions = 4;
+
+extern "C" {
+    /*
+     * CFURLEnumerator.h
+     */
+    pub fn CFURLEnumeratorGetTypeID() -> CFTypeID;
+    pub fn CFURLEnumeratorCreateForDirectoryURL(
+        alloc: CFAllocatorRef,
+        directoryURL: CFURLRef,
+        option: CFURLEnumeratorOptions,
+        propertyKeys: CFArrayRef,
+    ) -> CFURLEnumeratorRef;
+    pub fn CFURLEnumeratorCreateForMountedVolumes(
+        alloc: CFAllocatorRef,
+        option: CFURLEnumeratorOptions,
+        propertyKeys: CFArrayRef,
+    ) -> CFURLEnumeratorRef;
+    pub fn CFURLEnumeratorGetNextURL(
+        enumerator: CFURLEnumeratorRef,
+
+--- src/url.rs ---
+// Copyright 2013-2015 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::array::CFArrayRef;
+use crate::base::{
+    Boolean, CFAllocatorRef, CFIndex, CFOptionFlags, CFRange, CFTypeID, CFTypeRef, SInt32,
+};
+use crate::data::CFDataRef;
+use crate::dictionary::CFDictionaryRef;
+use crate::error::CFErrorRef;
+use crate::string::{CFStringEncoding, CFStringRef};
+
+#[repr(C)]
+pub struct __CFURL(c_void);
+
+pub type CFURLRef = *const __CFURL;
+
+pub type CFURLBookmarkCreationOptions = CFOptionFlags;
+pub type CFURLBookmarkResolutionOptions = CFOptionFlags;
+pub type CFURLBookmarkFileCreationOptions = CFOptionFlags;
+
+pub type CFURLPathStyle = CFIndex;
+
+/* typedef CF_ENUM(CFIndex, CFURLPathStyle) */
+pub const kCFURLPOSIXPathStyle: CFURLPathStyle = 0;
+pub const kCFURLHFSPathStyle: CFURLPathStyle = 1;
+pub const kCFURLWindowsPathStyle: CFURLPathStyle = 2;
+
+/* Bookmark Data Creation Options */
+pub static kCFURLBookmarkCreationMinimalBookmarkMask: CFURLBookmarkCreationOptions =
+    (1u32 << 9) as usize;
+pub static kCFURLBookmarkCreationSuitableForBookmarkFile: CFURLBookmarkCreationOptions =
+    (1u32 << 10) as usize;
+
+#[cfg(target_os = "macos")]
+pub static kCFURLBookmarkCreationWithSecurityScope: CFURLBookmarkCreationOptions =
+    (1u32 << 11) as usize;
+
+#[cfg(target_os = "macos")]
+pub static kCFURLBookmarkCreationSecurityScopeAllowOnlyReadAccess: CFURLBookmarkCreationOptions =
+    (1u32 << 12) as usize;
+
+pub static kCFURLBookmarkCreationWithoutImplicitSecurityScope: CFURLBookmarkCreationOptions =
+    (1u32 << 29) as usize;
+
+pub static kCFURLBookmarkCreationPreferFileIDResolutionMask: CFURLBookmarkCreationOptions =
+    (1u32 << 8) as usize; // deprecated
+
+--- src/user_notification.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::base::{CFAllocatorRef, CFIndex, CFOptionFlags, CFTypeID, SInt32};
+use crate::date::CFTimeInterval;
+use crate::dictionary::CFDictionaryRef;
+use crate::runloop::CFRunLoopSourceRef;
+use crate::string::CFStringRef;
+use crate::url::CFURLRef;
+
+#[repr(C)]
+pub struct __CFUserNotification(c_void);
+
+pub type CFUserNotificationCallBack =
+    extern "C" fn(userNotification: CFUserNotificationRef, responseFlags: CFOptionFlags);
+pub type CFUserNotificationRef = *mut __CFUserNotification;
+
+/* Alert Levels */
+pub const kCFUserNotificationStopAlertLevel: CFOptionFlags = 0;
+pub const kCFUserNotificationNoteAlertLevel: CFOptionFlags = 1;
+pub const kCFUserNotificationCautionAlertLevel: CFOptionFlags = 2;
+pub const kCFUserNotificationPlainAlertLevel: CFOptionFlags = 3;
+
+/* Response Codes */
+pub const kCFUserNotificationDefaultResponse: CFOptionFlags = 0;
+pub const kCFUserNotificationAlternateResponse: CFOptionFlags = 1;
+pub const kCFUserNotificationOtherResponse: CFOptionFlags = 2;
+pub const kCFUserNotificationCancelResponse: CFOptionFlags = 3;
+
+/* Button Flags */
+pub const kCFUserNotificationNoDefaultButtonFlag: CFOptionFlags = 1usize << 5;
+pub const kCFUserNotificationUseRadioButtonsFlag: CFOptionFlags = 1usize << 6;
+
+#[inline(always)]
+pub fn CFUserNotificationCheckBoxChecked(i: CFIndex) -> CFOptionFlags {
+    (1u32 << (8 + i)) as CFOptionFlags
+}
+
+#[inline(always)]
+pub fn CFUserNotificationSecureTextField(i: CFIndex) -> CFOptionFlags {
+    (1u32 << (16 + i)) as CFOptionFlags
+}
+
+#[inline(always)]
+pub fn CFUserNotificationPopUpSelection(n: CFIndex) -> CFOptionFlags {
+    (n << 24) as CFOptionFlags
+}
+
+--- src/uuid.rs ---
+// Copyright 2013-2015 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::base::{CFAllocatorRef, CFTypeID};
+use crate::string::CFStringRef;
+
+#[repr(C)]
+pub struct __CFUUID(c_void);
+
+pub type CFUUIDRef = *const __CFUUID;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct CFUUIDBytes {
+    pub byte0: u8,
+    pub byte1: u8,
+    pub byte2: u8,
+    pub byte3: u8,
+    pub byte4: u8,
+    pub byte5: u8,
+    pub byte6: u8,
+    pub byte7: u8,
+    pub byte8: u8,
+    pub byte9: u8,
+    pub byte10: u8,
+    pub byte11: u8,
+    pub byte12: u8,
+    pub byte13: u8,
+    pub byte14: u8,
+    pub byte15: u8,
+}
+
+extern "C" {
+    /*
+     * CFUUID.h
+     */
+
+    /* Creating CFUUID Objects */
+    pub fn CFUUIDCreate(allocator: CFAllocatorRef) -> CFUUIDRef;
+    pub fn CFUUIDCreateFromString(alloc: CFAllocatorRef, uuidStr: CFStringRef) -> CFUUIDRef;
+    pub fn CFUUIDCreateFromUUIDBytes(allocator: CFAllocatorRef, bytes: CFUUIDBytes) -> CFUUIDRef;
+    pub fn CFUUIDCreateWithBytes(
+        alloc: CFAllocatorRef,
+        byte0: u8,
+        byte1: u8,
+        byte2: u8,
+        byte3: u8,
+
+--- src/xml_node.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::{c_char, c_void};
+
+use crate::array::CFArrayRef;
+use crate::base::{Boolean, CFAllocatorRef, CFIndex, CFTypeID};
+use crate::dictionary::CFDictionaryRef;
+use crate::string::{CFStringEncoding, CFStringRef};
+use crate::tree::CFTreeRef;
+use crate::url::CFURLRef;
+
+#[repr(C)]
+pub struct __CFXMLNode(c_void);
+
+pub type CFXMLNodeRef = *mut __CFXMLNode;
+pub type CFXMLTreeRef = CFTreeRef;
+
+pub const kCFXMLNodeCurrentVersion: CFIndex = 1;
+
+pub type CFXMLNodeTypeCode = CFIndex;
+pub const kCFXMLNodeTypeDocument: CFXMLNodeTypeCode = 1;
+pub const kCFXMLNodeTypeElement: CFXMLNodeTypeCode = 2;
+pub const kCFXMLNodeTypeAttribute: CFXMLNodeTypeCode = 3;
+pub const kCFXMLNodeTypeProcessingInstruction: CFXMLNodeTypeCode = 4;
+pub const kCFXMLNodeTypeComment: CFXMLNodeTypeCode = 5;
+pub const kCFXMLNodeTypeText: CFXMLNodeTypeCode = 6;
+pub const kCFXMLNodeTypeCDATASection: CFXMLNodeTypeCode = 7;
+pub const kCFXMLNodeTypeDocumentFragment: CFXMLNodeTypeCode = 8;
+pub const kCFXMLNodeTypeEntity: CFXMLNodeTypeCode = 9;
+pub const kCFXMLNodeTypeEntityReference: CFXMLNodeTypeCode = 10;
+pub const kCFXMLNodeTypeDocumentType: CFXMLNodeTypeCode = 11;
+pub const kCFXMLNodeTypeWhitespace: CFXMLNodeTypeCode = 12;
+pub const kCFXMLNodeTypeNotation: CFXMLNodeTypeCode = 13;
+pub const kCFXMLNodeTypeElementTypeDeclaration: CFXMLNodeTypeCode = 14;
+pub const kCFXMLNodeTypeAttributeListDeclaration: CFXMLNodeTypeCode = 15;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct CFXMLElementInfo {
+    pub attributes: CFDictionaryRef,
+    pub attributeOrder: CFArrayRef,
+    pub isEmpty: Boolean,
+    pub _reserved: [c_char; 3],
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct CFXMLProcessingInstructionInfo {
+
+--- src/xml_parser.rs ---
+// Copyright 2023 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::os::raw::c_void;
+
+use crate::base::{Boolean, CFAllocatorRef, CFIndex, CFOptionFlags, CFTypeID};
+use crate::data::CFDataRef;
+use crate::dictionary::CFDictionaryRef;
+use crate::string::CFStringRef;
+use crate::url::CFURLRef;
+use crate::xml_node::{CFXMLExternalID, CFXMLNodeRef, CFXMLTreeRef};
+
+#[repr(C)]
+pub struct __CFXMLParser(c_void);
+
+pub type CFXMLParserRef = *mut __CFXMLParser;
+
+pub type CFXMLParserOptions = CFOptionFlags;
+pub const kCFXMLParserValidateDocument: CFXMLParserOptions = 1 << 0;
+pub const kCFXMLParserSkipMetaData: CFXMLParserOptions = 1 << 1;
+pub const kCFXMLParserReplacePhysicalEntities: CFXMLParserOptions = 1 << 2;
+pub const kCFXMLParserSkipWhitespace: CFXMLParserOptions = 1 << 3;
+pub const kCFXMLParserResolveExternalEntities: CFXMLParserOptions = 1 << 4;
+pub const kCFXMLParserAddImpliedAttributes: CFXMLParserOptions = 1 << 5;
+pub const kCFXMLParserAllOptions: CFXMLParserOptions = 0x00FFFFFF;
+pub const kCFXMLParserNoOptions: CFXMLParserOptions = 0;
+
+pub type CFXMLParserStatusCode = CFIndex;
+pub const kCFXMLStatusParseNotBegun: CFIndex = -2;
+pub const kCFXMLStatusParseInProgress: CFIndex = -1;
+pub const kCFXMLStatusParseSuccessful: CFIndex = 0;
+pub const kCFXMLErrorUnexpectedEOF: CFIndex = 1;
+pub const kCFXMLErrorUnknownEncoding: CFIndex = 2;
+pub const kCFXMLErrorEncodingConversionFailure: CFIndex = 3;
+pub const kCFXMLErrorMalformedProcessingInstruction: CFIndex = 4;
+pub const kCFXMLErrorMalformedDTD: CFIndex = 5;
+pub const kCFXMLErrorMalformedName: CFIndex = 6;
+pub const kCFXMLErrorMalformedCDSect: CFIndex = 7;
+pub const kCFXMLErrorMalformedCloseTag: CFIndex = 8;
+pub const kCFXMLErrorMalformedStartTag: CFIndex = 9;
+pub const kCFXMLErrorMalformedDocument: CFIndex = 10;
+pub const kCFXMLErrorElementlessDocument: CFIndex = 11;
+pub const kCFXMLErrorMalformedComment: CFIndex = 12;
+pub const kCFXMLErrorMalformedCharacterReference: CFIndex = 13;
+pub const kCFXMLErrorMalformedParsedCharacterData: CFIndex = 14;
+pub const kCFXMLErrorNoData: CFIndex = 15;
+
+pub type CFXMLParserCreateXMLStructureCallBack =
+    extern "C" fn(parser: CFXMLParserRef, nodeDesc: CFXMLNodeRef, info: *mut c_void) -> *mut c_void;

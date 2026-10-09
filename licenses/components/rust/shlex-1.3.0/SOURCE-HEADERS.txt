@@ -1,0 +1,113 @@
+--- src/bytes.rs ---
+// Copyright 2015 Nicholas Allegra (comex).
+// Licensed under the Apache License, Version 2.0 <https://www.apache.org/licenses/LICENSE-2.0> or
+// the MIT license <https://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+//! [`Shlex`] and friends for byte strings.
+//!
+//! This is used internally by the [outer module](crate), and may be more
+//! convenient if you are working with byte slices (`[u8]`) or types that are
+//! wrappers around bytes, such as [`OsStr`](std::ffi::OsStr):
+//!
+//! ```rust
+//! #[cfg(unix)] {
+//!     use shlex::bytes::quote;
+//!     use std::ffi::OsStr;
+//!     use std::os::unix::ffi::OsStrExt;
+//!
+//!     // `\x80` is invalid in UTF-8.
+//!     let os_str = OsStr::from_bytes(b"a\x80b c");
+//!     assert_eq!(quote(os_str.as_bytes()), &b"'a\x80b c'"[..]);
+//! }
+//! ```
+//!
+//! (On Windows, `OsStr` uses 16 bit wide characters so this will not work.)
+
+extern crate alloc;
+use alloc::vec::Vec;
+use alloc::borrow::Cow;
+#[cfg(test)]
+use alloc::vec;
+#[cfg(test)]
+use alloc::borrow::ToOwned;
+#[cfg(all(doc, not(doctest)))]
+use crate::{self as shlex, quoting_warning};
+
+use super::QuoteError;
+
+/// An iterator that takes an input byte string and splits it into the words using the same syntax as
+/// the POSIX shell.
+pub struct Shlex<'a> {
+    in_iter: core::slice::Iter<'a, u8>,
+    /// The number of newlines read so far, plus one.
+    pub line_no: usize,
+    /// An input string is erroneous if it ends while inside a quotation or right after an
+    /// unescaped backslash.  Since Iterator does not have a mechanism to return an error, if that
+    /// happens, Shlex just throws out the last token, ends the iteration, and sets 'had_error' to
+    /// true; best to check it after you're done iterating.
+    pub had_error: bool,
+}
+
+impl<'a> Shlex<'a> {
+    pub fn new(in_bytes: &'a [u8]) -> Self {
+        Shlex {
+            in_iter: in_bytes.iter(),
+            line_no: 1,
+
+--- src/lib.rs ---
+// Copyright 2015 Nicholas Allegra (comex).
+// Licensed under the Apache License, Version 2.0 <https://www.apache.org/licenses/LICENSE-2.0> or
+// the MIT license <https://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+//! Parse strings like, and escape strings for, POSIX shells.
+//!
+//! Same idea as (but implementation not directly based on) the Python shlex module.
+//!
+//! Disabling the `std` feature (which is enabled by default) will allow the crate to work in
+//! `no_std` environments, where the `alloc` crate, and a global allocator, are available.
+//!
+//! ## <span style="color:red">Warning</span>
+//!
+//! The [`try_quote`]/[`try_join`] family of APIs does not quote control characters (because they
+//! cannot be quoted portably).
+//!
+//! This is fully safe in noninteractive contexts, like shell scripts and `sh -c` arguments (or
+//! even scripts `source`d from interactive shells).
+//!
+//! But if you are quoting for human consumption, you should keep in mind that ugly inputs produce
+//! ugly outputs (which may not be copy-pastable).
+//!
+//! And if by chance you are piping the output of [`try_quote`]/[`try_join`] directly to the stdin
+//! of an interactive shell, you should stop, because control characters can lead to arbitrary
+//! command injection.
+//!
+//! For more information, and for information about more minor issues, please see [quoting_warning].
+//!
+//! ## Compatibility
+//!
+//! This crate's quoting functionality tries to be compatible with **any POSIX-compatible shell**;
+//! it's tested against `bash`, `zsh`, `dash`, Busybox `ash`, and `mksh`, plus `fish` (which is not
+//! POSIX-compatible but close enough).
+//!
+//! It also aims to be compatible with Python `shlex` and C `wordexp`.
+
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+use alloc::vec::Vec;
+use alloc::borrow::Cow;
+use alloc::string::String;
+#[cfg(test)]
+use alloc::vec;
+#[cfg(test)]
+use alloc::borrow::ToOwned;
+
+pub mod bytes;
+#[cfg(all(doc, not(doctest)))]
+#[path = "quoting_warning.md"]
+pub mod quoting_warning;
+
+/// An iterator that takes an input string and splits it into the words using the same syntax as
+/// the POSIX shell.

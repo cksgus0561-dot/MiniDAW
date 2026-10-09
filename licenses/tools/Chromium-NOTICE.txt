@@ -1,0 +1,19 @@
+Chromium-derived code in the separately built NSIS Tauri helper
+
+Copyright 2024 The Chromium Authors
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+
+The original header above is from base/win/elevation_util.cc at commit
+36e1c43ace542988d624bd1bc0813c184482d2ab. The exact associated license is
+preserved alongside this notice as Chromium-BSD.txt.
+
+nsis-tauri-utils 0.5.3 embeds nsis-process/src/lib.rs. Its run_as_user
+function explicitly identifies this Chromium implementation as its source
+("Ported from"). The Rust port remains in the supplied upstream helper source
+archive. Preserve BOTH the Tauri MIT notice and these Chromium BSD notices.
+This does not bundle the Chromium browser; WebView2 is installed separately.
+
+Original source and license:
+https://chromium.googlesource.com/chromium/src/+/36e1c43ace542988d624bd1bc0813c184482d2ab/base/win/elevation_util.cc
+https://chromium.googlesource.com/chromium/src/+/36e1c43ace542988d624bd1bc0813c184482d2ab/LICENSE

@@ -1,0 +1,831 @@
+--- src/lib.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+//! This library exposes a low-level API for creating your own efficient
+//! synchronization primitives.
+//!
+//! # The parking lot
+//!
+//! To keep synchronization primitives small, all thread queuing and suspending
+//! functionality is offloaded to the *parking lot*. The idea behind this is based
+//! on the Webkit [`WTF::ParkingLot`](https://webkit.org/blog/6161/locking-in-webkit/)
+//! class, which essentially consists of a hash table mapping of lock addresses
+//! to queues of parked (sleeping) threads. The Webkit parking lot was itself
+//! inspired by Linux [futexes](http://man7.org/linux/man-pages/man2/futex.2.html),
+//! but it is more powerful since it allows invoking callbacks while holding a
+//! queue lock.
+//!
+//! There are two main operations that can be performed on the parking lot:
+//!
+//!  - *Parking* refers to suspending the thread while simultaneously enqueuing it
+//! on a queue keyed by some address.
+//! - *Unparking* refers to dequeuing a thread from a queue keyed by some address
+//! and resuming it.
+//!
+//! See the documentation of the individual functions for more details.
+//!
+//! # Building custom synchronization primitives
+//!
+//! Building custom synchronization primitives is very simple since the parking
+//! lot takes care of all the hard parts for you. A simple example for a
+//! custom primitive would be to integrate a `Mutex` inside another data type.
+//! Since a mutex only requires 2 bits, it can share space with other data.
+//! For example, one could create an `ArcMutex` type that combines the atomic
+//! reference count and the two mutex bits in the same atomic word.
+
+#![warn(missing_docs)]
+#![warn(rust_2018_idioms)]
+#![cfg_attr(
+    all(target_env = "sgx", target_vendor = "fortanix"),
+    feature(sgx_platform)
+)]
+#![cfg_attr(
+    all(
+        feature = "nightly",
+        target_family = "wasm",
+        target_feature = "atomics"
+    ),
+    feature(stdarch_wasm_atomic_wait)
+)]
+
+mod parking_lot;
+
+--- src/parking_lot.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+use crate::thread_parker::{ThreadParker, ThreadParkerT, UnparkHandleT};
+use crate::util::UncheckedOptionExt;
+use crate::word_lock::WordLock;
+use core::{
+    cell::{Cell, UnsafeCell},
+    ptr,
+    sync::atomic::{AtomicPtr, AtomicUsize, Ordering},
+};
+use smallvec::SmallVec;
+use std::time::{Duration, Instant};
+
+// Don't use Instant on wasm32-unknown-unknown, it just panics.
+cfg_if::cfg_if! {
+    if #[cfg(all(
+        target_family = "wasm",
+        target_os = "unknown",
+        target_vendor = "unknown"
+    ))] {
+        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+        struct TimeoutInstant;
+        impl TimeoutInstant {
+            fn now() -> TimeoutInstant {
+                TimeoutInstant
+            }
+        }
+        impl core::ops::Add<Duration> for TimeoutInstant {
+            type Output = Self;
+            fn add(self, _rhs: Duration) -> Self::Output {
+                TimeoutInstant
+            }
+        }
+    } else {
+        use std::time::Instant as TimeoutInstant;
+    }
+}
+
+static NUM_THREADS: AtomicUsize = AtomicUsize::new(0);
+
+/// Holds the pointer to the currently active `HashTable`.
+///
+/// # Safety
+///
+/// Except for the initial value of null, it must always point to a valid `HashTable` instance.
+/// Any `HashTable` this global static has ever pointed to must never be freed.
+static HASHTABLE: AtomicPtr<HashTable> = AtomicPtr::new(ptr::null_mut());
+
+// Even with 3x more buckets than threads, the memory overhead per thread is
+// still only a few hundred bytes per thread.
+const LOAD_FACTOR: usize = 3;
+
+--- src/spinwait.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use crate::thread_parker;
+use core::hint::spin_loop;
+
+// Wastes some CPU time for the given number of iterations,
+// using a hint to indicate to the CPU that we are spinning.
+#[inline]
+fn cpu_relax(iterations: u32) {
+    for _ in 0..iterations {
+        spin_loop()
+    }
+}
+
+/// A counter used to perform exponential backoff in spin loops.
+#[derive(Default)]
+pub struct SpinWait {
+    counter: u32,
+}
+
+impl SpinWait {
+    /// Creates a new `SpinWait`.
+    #[inline]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Resets a `SpinWait` to its initial state.
+    #[inline]
+    pub fn reset(&mut self) {
+        self.counter = 0;
+    }
+
+    /// Spins until the sleep threshold has been reached.
+    ///
+    /// This function returns whether the sleep threshold has been reached, at
+    /// which point further spinning has diminishing returns and the thread
+    /// should be parked instead.
+    ///
+    /// The spin strategy will initially use a CPU-bound loop but will fall back
+    /// to yielding the CPU to the OS after a few iterations.
+    #[inline]
+    pub fn spin(&mut self) -> bool {
+        if self.counter >= 10 {
+            return false;
+        }
+        self.counter += 1;
+        if self.counter <= 3 {
+            cpu_relax(1 << self.counter);
+        } else {
+
+--- src/thread_parker/generic.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+//! A simple spin lock based thread parker. Used on platforms without better
+//! parking facilities available.
+
+use core::hint::spin_loop;
+use core::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::Instant;
+
+// Helper type for putting a thread to sleep until some other thread wakes it up
+pub struct ThreadParker {
+    parked: AtomicBool,
+}
+
+impl super::ThreadParkerT for ThreadParker {
+    type UnparkHandle = UnparkHandle;
+
+    const IS_CHEAP_TO_CONSTRUCT: bool = true;
+
+    #[inline]
+    fn new() -> ThreadParker {
+        ThreadParker {
+            parked: AtomicBool::new(false),
+        }
+    }
+
+    #[inline]
+    unsafe fn prepare_park(&self) {
+        self.parked.store(true, Ordering::Relaxed);
+    }
+
+    #[inline]
+    unsafe fn timed_out(&self) -> bool {
+        self.parked.load(Ordering::Relaxed) != false
+    }
+
+    #[inline]
+    unsafe fn park(&self) {
+        while self.parked.load(Ordering::Acquire) != false {
+            spin_loop();
+        }
+    }
+
+    #[inline]
+    unsafe fn park_until(&self, timeout: Instant) -> bool {
+        while self.parked.load(Ordering::Acquire) != false {
+            if Instant::now() >= timeout {
+                return false;
+            }
+
+--- src/thread_parker/linux.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use core::{
+    ptr,
+    sync::atomic::{AtomicI32, Ordering},
+};
+use libc;
+use std::thread;
+use std::time::Instant;
+
+// x32 Linux uses a non-standard type for tv_nsec in timespec.
+// See https://sourceware.org/bugzilla/show_bug.cgi?id=16437
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "32"))]
+#[allow(non_camel_case_types)]
+type tv_nsec_t = i64;
+#[cfg(not(all(target_arch = "x86_64", target_pointer_width = "32")))]
+#[allow(non_camel_case_types)]
+type tv_nsec_t = libc::c_long;
+
+fn errno() -> libc::c_int {
+    #[cfg(target_os = "linux")]
+    unsafe {
+        *libc::__errno_location()
+    }
+    #[cfg(target_os = "android")]
+    unsafe {
+        *libc::__errno()
+    }
+}
+
+// Helper type for putting a thread to sleep until some other thread wakes it up
+pub struct ThreadParker {
+    futex: AtomicI32,
+}
+
+impl super::ThreadParkerT for ThreadParker {
+    type UnparkHandle = UnparkHandle;
+
+    const IS_CHEAP_TO_CONSTRUCT: bool = true;
+
+    #[inline]
+    fn new() -> ThreadParker {
+        ThreadParker {
+            futex: AtomicI32::new(0),
+        }
+    }
+
+    #[inline]
+    unsafe fn prepare_park(&self) {
+        self.futex.store(1, Ordering::Relaxed);
+
+--- src/thread_parker/redox.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use core::{
+    ptr,
+    sync::atomic::{AtomicI32, Ordering},
+};
+use std::thread;
+use std::time::Instant;
+use syscall::{
+    call::futex,
+    data::TimeSpec,
+    error::{Error, EAGAIN, EFAULT, EINTR, ETIMEDOUT},
+    flag::{FUTEX_WAIT, FUTEX_WAKE},
+};
+
+const UNPARKED: i32 = 0;
+const PARKED: i32 = 1;
+
+// Helper type for putting a thread to sleep until some other thread wakes it up
+pub struct ThreadParker {
+    futex: AtomicI32,
+}
+
+impl super::ThreadParkerT for ThreadParker {
+    type UnparkHandle = UnparkHandle;
+
+    const IS_CHEAP_TO_CONSTRUCT: bool = true;
+
+    #[inline]
+    fn new() -> ThreadParker {
+        ThreadParker {
+            futex: AtomicI32::new(UNPARKED),
+        }
+    }
+
+    #[inline]
+    unsafe fn prepare_park(&self) {
+        self.futex.store(PARKED, Ordering::Relaxed);
+    }
+
+    #[inline]
+    unsafe fn timed_out(&self) -> bool {
+        self.futex.load(Ordering::Relaxed) != UNPARKED
+    }
+
+    #[inline]
+    unsafe fn park(&self) {
+        while self.futex.load(Ordering::Acquire) != UNPARKED {
+            self.futex_wait(None);
+        }
+
+--- src/thread_parker/sgx.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use core::sync::atomic::{AtomicBool, Ordering};
+use std::io::ErrorKind;
+use std::time::Instant;
+use std::{
+    io,
+    os::fortanix_sgx::{
+        thread::current as current_tcs,
+        usercalls::{
+            self,
+            raw::{Tcs, EV_UNPARK, WAIT_INDEFINITE},
+        },
+    },
+    thread,
+};
+
+// Helper type for putting a thread to sleep until some other thread wakes it up
+pub struct ThreadParker {
+    parked: AtomicBool,
+    tcs: Tcs,
+}
+
+impl super::ThreadParkerT for ThreadParker {
+    type UnparkHandle = UnparkHandle;
+
+    const IS_CHEAP_TO_CONSTRUCT: bool = true;
+
+    #[inline]
+    fn new() -> ThreadParker {
+        ThreadParker {
+            parked: AtomicBool::new(false),
+            tcs: current_tcs(),
+        }
+    }
+
+    #[inline]
+    unsafe fn prepare_park(&self) {
+        self.parked.store(true, Ordering::Relaxed);
+    }
+
+    #[inline]
+    unsafe fn timed_out(&self) -> bool {
+        self.parked.load(Ordering::Relaxed)
+    }
+
+    #[inline]
+    unsafe fn park(&self) {
+        while self.parked.load(Ordering::Acquire) {
+            let result = usercalls::wait(EV_UNPARK, WAIT_INDEFINITE);
+
+--- src/thread_parker/unix.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+#[cfg(target_vendor = "apple")]
+use core::ptr;
+use core::{
+    cell::{Cell, UnsafeCell},
+    mem::MaybeUninit,
+};
+use libc;
+use std::time::Instant;
+use std::{thread, time::Duration};
+
+// x32 Linux uses a non-standard type for tv_nsec in timespec.
+// See https://sourceware.org/bugzilla/show_bug.cgi?id=16437
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "32"))]
+#[allow(non_camel_case_types)]
+type tv_nsec_t = i64;
+#[cfg(not(all(target_arch = "x86_64", target_pointer_width = "32")))]
+#[allow(non_camel_case_types)]
+type tv_nsec_t = libc::c_long;
+
+// Helper type for putting a thread to sleep until some other thread wakes it up
+pub struct ThreadParker {
+    should_park: Cell<bool>,
+    mutex: UnsafeCell<libc::pthread_mutex_t>,
+    condvar: UnsafeCell<libc::pthread_cond_t>,
+    initialized: Cell<bool>,
+}
+
+impl super::ThreadParkerT for ThreadParker {
+    type UnparkHandle = UnparkHandle;
+
+    const IS_CHEAP_TO_CONSTRUCT: bool = false;
+
+    #[inline]
+    fn new() -> ThreadParker {
+        ThreadParker {
+            should_park: Cell::new(false),
+            mutex: UnsafeCell::new(libc::PTHREAD_MUTEX_INITIALIZER),
+            condvar: UnsafeCell::new(libc::PTHREAD_COND_INITIALIZER),
+            initialized: Cell::new(false),
+        }
+    }
+
+    #[inline]
+    unsafe fn prepare_park(&self) {
+        self.should_park.set(true);
+        if !self.initialized.get() {
+            self.init();
+            self.initialized.set(true);
+
+--- src/thread_parker/wasm_atomic.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use core::{
+    arch::wasm32,
+    sync::atomic::{AtomicI32, Ordering},
+};
+use std::time::{Duration, Instant};
+use std::{convert::TryFrom, thread};
+
+// Helper type for putting a thread to sleep until some other thread wakes it up
+pub struct ThreadParker {
+    parked: AtomicI32,
+}
+
+const UNPARKED: i32 = 0;
+const PARKED: i32 = 1;
+
+impl super::ThreadParkerT for ThreadParker {
+    type UnparkHandle = UnparkHandle;
+
+    const IS_CHEAP_TO_CONSTRUCT: bool = true;
+
+    #[inline]
+    fn new() -> ThreadParker {
+        ThreadParker {
+            parked: AtomicI32::new(UNPARKED),
+        }
+    }
+
+    #[inline]
+    unsafe fn prepare_park(&self) {
+        self.parked.store(PARKED, Ordering::Relaxed);
+    }
+
+    #[inline]
+    unsafe fn timed_out(&self) -> bool {
+        self.parked.load(Ordering::Relaxed) == PARKED
+    }
+
+    #[inline]
+    unsafe fn park(&self) {
+        while self.parked.load(Ordering::Acquire) == PARKED {
+            let r = wasm32::memory_atomic_wait32(self.ptr(), PARKED, -1);
+            // we should have either woken up (0) or got a not-equal due to a
+            // race (1). We should never time out (2)
+            debug_assert!(r == 0 || r == 1);
+        }
+    }
+
+    #[inline]
+
+--- src/thread_parker/wasm.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+//! The wasm platform can't park when atomic support is not available.
+//! So this ThreadParker just panics on any attempt to park.
+
+use std::thread;
+use std::time::Instant;
+
+pub struct ThreadParker(());
+
+impl super::ThreadParkerT for ThreadParker {
+    type UnparkHandle = UnparkHandle;
+
+    const IS_CHEAP_TO_CONSTRUCT: bool = true;
+
+    fn new() -> ThreadParker {
+        ThreadParker(())
+    }
+
+    unsafe fn prepare_park(&self) {
+        panic!("Parking not supported on this platform");
+    }
+
+    unsafe fn timed_out(&self) -> bool {
+        panic!("Parking not supported on this platform");
+    }
+
+    unsafe fn park(&self) {
+        panic!("Parking not supported on this platform");
+    }
+
+    unsafe fn park_until(&self, _timeout: Instant) -> bool {
+        panic!("Parking not supported on this platform");
+    }
+
+    unsafe fn unpark_lock(&self) -> UnparkHandle {
+        panic!("Parking not supported on this platform");
+    }
+}
+
+pub struct UnparkHandle(());
+
+impl super::UnparkHandleT for UnparkHandle {
+    unsafe fn unpark(self) {}
+}
+
+pub fn thread_yield() {
+    thread::yield_now();
+}
+
+
+--- src/thread_parker/windows/keyed_event.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use core::{
+    ffi,
+    mem::{self, MaybeUninit},
+    ptr,
+};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Instant;
+
+const STATE_UNPARKED: usize = 0;
+const STATE_PARKED: usize = 1;
+const STATE_TIMED_OUT: usize = 2;
+
+use super::bindings::*;
+
+#[allow(non_snake_case)]
+pub struct KeyedEvent {
+    handle: HANDLE,
+    NtReleaseKeyedEvent: extern "system" fn(
+        EventHandle: HANDLE,
+        Key: *mut ffi::c_void,
+        Alertable: BOOLEAN,
+        Timeout: *mut i64,
+    ) -> NTSTATUS,
+    NtWaitForKeyedEvent: extern "system" fn(
+        EventHandle: HANDLE,
+        Key: *mut ffi::c_void,
+        Alertable: BOOLEAN,
+        Timeout: *mut i64,
+    ) -> NTSTATUS,
+}
+
+impl KeyedEvent {
+    #[inline]
+    unsafe fn wait_for(&self, key: *mut ffi::c_void, timeout: *mut i64) -> NTSTATUS {
+        (self.NtWaitForKeyedEvent)(self.handle, key, false.into(), timeout)
+    }
+
+    #[inline]
+    unsafe fn release(&self, key: *mut ffi::c_void) -> NTSTATUS {
+        (self.NtReleaseKeyedEvent)(self.handle, key, false.into(), ptr::null_mut())
+    }
+
+    #[allow(non_snake_case)]
+    pub fn create() -> Option<KeyedEvent> {
+        let ntdll = unsafe { GetModuleHandleA(b"ntdll.dll\0".as_ptr()) };
+        if ntdll == 0 {
+            return None;
+        }
+
+--- src/thread_parker/windows/mod.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use core::{
+    ptr,
+    sync::atomic::{AtomicPtr, AtomicUsize, Ordering},
+};
+use std::time::Instant;
+
+mod bindings;
+mod keyed_event;
+mod waitaddress;
+
+enum Backend {
+    KeyedEvent(keyed_event::KeyedEvent),
+    WaitAddress(waitaddress::WaitAddress),
+}
+
+static BACKEND: AtomicPtr<Backend> = AtomicPtr::new(ptr::null_mut());
+
+impl Backend {
+    #[inline]
+    fn get() -> &'static Backend {
+        // Fast path: use the existing object
+        let backend_ptr = BACKEND.load(Ordering::Acquire);
+        if !backend_ptr.is_null() {
+            return unsafe { &*backend_ptr };
+        };
+
+        Backend::create()
+    }
+
+    #[cold]
+    fn create() -> &'static Backend {
+        // Try to create a new Backend
+        let backend;
+        if let Some(waitaddress) = waitaddress::WaitAddress::create() {
+            backend = Backend::WaitAddress(waitaddress);
+        } else if let Some(keyed_event) = keyed_event::KeyedEvent::create() {
+            backend = Backend::KeyedEvent(keyed_event);
+        } else {
+            panic!(
+                "parking_lot requires either NT Keyed Events (WinXP+) or \
+                 WaitOnAddress/WakeByAddress (Win8+)"
+            );
+        }
+
+        // Try to set our new Backend as the global one
+        let backend_ptr = Box::into_raw(Box::new(backend));
+        match BACKEND.compare_exchange(
+            ptr::null_mut(),
+
+--- src/thread_parker/windows/waitaddress.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use core::{
+    mem,
+    sync::atomic::{AtomicUsize, Ordering},
+};
+use std::{ffi, time::Instant};
+
+use super::bindings::*;
+
+#[allow(non_snake_case)]
+pub struct WaitAddress {
+    WaitOnAddress: WaitOnAddress,
+    WakeByAddressSingle: WakeByAddressSingle,
+}
+
+impl WaitAddress {
+    #[allow(non_snake_case)]
+    pub fn create() -> Option<WaitAddress> {
+        let synch_dll = unsafe { GetModuleHandleA(b"api-ms-win-core-synch-l1-2-0.dll\0".as_ptr()) };
+        if synch_dll == 0 {
+            return None;
+        }
+
+        let WaitOnAddress = unsafe { GetProcAddress(synch_dll, b"WaitOnAddress\0".as_ptr())? };
+        let WakeByAddressSingle =
+            unsafe { GetProcAddress(synch_dll, b"WakeByAddressSingle\0".as_ptr())? };
+
+        Some(WaitAddress {
+            WaitOnAddress: unsafe { mem::transmute(WaitOnAddress) },
+            WakeByAddressSingle: unsafe { mem::transmute(WakeByAddressSingle) },
+        })
+    }
+
+    #[inline]
+    pub fn prepare_park(&'static self, key: &AtomicUsize) {
+        key.store(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn timed_out(&'static self, key: &AtomicUsize) -> bool {
+        key.load(Ordering::Relaxed) != 0
+    }
+
+    #[inline]
+    pub fn park(&'static self, key: &AtomicUsize) {
+        while key.load(Ordering::Acquire) != 0 {
+            let r = self.wait_on_address(key, INFINITE);
+            debug_assert!(r == true.into());
+        }
+
+--- src/util.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+// Option::unchecked_unwrap
+pub trait UncheckedOptionExt<T> {
+    unsafe fn unchecked_unwrap(self) -> T;
+}
+
+impl<T> UncheckedOptionExt<T> for Option<T> {
+    #[inline]
+    unsafe fn unchecked_unwrap(self) -> T {
+        match self {
+            Some(x) => x,
+            None => unreachable(),
+        }
+    }
+}
+
+// hint::unreachable_unchecked() in release mode
+#[inline]
+unsafe fn unreachable() -> ! {
+    if cfg!(debug_assertions) {
+        unreachable!();
+    } else {
+        core::hint::unreachable_unchecked()
+    }
+}
+
+
+--- src/word_lock.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use crate::spinwait::SpinWait;
+use crate::thread_parker::{ThreadParker, ThreadParkerT, UnparkHandleT};
+use core::{
+    cell::Cell,
+    mem, ptr,
+    sync::atomic::{fence, AtomicUsize, Ordering},
+};
+
+struct ThreadData {
+    parker: ThreadParker,
+
+    // Linked list of threads in the queue. The queue is split into two parts:
+    // the processed part and the unprocessed part. When new nodes are added to
+    // the list, they only have the next pointer set, and queue_tail is null.
+    //
+    // Nodes are processed with the queue lock held, which consists of setting
+    // the prev pointer for each node and setting the queue_tail pointer on the
+    // first processed node of the list.
+    //
+    // This setup allows nodes to be added to the queue without a lock, while
+    // still allowing O(1) removal of nodes from the processed part of the list.
+    // The only cost is the O(n) processing, but this only needs to be done
+    // once for each node, and therefore isn't too expensive.
+    queue_tail: Cell<*const ThreadData>,
+    prev: Cell<*const ThreadData>,
+    next: Cell<*const ThreadData>,
+}
+
+impl ThreadData {
+    #[inline]
+    fn new() -> ThreadData {
+        assert!(mem::align_of::<ThreadData>() > !QUEUE_MASK);
+        ThreadData {
+            parker: ThreadParker::new(),
+            queue_tail: Cell::new(ptr::null()),
+            prev: Cell::new(ptr::null()),
+            next: Cell::new(ptr::null()),
+        }
+    }
+}
+
+// Invokes the given closure with a reference to the current thread `ThreadData`.
+#[inline]
+fn with_thread_data<T>(f: impl FnOnce(&ThreadData) -> T) -> T {
+    let mut thread_data_ptr = ptr::null();
+    // If ThreadData is expensive to construct, then we want to use a cached
+    // version in thread-local storage if possible.
+    if !ThreadParker::IS_CHEAP_TO_CONSTRUCT {

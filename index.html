@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>MiniDAW</title>
+  </head>
+  <body>
+    <main class="app-shell" id="app">
+      <header class="topbar">
+        <div class="brand"><span class="brand-mark" aria-hidden="true">▥</span><h1>MiniDAW</h1><span class="tag">AUDIO WORKSPACE</span></div>
+        <div class="header-controls">
+          <button id="open-app-settings" title="언어 및 단축키 설정">앱 설정</button><button id="open-audio-settings">오디오 설정</button>
+          <div class="output-state"><i id="output-led"></i><span id="output-label">출력 장치 연결 중</span><span id="version"></span></div>
+          <label class="font-setting" for="font-scale">글꼴 크기 <select id="font-scale" aria-label="UI 글꼴 크기"><option value="90">90%</option><option value="95">95%</option><option value="100">100%</option><option value="105">105%</option><option value="110" selected>110% (기본)</option><option value="115">115%</option><option value="120">120%</option><option value="125">125%</option></select></label>
+        </div>
+      </header>
+      <nav class="project-bar" aria-label="프로젝트">
+        <details id="file-menu"><summary>파일</summary><div class="file-menu-content">
+          <button id="project-new">새 프로젝트 <span>Ctrl+N</span></button>
+          <button id="project-open">프로젝트 열기 <span>Ctrl+Shift+O</span></button>
+          <button id="project-save">저장 <span>Ctrl+S</span></button>
+          <button id="midi-import">MIDI 가져오기…</button><button id="midi-export">MIDI 내보내기…</button><button id="project-save-as">다른 이름으로 저장 <span>Ctrl+Shift+S</span></button>
+          <button id="audio-export">Export Audio Mixdown…</button>
+          <button id="project-close">종료</button>
+          <h3>최근 프로젝트</h3><div id="recent-projects"></div>
+        </div></details>
+        <details class="file-menu"><summary>편집</summary><div id="edit-menu-items" class="file-menu-items"></div></details>
+        <details class="file-menu"><summary>오디오</summary><div id="audio-menu-items" class="file-menu-items"></div></details>
+        <strong id="project-name">Untitled</strong><div id="panel-switches" aria-label="패널 표시"></div><button id="project-assets" title="프로젝트 미디어 패널">미디어 0</button>
+      </nav>
+      <p id="project-notice" role="status" hidden></p>
+      <section class="transport-bar" aria-label="재생 제어">
+        <button id="open-file" class="open-button" title="오디오 가져오기 (Ctrl+O)">＋ 오디오 가져오기</button>
+        <div class="separator"></div>
+        <div class="transport-buttons">
+          <button id="play-pause" class="play-button toggle-button" aria-label="재생" aria-pressed="false" title="재생 (Space)" disabled>▶ 재생</button>
+          <button id="stop" class="icon-button" aria-label="정지" title="정지 · 처음으로 (Num 0)" disabled>■</button>
+        </div>
+        <div class="clock"><span id="position">00:00.000</span><span class="duration">/ <span id="duration">00:00.000</span></span></div>
+        <span id="transport-state" class="state-pill">정지</span>
+        <div class="transport-hint">SPACE <span>재생 / 일시정지</span></div>
+      </section>
+      <div id="error" class="error-banner" role="alert" hidden><span id="error-text"></span><button id="dismiss-error" aria-label="오류 닫기">×</button></div>
+      <section class="computer-midi" aria-label="컴퓨터 키보드 MIDI 연주">
+        <button id="computer-midi-toggle" aria-pressed="false">컴퓨터 건반 OFF</button>
+        <button id="computer-midi-down" aria-label="컴퓨터 건반 옥타브 내리기">−</button><span id="computer-midi-octave">C3–C4</span><button id="computer-midi-up" aria-label="컴퓨터 건반 옥타브 올리기">＋</button>
+        <span id="computer-midi-track"></span><small id="computer-midi-state"></small>
+        <details><summary>건반 배치</summary><div class="computer-midi-help"><p>흰 건반: A S D F G H J K · 검은 건반: W E T Y U</p><p>C D E F G A B C · C♯ D♯ F♯ G♯ A♯</p><p>연주 ON: 건반 키 우선 · Ctrl/Alt/Shift 조합과 Space는 기존 단축키 · 입력칸에서는 연주 안 함</p><p>옥타브는 −/＋ 버튼으로 변경 · 누르고 있는 음은 키를 놓을 때까지 유지 · 녹음하지 않음</p></div></details>
+      </section>
+      <div class="workspace" id="workspace">
+        <section id="panel-media" class="workspace-panel media-panel" aria-labelledby="project-media-title">
+          <header class="workspace-panel-heading"><h2 id="project-media-title">Media / Browser</h2><button data-panel-close aria-label="Media 패널 닫기">×</button></header>
+          <div class="panel-content" id="project-media"><button id="media-import">＋ 오디오 가져오기</button><p class="metric-note">프로젝트 미디어 · Clip 선택 / 원본 재연결</p><div id="project-asset-list"></div>
+            <details class="source-info"><summary>현재 재생 정보</summary><h3 id="file-name">오디오 없음</h3><span id="file-badge">WAV / MP3 / FLAC</span><div class="file-meta"><span id="file-rate">— Hz</span><span id="file-channels">— 채널</span><span id="file-length">—</span><span id="file-frames">PCM · f32</span></div></details>
+          </div>
+        </section>
+        <section id="panel-arrangement" class="workspace-panel arrangement-panel" aria-labelledby="arrangement-title">
+          <header class="workspace-panel-heading"><h2 id="arrangement-title">Arrangement / Timeline</h2><span id="track-count"></span><button data-panel-close aria-label="Arrangement 패널 닫기">×</button></header>
+<div class="edit-toolbar"><button id="audio-track-add">＋ Audio Track</button><button id="midi-track-add">＋ MIDI Track</button><button id="piano-open" disabled>Piano Roll 열기</button><div id="edit-tools"></div><label title="Audio Event 경계 드래그 방식"><select id="audio-sizing" aria-label="Audio Sizing"><option value="trim">Sizing: Trim</option><option value="stretch">Sizing: Time Stretch</option></select></label><span id="edit-selection">Clip 0개 선택</span><label>Start <input id="clip-start" type="text" spellcheck="false" aria-label="Clip Start" disabled></label><span class="tempo-sync-controls"><label title="Source BPM을 지정한 뒤 활성화 · OFF는 현재 길이 유지 · ON의 경계 드래그는 Trim"><input id="clip-tempo-sync" type="checkbox" disabled> Tempo Sync</label><label>Source BPM <input id="clip-source-bpm" type="number" min="1" max="1000" step="0.01" disabled></label><small id="clip-tempo-status" role="status"></small></span><label title="원본 대비 길이 비율 · 50–200% · Pitch 유지">Stretch <input id="clip-stretch" type="number" min="50" max="200" step="any" aria-label="Time Stretch Percent" disabled> %</label><label title="Snap과 무관한 목표 길이 · 원본 sample 단위 반올림">Length <input id="clip-stretch-length" type="number" min="0" step="any" aria-label="Time Stretch Length" disabled> s</label><label title="Transpose · -12–12 semitone · 재생 길이 유지">Pitch <input id="clip-pitch" type="number" min="-12" max="12" step="1" aria-label="Pitch Semitones" disabled> st</label><label title="Fine Tune · -100–100 cent · 1 cent 단위">Fine <input id="clip-pitch-cents" type="number" min="-100" max="100" step="1" aria-label="Pitch Cents" disabled> ct</label><button id="clip-pitch-reset" disabled title="Pitch만 0으로 복원 · Stretch 유지">Pitch 0</button><small id="clip-pitch-status" role="status"></small><small id="clip-stretch-status" role="status"></small><small id="clip-start-message" role="status"></small><output id="edit-position" title="Bar.Beat.Sixteenth.Tick · PPQ 960000">위치 1.1.1.000000</output><label>Gain <input id="clip-gain" type="number" min="-144" max="144" step="0.1" value="0"> dB</label><label>Fade In <input id="fade-in-ms" type="number" min="0" step="1" value="0"> ms</label><label>Out <input id="fade-out-ms" type="number" min="0" step="1" value="0"> ms</label><select id="fade-curve" aria-label="Fade 곡선"><option value="cosine">Cosine</option><option value="linear">Linear</option></select><button id="apply-fade">Fade 적용</button></div>
+          <div class="musical-toolbar"><label>BPM <input id="project-bpm" type="number" min="1" max="1000" step="0.1" value="120"></label><small id="tempo-prepare" role="status" hidden></small><label>박자 <input id="signature-numerator" type="number" min="1" max="255" step="1" value="4"> / <select id="signature-denominator" aria-label="박자 분모"><option>1</option><option>2</option><option selected>4</option><option>8</option><option>16</option><option>32</option><option>64</option><option>128</option></select></label><button id="snap-toggle" aria-pressed="false" title="Grid Snap (J)">Snap · J</button><label>Grid <select id="grid-type"><option value="bar">Bar</option><option value="beat" selected>Beat</option><option value="2">1/2</option><option value="4">1/4</option><option value="8">1/8</option><option value="16">1/16</option><option value="32">1/32</option><option value="64">1/64</option><option value="128">1/128</option></select></label><button id="cycle-toggle" aria-pressed="false">⟳ Cycle</button><label>L <input id="cycle-start" aria-label="Loop Start" value="1.1.0" title="마디.박.tick (PPQ 960000)"></label><label>R <input id="cycle-end" aria-label="Loop End" value="2.1.0" title="마디.박.tick (PPQ 960000)"></label></div><div class="wave-toolbar"><label class="ruler-format-setting">Ruler <select id="ruler-format" aria-label="Ruler 표시 형식"><option value="bars">Bars+Beats</option><option value="seconds">Seconds</option></select></label><span id="view-range" class="range-label">00:00.000 — 00:10.000</span><div class="zoom-controls"><button id="zoom-out" aria-label="파형 축소" title="축소 (-)">−</button><span id="zoom-value">1.0×</span><button id="zoom-in" aria-label="파형 확대" title="확대 (+)">＋</button><button id="zoom-fit" title="전체 Timeline 보기">전체</button></div></div>
+          <div id="drop-area" class="timeline-viewport">
+            <div id="track-scroll" class="timeline-scroll"><div class="timeline-content"><div id="track-list" aria-label="Track 목록"></div><div id="clip-layer" aria-label="Audio Clip 편집 영역"><div id="edit-range" hidden></div></div></div></div>
+            <div class="track-ruler">TRACK / EVENT</div>
+            <div id="timeline-overlay"><div id="cycle-ruler" title="Loop 구간: 위쪽 띠를 드래그 · L/R 경계 조절"><div id="cycle-range"><span data-locator="start">L</span><span data-locator="end">R</span></div></div><canvas id="waveform" aria-label="Timeline ruler. 누른 채 드래그하고 놓으면 해당 위치로 이동합니다."></canvas><div id="playhead" class="playhead" aria-hidden="true" hidden><span class="playhead-handle"></span></div></div>
+            <div id="empty" class="empty-state"><h3>오디오를 가져와 시작하세요</h3><p>파일을 놓거나 오디오 가져오기를 선택하세요</p><span>WAV · MP3 · FLAC</span></div>
+            <div id="drop-overlay" class="drop-overlay" hidden>여기에 놓아 오디오 열기</div>
+            <div id="loading" class="loading-overlay" role="status" hidden><span class="spinner"></span>오디오 재생 준비 중…</div>
+          </div>
+          <div class="scroll-row"><span>↔</span><input id="scroll" type="range" min="0" max="0" value="0" aria-label="파형 수평 스크롤" disabled /></div>
+          <div class="editor-footer"><span>Ruler: 위치 이동 · Ctrl+휠: 확대 · Shift+휠: 좌우 · 휠: Track 스크롤</span><span id="cache-status">파일을 기다리는 중</span></div>
+        </section>
+        <section id="panel-performance" class="workspace-panel performance-panel" aria-labelledby="performance-title">
+          <header class="workspace-panel-heading"><h2 id="performance-title">Performance</h2><button data-panel-close aria-label="Performance 패널 닫기">×</button></header><div class="panel-content performance"><p class="eyebrow">DEVELOPER TOOLS</p>
+          <section class="metric-group"><h3>오디오 출력</h3><dl><div><dt>샘플레이트</dt><dd id="metric-rate">—</dd></div><div><dt>실제 callback 버퍼</dt><dd id="metric-buffer">—</dd></div><div><dt>Callback 평균</dt><dd id="metric-avg">—</dd></div><div><dt>Callback 최대</dt><dd id="metric-max">—</dd></div><div><dt>Callback 간격 평균 / 최대</dt><dd id="metric-interval">—</dd></div><div><dt>Callback 횟수</dt><dd id="metric-count">—</dd></div><div><dt>처리 시간 초과</dt><dd id="metric-overruns">—</dd></div><div><dt>스트림 오류</dt><dd id="metric-errors">—</dd></div></dl><p class="metric-note">시간 초과 = 처리 시간이 버퍼 재생 시간보다 긴 횟수. 하드웨어 underrun은 직접 측정하지 않습니다.</p></section>
+          <section class="metric-group"><h3>명령 처리 지연</h3><dl><div><dt>Play → 샘플 처리</dt><dd id="metric-play">—</dd></div><div><dt>Pause → 적용</dt><dd id="metric-pause">—</dd></div><div><dt>Resume → 샘플 처리</dt><dd id="metric-resume">—</dd></div><div><dt>Stop → 적용</dt><dd id="metric-stop">—</dd></div><div><dt>Seek → 샘플 처리</dt><dd id="metric-seek">—</dd></div></dl><p class="metric-note">Rust 명령 수신부터 새 오디오 버퍼 처리까지. IPC·DAC·실제 청취 지연은 포함하지 않습니다.</p></section>
+          <section class="metric-group"><h3>오디오 소스</h3><dl><div><dt>공급 방식</dt><dd id="metric-source">—</dd></div><div><dt>PCM / 버퍼 RAM</dt><dd id="metric-resident">—</dd></div><div><dt>Read-ahead 사용 / 용량</dt><dd id="metric-ahead">—</dd></div><div><dt>재생 중 버퍼 부족</dt><dd id="metric-starvation">0</dd></div><div><dt>Seek 준비 대기 callback</dt><dd id="metric-priming">0</dd></div><div><dt>Refill 최근 / 최대</dt><dd id="metric-refill">—</dd></div><div><dt>파형 캐시 RAM</dt><dd id="metric-wave-memory">—</dd></div></dl><p class="metric-note">버퍼 부족 시 무음으로 기다리며 재생 위치를 보존합니다. RAM은 소스 버퍼와 peak 데이터의 크기입니다.</p></section>
+          <section class="metric-group"><h3>화면 / 파형</h3><dl><div><dt>UI FPS</dt><dd id="metric-fps">—</dd></div><div><dt>Spectrum UI FPS</dt><dd id="metric-spectrum-fps">0.0</dd></div><div><dt>평균 프레임 시간</dt><dd id="metric-frame">—</dd></div><div><dt>캐시 생성</dt><dd id="metric-cache">—</dd></div><div><dt>파형 그리기 횟수</dt><dd id="metric-draws">—</dd></div></dl></section>
+        
+          </div>
+        </section>
+        <section id="panel-spectrum" class="workspace-panel" hidden aria-labelledby="spectrum-title">
+          <div class="workspace-panel-heading"><h2 id="spectrum-title">Spectrum</h2><button data-panel-close aria-label="Spectrum 닫기">×</button></div>
+          <div class="spectrum-controls">
+            <label>표시 <select id="spectrum-mode"><option value="live">실시간</option><option value="selection">선택 분석</option></select></label>
+            <label>소스 <select id="spectrum-source"><option value="master">Master</option></select></label>
+            <label><input id="spectrum-compare" type="checkbox"> 2 Track 비교</label>
+            <label id="spectrum-source-b-label" hidden>비교 <select id="spectrum-source-b" aria-label="비교할 두 번째 Track"></select></label>
+            <label>채널 <select id="spectrum-channel" title="Combined는 (L²+R²)/2 에너지 평균입니다. 좌우 위상 상쇄 없이 주파수 분포를 표시합니다."><option value="2">L+R / Combined</option><option value="0">L</option><option value="1">R</option></select></label>
+            <label>FFT <select id="spectrum-fft"><option>2048</option><option selected>4096</option><option>8192</option><option>16384</option></select></label>
+            <label>평균 <select id="spectrum-smoothing"><option value="0">없음</option><option value="100">빠르게 · 100 ms</option><option value="200" selected>기본 · 200 ms</option><option value="500">부드럽게 · 500 ms</option></select></label>
+            <label><input id="spectrum-hold" type="checkbox" checked> Peak / Max</label><button id="spectrum-reset">Peak 초기화</button>
+            <button id="spectrum-analyze">선택 Clip / Range 분석</button><button id="spectrum-cancel" hidden>취소</button>
+          </div>
+          <div id="spectrum-legend" aria-live="polite"></div>
+          <div class="spectrum-plot"><canvas id="spectrum-canvas" aria-label="로그 주파수 Spectrum, 20 Hz에서 20 kHz, dBFS"></canvas></div>
+          <output id="spectrum-hover">그래프 위에 마우스를 올리면 Hz · 음이름 · dB를 표시합니다.</output>
+          <p id="spectrum-status" role="status">실시간 출력 · 재생하면 주파수 분포가 표시됩니다.</p>
+          <p id="spectrum-metrics" class="metric-note"></p>
+          <p class="spectrum-note">Hann · dBFS (full-scale sine = 0 dB). Combined: 좌우 에너지 평균. 선택 분석은 편집·출력 clipping을 반영한 구간 평균입니다.</p>
+        </section>
+        <section id="panel-piano" class="workspace-panel" hidden aria-labelledby="piano-title">
+          <header class="workspace-panel-heading"><h2 id="piano-title">Piano Roll</h2><strong id="piano-clip-name">MIDI Clip을 선택하세요</strong><button data-panel-close aria-label="Piano Roll 닫기">×</button></header>
+          <div id="piano-parts" role="group" aria-label="활성 Part 선택 · 활성 Part만 편집" hidden></div>
+          <div class="piano-toolbar"><div class="piano-tools"><button id="piano-select" aria-pressed="true" title="개체 선택 (1)">선택</button><button id="piano-draw" aria-pressed="false" title="그리기 (8)">그리기</button><button id="piano-delete">노트 삭제</button><button id="piano-zoom-out" aria-label="Piano Roll 축소">−</button><button id="piano-zoom-in" aria-label="Piano Roll 확대">+</button><button id="piano-fit">Clip 맞춤</button></div><div class="piano-properties"><span id="piano-selected-count">0개 선택</span><label>Velocity <input id="piano-velocity" type="number" min="1" max="127" step="1" value="100"></label><button id="piano-velocity-apply">Velocity 적용</button><button id="piano-quantize" title="현재 Grid에 Quantize (Q)">Quantize</button><button id="piano-transpose-down" title="반음 내림 (↓)">− 반음</button><button id="piano-transpose-up" title="반음 올림 (↑)">+ 반음</button><span id="piano-grid-info"></span></div></div>
+          <div class="piano-note-strip"><div id="piano-note-info"><label>Start<input id="note-start" aria-label="Note Start" spellcheck="false" autocomplete="off" placeholder="1.1.1.000000" disabled></label><label>End<input id="note-end" aria-label="Note End" spellcheck="false" autocomplete="off" placeholder="1.1.1.000000" disabled></label><label>Length<input id="note-length" aria-label="Note Length" spellcheck="false" autocomplete="off" placeholder="0.0.1.000000" disabled></label><label>표시<select id="note-time-format" aria-label="Note 시간 표시"><option value="musical">Bar.Beat.16th.Tick</option><option value="ticks">Ticks</option></select></label></div><small id="note-time-hint"></small><output id="note-time-message" role="status"></output></div>
+          <div class="piano-body"><div class="piano-plot"><canvas id="piano-canvas" tabindex="0" aria-label="Piano Roll 노트 편집"></canvas><div id="piano-playhead" hidden></div></div><div id="piano-vscroll" aria-label="음높이 스크롤"><div></div></div></div>
+          <div class="midi-lane-toolbar"><label>Lane <select id="midi-lane-type"><option value="velocity">Velocity</option><option value="cc">CC</option><option value="pitchBend">Pitch Bend</option><option value="sustain">Sustain (CC64)</option></select></label><label id="midi-cc-label">CC <input id="midi-cc" type="number" min="0" max="127" value="1"></label><label id="midi-channel-label">Ch <input id="midi-channel" type="number" min="1" max="16" value="1"></label><label>값 <input id="midi-lane-value" type="number" min="1" max="127" value="100"></label><button id="midi-lane-apply">적용</button><button id="midi-lane-delete">이벤트 삭제</button><output id="midi-lane-readout"></output></div>
+          <canvas id="midi-lane-canvas" tabindex="0" aria-label="MIDI Velocity 및 컨트롤러 편집"></canvas>
+          <input id="piano-scroll" type="range" aria-label="Piano Roll 가로 스크롤" min="0" max="0" value="0">
+          <output id="piano-position">Bar.Beat.Sixteenth.Tick</output>
+          <div class="piano-footer"><details class="midi-input" name="piano-footer"><summary>MIDI Keyboard <span id="midi-input-device-state">연결 안 됨</span></summary><div class="piano-popup"><div class="midi-input-controls"><select id="midi-input-port" aria-label="MIDI 입력 장치"><option value="">연결 안 함</option></select><button id="midi-input-refresh">장치 새로고침</button><button id="midi-input-connect">연결</button><button id="midi-input-disconnect">해제</button></div><output id="midi-input-status">선택한 MIDI Clip의 Track 악기로 입력</output></div></details>
+          <details class="piano-help" name="piano-footer"><summary>편집 도움말</summary><p class="piano-popup">Shift/Ctrl+클릭 또는 빈 곳 드래그: 다중 선택 · Q: Quantize · ↑/↓: 반음<br>그리기: 빈 곳 클릭/드래그 · 선택: 노트 이동/양끝 길이 조절 · Delete 삭제 · Ctrl+Wheel 확대 · Shift+Wheel 가로 이동<br>음이름 C3 = MIDI 60 · Track에서 MiniDAW Synth를 선택하면 소리가 출력됩니다.</p></details></div>
+        </section>
+        <section id="panel-mixer" class="workspace-panel" hidden aria-labelledby="mixer-title">
+          <header class="workspace-panel-heading"><h2 id="mixer-title">Mixer</h2><button type="button" data-panel-close aria-label="Mixer 닫기">×</button></header>
+          <div id="mixer-content"><div id="mixer-tracks" aria-label="Track Channels"></div><div id="mixer-master"></div></div>
+          <div class="mixer-footer">Track → Master · dB / Stereo Balance</div>
+        </section>
+        <div id="workspace-empty" hidden>표시할 패널을 상단에서 선택하세요.</div>
+      </div>
+      <footer class="statusbar"><span id="status-text">엔진 연결 중</span><span>MiniDAW · Audio Workspace</span></footer>
+    </main>
+    <dialog id="audio-settings" aria-labelledby="audio-settings-title">
+      <div class="panel-heading"><h2 id="audio-settings-title">Audio Settings</h2><button id="close-audio-settings" aria-label="오디오 설정 닫기">×</button></div>
+      <div class="audio-settings-fields">
+        <p id="audio-settings-error" role="alert"></p>
+        <label for="driver-type">Driver Type</label><select id="driver-type"><option value="wasapi">WASAPI Shared</option><option value="asio">ASIO</option></select>
+        <label for="output-device" id="device-label">Output Device</label><select id="output-device"></select>
+        <button id="refresh-devices">장치 목록 새로고침</button>
+        <div id="asio-panel-row" hidden><button id="asio-panel" disabled>ASIO Control Panel 열기</button><p class="metric-note">버퍼는 드라이버의 기본값을 사용합니다. 패널 설정을 변경한 뒤 아래의 출력 적용 버튼으로 다시 연결하세요.</p></div>
+        <div id="wasapi-buffer-row"><label for="buffer-size">WASAPI 요청 버퍼</label><select id="buffer-size"><option value="0">장치 기본값</option><option value="128">128 samples</option><option value="256">256 samples</option><option value="512">512 samples</option><option value="1024">1024 samples</option></select></div>
+        <label class="declick-setting" for="transport-declick"><input id="transport-declick" type="checkbox" checked />Transport De-click</label>
+        <p class="metric-note">재생, 일시정지, 정지, 탐색 시 발생할 수 있는 클릭/팝 노이즈를 짧은 전환 처리로 억제합니다. 기본값은 ON이며, OFF에서는 전환 처리를 완전히 건너뜁니다.</p>
+        <button id="reconnect">설정 저장 / 출력 적용</button><p id="audio-settings-progress" role="status"></p>
+        <p class="metric-note">출력 장치를 전환하면 재생이 멈추고 처음으로 이동합니다. De-click만 바꾸면 현재 재생을 유지합니다.</p>
+      </div>
+      <section class="metric-group"><h3>현재 출력</h3><p id="audio-current"></p><p id="audio-format"></p><p id="audio-buffer"></p><p id="audio-driver-latency" class="metric-note"></p><p class="metric-note">드라이버 보고 지연과 callback 측정값은 실제 스피커의 청취 지연과 다릅니다.</p></section>
+    </dialog>
+    <dialog id="export-dialog" aria-labelledby="export-title">
+      <h2 id="export-title">Export Audio Mixdown</h2>
+      <div class="export-options"><label>출력 대상 <select id="export-mode"><option value="mixdown">전체 Mixdown</option><option value="selection">Selection · 선택 시간 구간</option><option value="track">개별 Track</option><option value="stems">Stem · Track별 파일</option></select></label><label id="export-range-option" hidden>시간 범위 <select id="export-range"><option value="project">프로젝트 전체</option><option value="selection">Arrangement 선택 구간</option></select></label></div>
+      <div id="export-tracks" role="group" aria-label="Export Track 선택" hidden></div>
+      <output id="export-boundaries"></output>
+      <p id="export-routing" class="metric-note"></p>
+      <p class="metric-note">Cycle 반복과 실시간 MIDI 입력은 제외합니다. 선택 구간은 끝 경계에서 정확히 종료하며, 전체 범위는 잔향을 포함합니다.</p>
+      <label class="export-location">저장 위치 <span><input id="export-path" type="text" placeholder="WAV 파일 경로" spellcheck="false"><button id="export-browse">찾아보기…</button></span></label>
+      <p id="export-naming" class="metric-note" hidden>선택 폴더 안에 새 Stem 폴더를 만듭니다. Track 순서와 이름으로 파일을 구분하며 기존 폴더와 파일은 덮어쓰지 않습니다.</p>
+      <div class="export-options"><label>파일 형식 <select id="export-format"><option value="pcm16">WAV · 16-bit PCM</option><option value="pcm24" selected>WAV · 24-bit PCM</option><option value="float32">WAV · 32-bit float</option></select></label><output id="export-rate"></output></div>
+      <p class="metric-note">Normalize / 추가 Limiter / Dither 없음 · 32-bit float는 0 dBFS 초과 값을 보존합니다. Transport De-click은 파일에 굽지 않습니다.</p>
+      <progress id="export-progress" max="1" value="0" aria-label="Export 진행률"></progress>
+      <p id="export-message" role="status"></p>
+      <div class="export-actions"><button id="export-replace" hidden>덮어쓰고 내보내기</button><button id="export-start">내보내기</button><button id="export-cancel">닫기</button></div>
+    </dialog>
+    <dialog id="app-settings" aria-labelledby="app-settings-title">
+      <header class="settings-heading"><h2 id="app-settings-title">앱 설정</h2><button id="app-settings-close" aria-label="설정 닫기">×</button></header>
+      <label class="language-setting">언어 / Language <select id="ui-language"><option value="ko">한국어</option><option value="en">English</option></select></label>
+      <h3>단축키</h3><p class="metric-note">기능을 검색하고 선택한 뒤 새 키를 누르세요. 설정은 즉시 적용되며 프로젝트와 별도로 저장됩니다.</p>
+      <div class="shortcut-toolbar"><input id="shortcut-search" type="search" placeholder="기능 또는 단축키 검색" aria-label="단축키 검색"><button id="shortcut-reset">모두 기본값 복원</button></div>
+      <div class="shortcut-columns"><span>기능</span><span>현재 단축키</span><span>기본값</span></div><div id="shortcut-list" aria-label="기능별 단축키"></div>
+      <div class="shortcut-editor"><strong id="shortcut-selected"></strong><span id="shortcut-current"></span><label>새 단축키 <input id="shortcut-capture" readonly placeholder="여기를 누른 뒤 키 입력" aria-label="새 단축키"></label><div id="shortcut-conflicts" role="status"></div>
+      <div class="dialog-actions"><button id="shortcut-assign" disabled>지정</button><button id="shortcut-reassign" hidden>충돌 기능에서 해제하고 지정</button><button id="shortcut-clear">지정 해제</button></div></div>
+      <p class="metric-note">텍스트·숫자 입력 중에는 입력을 우선합니다. Piano Roll 편집 명령은 해당 편집기에서 동작합니다.</p><p id="shortcut-message" role="status"></p>
+    </dialog>
+    <script type="module" src="/src/boot.ts"></script>
+    <div id="clip-context" class="clip-context" hidden></div>
+    <dialog id="bounce-dialog"><h2>Bounce Selection</h2><p>선택한 Event의 Gain / Fade / Mute / Stretch / Pitch를 새 Audio 파일로 만듭니다.<br>Track / Mixer / Master 처리는 포함하지 않습니다.</p><p>새 파일로 선택 Event를 교체하시겠습니까?<br>원본 유지는 현재 배치를 그대로 두고 새 파일을 Media에 추가합니다.</p><div class="dialog-actions"><button id="bounce-replace">교체</button><button id="bounce-keep">원본 유지 · Media에 추가</button><button id="bounce-cancel">취소</button></div></dialog>
+    <dialog id="normalize-dialog"><h2>Peak Normalize</h2><p>선택 Clip의 원본 범위만 분석하여 Gain을 조절합니다.</p><label>Target <input id="normalize-target" type="number" min="-144" max="0" step="0.1" value="0"> dBFS</label><div class="dialog-actions"><button id="normalize-apply">적용</button><button id="normalize-cancel">취소</button></div></dialog>
+    <dialog id="project-confirm" aria-labelledby="project-confirm-text"><p id="project-confirm-text"></p><div id="project-confirm-actions"></div></dialog>
+  </body>
+</html>

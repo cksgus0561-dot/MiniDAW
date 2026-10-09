@@ -1,0 +1,1086 @@
+--- examples/arena.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+extern crate html5ever;
+extern crate typed_arena;
+
+use html5ever::interface::tree_builder::{ElementFlags, NodeOrText, QuirksMode, TreeSink};
+use html5ever::tendril::{StrTendril, TendrilSink};
+use html5ever::{parse_document, Attribute, QualName};
+use std::borrow::Cow;
+use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
+use std::io::{self, Read};
+use std::ptr;
+
+/// By using our Sink type, the arena is filled with parsed HTML.
+fn html5ever_parse_slice_into_arena<'a>(bytes: &[u8], arena: Arena<'a>) -> Ref<'a> {
+    let sink = Sink {
+        arena,
+        document: arena.alloc(Node::new(NodeData::Document)),
+        quirks_mode: Cell::new(QuirksMode::NoQuirks),
+    };
+
+    parse_document(sink, Default::default())
+        .from_utf8()
+        .one(bytes)
+}
+
+type Arena<'arena> = &'arena typed_arena::Arena<Node<'arena>>;
+type Ref<'arena> = &'arena Node<'arena>;
+type Link<'arena> = Cell<Option<Ref<'arena>>>;
+
+/// Sink struct is responsible for handling how the data that comes out of the HTML parsing
+/// unit (TreeBuilder in our case) is handled.
+struct Sink<'arena> {
+    arena: Arena<'arena>,
+    document: Ref<'arena>,
+    quirks_mode: Cell<QuirksMode>,
+}
+
+/// DOM node which contains links to other nodes in the tree.
+pub struct Node<'arena> {
+    parent: Link<'arena>,
+    next_sibling: Link<'arena>,
+    previous_sibling: Link<'arena>,
+    first_child: Link<'arena>,
+    last_child: Link<'arena>,
+    data: NodeData<'arena>,
+}
+
+--- examples/noop-tokenize.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+// Run a single benchmark once.  For use with profiling tools.
+
+extern crate html5ever;
+
+use std::cell::RefCell;
+use std::io;
+
+use html5ever::tendril::*;
+use html5ever::tokenizer::{BufferQueue, Token, TokenSink, TokenSinkResult, Tokenizer};
+
+/// In our case, our sink only contains a tokens vector
+struct Sink(RefCell<Vec<Token>>);
+
+impl TokenSink for Sink {
+    type Handle = ();
+
+    /// Each processed token will be handled by this method
+    fn process_token(&self, token: Token, _line_number: u64) -> TokenSinkResult<()> {
+        self.0.borrow_mut().push(token);
+        TokenSinkResult::Continue
+    }
+}
+
+/// In this example we implement the TokenSink trait which lets us implement how each
+/// parsed token is treated. In our example we take each token and insert it into a vector.
+fn main() {
+    // Read HTML from standard input
+    let mut chunk = ByteTendril::new();
+    io::stdin().read_to_tendril(&mut chunk).unwrap();
+
+    let input = BufferQueue::default();
+    input.push_back(chunk.try_reinterpret().unwrap());
+
+    let tok = Tokenizer::new(Sink(RefCell::new(Vec::new())), Default::default());
+    let _ = tok.feed(&input);
+    assert!(input.is_empty());
+    tok.end();
+}
+
+
+--- examples/noop-tree-builder.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+#[macro_use]
+extern crate html5ever;
+
+use std::borrow::Cow;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::io;
+
+use html5ever::parse_document;
+use html5ever::tendril::*;
+use html5ever::tree_builder::{ElementFlags, NodeOrText, QuirksMode, TreeSink};
+use html5ever::{Attribute, ExpandedName, QualName};
+
+struct Sink {
+    next_id: Cell<usize>,
+    names: RefCell<HashMap<usize, &'static QualName>>,
+}
+
+impl Sink {
+    fn get_id(&self) -> usize {
+        let id = self.next_id.get();
+        self.next_id.set(id + 2);
+        id
+    }
+}
+
+/// By implementing the TreeSink trait we determine how the data from the tree building step
+/// is processed. In this case the DOM elements are written into the "names" hashmap.
+///
+/// For deeper understating of each function go to the TreeSink declaration.
+impl TreeSink for Sink {
+    type Handle = usize;
+    type Output = Self;
+    type ElemName<'a> = ExpandedName<'a>;
+    fn finish(self) -> Self {
+        self
+    }
+
+    fn get_document(&self) -> usize {
+        0
+    }
+
+    fn get_template_contents(&self, target: &usize) -> usize {
+        if let Some(expanded_name!(html "template")) =
+            self.names.borrow().get(target).map(|n| n.expanded())
+        {
+
+--- examples/print-tree-actions.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+#[macro_use]
+extern crate html5ever;
+
+use std::borrow::Cow;
+use std::cell::{Cell, Ref, RefCell};
+use std::collections::HashMap;
+use std::io;
+
+use html5ever::parse_document;
+use html5ever::tendril::*;
+use html5ever::tree_builder::{
+    AppendNode, AppendText, ElementFlags, NodeOrText, QuirksMode, TreeSink,
+};
+use html5ever::{Attribute, QualName};
+
+struct Sink {
+    next_id: Cell<usize>,
+    names: RefCell<HashMap<usize, &'static QualName>>,
+}
+
+impl Sink {
+    fn get_id(&self) -> usize {
+        let id = self.next_id.get();
+        self.next_id.set(id + 2);
+        id
+    }
+}
+
+impl TreeSink for Sink {
+    type Handle = usize;
+    type Output = Self;
+    type ElemName<'a> = Ref<'a, QualName>;
+    fn finish(self) -> Self {
+        self
+    }
+
+    fn parse_error(&self, msg: Cow<'static, str>) {
+        println!("Parse error: {msg}");
+    }
+
+    fn get_document(&self) -> usize {
+        0
+    }
+
+    fn get_template_contents(&self, target: &usize) -> usize {
+        if let Some(expanded_name!(html "template")) =
+
+--- examples/tokenize.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+extern crate html5ever;
+
+use std::cell::Cell;
+use std::io;
+
+use html5ever::tendril::*;
+use html5ever::tokenizer::BufferQueue;
+use html5ever::tokenizer::{CharacterTokens, EndTag, NullCharacterToken, StartTag, TagToken};
+use html5ever::tokenizer::{
+    ParseError, Token, TokenSink, TokenSinkResult, Tokenizer, TokenizerOpts,
+};
+
+#[derive(Clone)]
+struct TokenPrinter {
+    in_char_run: Cell<bool>,
+}
+
+impl TokenPrinter {
+    fn is_char(&self, is_char: bool) {
+        match (self.in_char_run.get(), is_char) {
+            (false, true) => print!("CHAR : \""),
+            (true, false) => println!("\""),
+            _ => (),
+        }
+        self.in_char_run.set(is_char);
+    }
+
+    fn do_char(&self, c: char) {
+        self.is_char(true);
+        print!("{}", c.escape_default().collect::<String>());
+    }
+}
+
+impl TokenSink for TokenPrinter {
+    type Handle = ();
+
+    fn process_token(&self, token: Token, _line_number: u64) -> TokenSinkResult<()> {
+        match token {
+            CharacterTokens(b) => {
+                for c in b.chars() {
+                    self.do_char(c);
+                }
+            },
+            NullCharacterToken => self.do_char('\0'),
+            TagToken(tag) => {
+                self.is_char(false);
+
+--- src/driver.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! High-level interface to the parser.
+
+use crate::buffer_queue::BufferQueue;
+use crate::tokenizer::{Tokenizer, TokenizerOpts};
+use crate::tree_builder::{create_element, TreeBuilder, TreeBuilderOpts, TreeSink};
+use crate::{Attribute, QualName};
+use markup5ever::TokenizerResult;
+use std::borrow::Cow;
+
+use crate::tendril;
+use crate::tendril::stream::{TendrilSink, Utf8LossyDecoder};
+use crate::tendril::StrTendril;
+
+/// All-encompassing options struct for the parser.
+#[derive(Clone, Default)]
+pub struct ParseOpts {
+    /// Tokenizer options.
+    pub tokenizer: TokenizerOpts,
+
+    /// Tree builder options.
+    pub tree_builder: TreeBuilderOpts,
+}
+
+/// Parse an HTML document
+///
+/// The returned value implements `tendril::TendrilSink`
+/// so that Unicode input may be provided incrementally,
+/// or all at once with the `one` method.
+///
+/// If your input is bytes, use `Parser::from_utf8`.
+pub fn parse_document<Sink>(sink: Sink, opts: ParseOpts) -> Parser<Sink>
+where
+    Sink: TreeSink,
+{
+    let tb = TreeBuilder::new(sink, opts.tree_builder);
+    let tok = Tokenizer::new(tb, opts.tokenizer);
+    Parser {
+        tokenizer: tok,
+        input_buffer: BufferQueue::default(),
+    }
+}
+
+/// Parse an HTML fragment
+///
+/// The returned value implements `tendril::TendrilSink`
+/// so that Unicode input may be provided incrementally,
+
+--- src/encoding.rs ---
+// Copyright 2014-2025 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::tendril::StrTendril;
+
+/// <https://html.spec.whatwg.org/multipage/#algorithm-for-extracting-a-character-encoding-from-a-meta-element>
+pub(crate) fn extract_a_character_encoding_from_a_meta_element(
+    input: StrTendril,
+) -> Option<StrTendril> {
+    // Step 1. Let position be a pointer into s, initially pointing at the start of the string.
+    let mut position = 0;
+    loop {
+        // Step 2. Loop: Find the first seven characters in s after position that are an ASCII
+        // case-insensitive match for the word "charset". If no such match is found, return nothing.
+        loop {
+            let candidate = input.as_bytes().get(position..position + "charset".len())?;
+            if candidate.eq_ignore_ascii_case(b"charset") {
+                break;
+            }
+
+            position += 1;
+        }
+        position += "charset".len();
+
+        // Step 3. Skip any ASCII whitespace that immediately follow the word "charset" (there might not be any).
+        position += input.as_bytes()[position..]
+            .iter()
+            .take_while(|byte| byte.is_ascii_whitespace())
+            .count();
+
+        // Step 4. If the next character is not a U+003D EQUALS SIGN (=), then move position to point just before
+        // that next character, and jump back to the step labeled loop.
+        if input.as_bytes()[position] == b'=' {
+            break;
+        }
+    }
+    // Skip the "="
+    position += 1;
+
+    // Step 5. Skip any ASCII whitespace that immediately follow the equals sign (there might not be any).
+    position += input.as_bytes()[position..]
+        .iter()
+        .take_while(|byte| byte.is_ascii_whitespace())
+        .count();
+
+    // Step 6. Process the next character as follows:
+    match input.as_bytes().get(position)? {
+        quote @ (b'"' | b'\'') => {
+            // Return the result of getting an encoding from the substring that is between this character
+
+--- src/lib.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+#![crate_name = "html5ever"]
+#![crate_type = "dylib"]
+#![cfg_attr(test, deny(warnings))]
+#![allow(unused_parens)]
+#![warn(unreachable_pub)]
+
+pub use driver::{parse_document, parse_fragment, ParseOpts, Parser};
+pub use markup5ever::*;
+
+pub use serialize::serialize;
+
+mod util {
+    pub(crate) mod str;
+}
+
+pub(crate) mod encoding;
+pub(crate) mod macros;
+
+pub mod driver;
+pub mod serialize;
+pub mod tokenizer;
+pub mod tree_builder;
+
+
+--- src/macros.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+macro_rules! unwrap_or_return {
+    ($opt:expr) => {{
+        let Some(x) = $opt else {
+            return;
+        };
+        x
+    }};
+    ($opt:expr, $retval:expr) => {{
+        let Some(x) = $opt else {
+            return $retval;
+        };
+        x
+    }};
+}
+pub(crate) use unwrap_or_return;
+
+macro_rules! time {
+    ($e:expr) => {{
+        let t0 = ::std::time::Instant::now();
+        let result = $e;
+        let dt = t0.elapsed().as_nanos() as u64;
+        (result, dt)
+    }};
+}
+pub(crate) use time;
+
+
+--- src/serialize/mod.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use log::warn;
+pub use markup5ever::serialize::{AttrRef, Serialize, Serializer, TraversalScope};
+use markup5ever::{local_name, ns};
+use std::io::{self, Write};
+
+use crate::{LocalName, QualName};
+
+pub fn serialize<Wr, T>(writer: Wr, node: &T, opts: SerializeOpts) -> io::Result<()>
+where
+    Wr: Write,
+    T: Serialize,
+{
+    let mut ser = HtmlSerializer::new(writer, opts.clone());
+    node.serialize(&mut ser, opts.traversal_scope)
+}
+
+#[derive(Clone)]
+pub struct SerializeOpts {
+    /// Is scripting enabled? Default: true
+    pub scripting_enabled: bool,
+
+    /// Serialize the root node? Default: ChildrenOnly
+    pub traversal_scope: TraversalScope,
+
+    /// If the serializer is asked to serialize an invalid tree, the default
+    /// behavior is to panic in the event that an `end_elem` is created without a
+    /// matching `start_elem`. Setting this to true will prevent those panics by
+    /// creating a default parent on the element stack. No extra start elem will
+    /// actually be written. Default: false
+    pub create_missing_parent: bool,
+}
+
+impl Default for SerializeOpts {
+    fn default() -> SerializeOpts {
+        SerializeOpts {
+            scripting_enabled: true,
+            traversal_scope: TraversalScope::ChildrenOnly(None),
+            create_missing_parent: false,
+        }
+    }
+}
+
+#[derive(Default)]
+struct ElemInfo {
+    html_name: Option<LocalName>,
+    ignore_children: bool,
+
+--- src/tokenizer/char_ref/mod.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use super::{TokenSink, Tokenizer};
+use crate::buffer_queue::BufferQueue;
+use crate::data;
+use crate::tendril::StrTendril;
+
+use log::debug;
+use std::borrow::Cow::{self, Borrowed};
+use std::char::from_u32;
+
+//§ tokenizing-character-references
+pub(super) struct CharRef {
+    /// The resulting character(s)
+    pub(super) chars: [char; 2],
+
+    /// How many slots in `chars` are valid?
+    pub(super) num_chars: u8,
+}
+
+pub(super) enum Status {
+    Stuck,
+    Progress,
+    Done(CharRef),
+}
+
+#[derive(Debug)]
+enum State {
+    Begin,
+    Octothorpe,
+    Numeric(u32), // base
+    NumericSemicolon,
+    Named,
+    BogusName,
+}
+
+pub(super) struct CharRefTokenizer {
+    state: State,
+    is_consumed_in_attribute: bool,
+
+    num: u32,
+    num_too_big: bool,
+    seen_digit: bool,
+    hex_marker: Option<char>,
+
+    name_buf_opt: Option<StrTendril>,
+    name_match: Option<(u32, u32)>,
+    name_len: usize,
+
+--- src/tokenizer/interface.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use markup5ever::ns;
+
+use crate::interface::Attribute;
+use crate::tendril::StrTendril;
+use crate::tokenizer::states;
+use crate::LocalName;
+use std::borrow::Cow;
+
+pub use self::TagKind::{EndTag, StartTag};
+pub use self::Token::{CharacterTokens, CommentToken, DoctypeToken, TagToken};
+pub use self::Token::{EOFToken, NullCharacterToken, ParseError};
+
+/// A `DOCTYPE` token.
+#[derive(PartialEq, Eq, Clone, Debug, Default)]
+pub struct Doctype {
+    pub name: Option<StrTendril>,
+    pub public_id: Option<StrTendril>,
+    pub system_id: Option<StrTendril>,
+    /// Indicates if this DOCTYPE token should put the document in [quirks mode].
+    ///
+    /// [quirks mode]: https://dom.spec.whatwg.org/#concept-document-quirks
+    pub force_quirks: bool,
+}
+
+/// Whether the tag is a start or an end tag.
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
+pub enum TagKind {
+    StartTag,
+    EndTag,
+}
+
+/// A tag token.
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct Tag {
+    /// Whether the tag is a start or an end tag.
+    pub kind: TagKind,
+    pub name: LocalName,
+    /// Whether the tag closes itself.
+    ///
+    /// An example of a self closing tag is `<foo />`.
+    pub self_closing: bool,
+    pub attrs: Vec<Attribute>,
+    /// Whether duplicate attributes were encountered during tokenization.
+    /// This is used for CSP nonce validation - elements with duplicate
+    /// attributes are not nonceable per the CSP spec.
+    pub had_duplicate_attributes: bool,
+
+--- src/tokenizer/mod.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! The HTML5 tokenizer.
+
+pub use self::interface::{CharacterTokens, EOFToken, NullCharacterToken, ParseError};
+pub use self::interface::{CommentToken, DoctypeToken, TagToken, Token};
+pub use self::interface::{Doctype, EndTag, StartTag, Tag, TagKind};
+pub use self::interface::{TokenSink, TokenSinkResult};
+
+use self::states::{DoctypeIdKind, Public, System};
+use self::states::{DoubleEscaped, Escaped};
+use self::states::{DoubleQuoted, SingleQuoted, Unquoted};
+use self::states::{Rawtext, Rcdata, ScriptData, ScriptDataEscaped};
+
+use self::char_ref::{CharRef, CharRefTokenizer};
+
+use crate::util::str::lower_ascii_letter;
+
+use log::{debug, trace};
+use markup5ever::{ns, small_char_set, TokenizerResult};
+use std::borrow::Cow::{self, Borrowed};
+use std::cell::{Cell, RefCell, RefMut};
+use std::collections::BTreeMap;
+use std::mem;
+
+pub use crate::buffer_queue::{BufferQueue, FromSet, NotFromSet, SetResult};
+use crate::macros::{time, unwrap_or_return};
+use crate::tendril::StrTendril;
+use crate::{Attribute, LocalName, QualName, SmallCharSet};
+
+mod char_ref;
+mod interface;
+pub mod states;
+
+/// The result of invoking the tokenizer once.
+pub enum ProcessResult<Handle> {
+    /// The tokenizer should be re-invoked immediately.
+    Continue,
+    /// The tokenizer has not finished, but it needs to wait for more
+    /// input to arrive before it can continue.
+    Suspend,
+    /// The tokenizer was blocked by a `<script>`.
+    ///
+    /// This `<script>` needs to be executed before tokenization
+    /// can continue, as it might invoke `document.write`.
+    Script(Handle),
+    /// The tokenizer was blocked because it found a `<meta charset>` tag.
+    ///
+
+--- src/tokenizer/states.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! Tokenizer states.
+//!
+//! This is public for use by the tokenizer tests.  Other library
+//! users should not have to care about this.
+
+pub use self::AttrValueKind::*;
+pub use self::DoctypeIdKind::*;
+pub use self::RawKind::*;
+pub use self::ScriptEscapeKind::*;
+pub use self::State::*;
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Hash, Debug)]
+pub enum ScriptEscapeKind {
+    Escaped,
+    DoubleEscaped,
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Hash, Debug)]
+pub enum DoctypeIdKind {
+    Public,
+    System,
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Hash, Debug)]
+pub enum RawKind {
+    Rcdata,
+    Rawtext,
+    ScriptData,
+    ScriptDataEscaped(ScriptEscapeKind),
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Hash, Debug)]
+pub enum AttrValueKind {
+    Unquoted,
+    SingleQuoted,
+    DoubleQuoted,
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Hash, Debug)]
+pub enum State {
+    /// <https://html.spec.whatwg.org/#data-state>
+    Data,
+    /// <https://html.spec.whatwg.org/#plaintext-state>
+    Plaintext,
+    /// <https://html.spec.whatwg.org/#tag-open-state>
+    TagOpen,
+
+--- src/tree_builder/data.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::interface::{LimitedQuirks, NoQuirks, Quirks, QuirksMode};
+use crate::tendril::StrTendril;
+use crate::tokenizer::Doctype;
+
+// These should all be lowercase, for ASCII-case-insensitive matching.
+static QUIRKY_PUBLIC_PREFIXES: &[&str] = &[
+    "-//advasoft ltd//dtd html 3.0 aswedit + extensions//",
+    "-//as//dtd html 3.0 aswedit + extensions//",
+    "-//ietf//dtd html 2.0 level 1//",
+    "-//ietf//dtd html 2.0 level 2//",
+    "-//ietf//dtd html 2.0 strict level 1//",
+    "-//ietf//dtd html 2.0 strict level 2//",
+    "-//ietf//dtd html 2.0 strict//",
+    "-//ietf//dtd html 2.0//",
+    "-//ietf//dtd html 2.1e//",
+    "-//ietf//dtd html 3.0//",
+    "-//ietf//dtd html 3.2 final//",
+    "-//ietf//dtd html 3.2//",
+    "-//ietf//dtd html 3//",
+    "-//ietf//dtd html level 0//",
+    "-//ietf//dtd html level 1//",
+    "-//ietf//dtd html level 2//",
+    "-//ietf//dtd html level 3//",
+    "-//ietf//dtd html strict level 0//",
+    "-//ietf//dtd html strict level 1//",
+    "-//ietf//dtd html strict level 2//",
+    "-//ietf//dtd html strict level 3//",
+    "-//ietf//dtd html strict//",
+    "-//ietf//dtd html//",
+    "-//metrius//dtd metrius presentational//",
+    "-//microsoft//dtd internet explorer 2.0 html strict//",
+    "-//microsoft//dtd internet explorer 2.0 html//",
+    "-//microsoft//dtd internet explorer 2.0 tables//",
+    "-//microsoft//dtd internet explorer 3.0 html strict//",
+    "-//microsoft//dtd internet explorer 3.0 html//",
+    "-//microsoft//dtd internet explorer 3.0 tables//",
+    "-//netscape comm. corp.//dtd html//",
+    "-//netscape comm. corp.//dtd strict html//",
+    "-//o'reilly and associates//dtd html 2.0//",
+    "-//o'reilly and associates//dtd html extended 1.0//",
+    "-//o'reilly and associates//dtd html extended relaxed 1.0//",
+    "-//softquad software//dtd hotmetal pro 6.0::19990601::extensions to html 4.0//",
+    "-//softquad//dtd hotmetal pro 4.0::19971010::extensions to html 4.0//",
+    "-//spyglass//dtd html 2.0 extended//",
+    "-//sq//dtd html 2.0 hotmetal + extensions//",
+    "-//sun microsystems corp.//dtd hotjava html//",
+
+--- src/tree_builder/mod.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! The HTML5 tree builder.
+
+pub use crate::interface::{create_element, ElemName, ElementFlags, Tracer, TreeSink};
+pub use crate::interface::{AppendNode, AppendText, Attribute, NodeOrText};
+pub use crate::interface::{LimitedQuirks, NoQuirks, Quirks, QuirksMode};
+pub use markup5ever::interface::tree_builder::create_element_with_flags;
+
+use self::types::*;
+
+use crate::tendril::StrTendril;
+use crate::{ExpandedName, LocalName, Namespace, QualName};
+
+use crate::tokenizer;
+use crate::tokenizer::states as tok_state;
+use crate::tokenizer::{Doctype, EndTag, StartTag, Tag, TokenSink, TokenSinkResult};
+
+use std::borrow::Cow::{self, Borrowed};
+use std::cell::{Cell, Ref, RefCell};
+use std::collections::VecDeque;
+use std::iter::{Enumerate, Rev};
+use std::{fmt, slice};
+
+use crate::tokenizer::states::RawKind;
+use crate::tree_builder::tag_sets::*;
+use crate::util::str::to_escaped_string;
+use log::{debug, log_enabled, warn, Level};
+use markup5ever::{expanded_name, local_name, namespace_prefix, ns};
+
+#[macro_use]
+mod tag_sets;
+
+mod data;
+mod rules;
+mod types;
+
+/// Tree builder options, with an impl for Default.
+#[derive(Copy, Clone)]
+pub struct TreeBuilderOpts {
+    /// Report all parse errors described in the spec, at some
+    /// performance penalty? Default: false
+    pub exact_errors: bool,
+
+    /// Is scripting enabled?
+    ///
+    /// This affects how `<noscript>` elements are parsed:
+    ///   - If scripting **is** enabled then the contents of a `<noscript>` element are parsed as a single text node
+
+--- src/tree_builder/rules.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+// The tree builder rules, as a single, enormous nested match expression.
+
+use crate::encoding::extract_a_character_encoding_from_a_meta_element;
+use crate::interface::Quirks;
+use crate::tokenizer::states::{Rawtext, Rcdata, ScriptData};
+use crate::tokenizer::TagKind::{EndTag, StartTag};
+use crate::tree_builder::tag_sets::*;
+use crate::tree_builder::types::*;
+use crate::tree_builder::{
+    html_elem, ElemName, NodeOrText::AppendNode, StrTendril, Tag, TreeBuilder, TreeSink,
+};
+use crate::QualName;
+use markup5ever::interface::tree_builder::create_element_with_flags;
+use markup5ever::{expanded_name, local_name, ns};
+use std::borrow::Cow::Borrowed;
+
+use crate::tendril::SliceExt;
+
+fn any_not_whitespace(x: &StrTendril) -> bool {
+    // FIXME: this might be much faster as a byte scan
+    x.chars().any(|c| !c.is_ascii_whitespace())
+}
+
+fn current_node<Handle>(open_elems: &[Handle]) -> &Handle {
+    open_elems.last().expect("no current element")
+}
+
+/// Helper macro that generates a [pattern](https://doc.rust-lang.org/reference/patterns.html) representing
+/// a [`Tag`] to make matching on [`Tag`]s less verbose.
+///
+/// This macro accepts 4 forms:
+///
+/// - `tag!(<div>)` where `div` can be any valid tag name. This matches a start tag where the tag name is "div".
+///   If the tag name contains characters other than [a-zA-Z0-9_] then it should be quoted a `<"div">`.
+/// - `tag!(</div>)` where `div` can be any valid tag name. This matches a end tag where the tag name is "div".
+///   If the tag name contains characters other than [a-zA-Z0-9_] then it should be quoted a `</"div">`.
+/// - `tag!(<>)`. This matches any start tag (regardless of tag name).
+/// - `tag!(</>)`. This matches any end tag (regardless of tag name).
+///
+/// Additionally any of the above can be freely combined with `|` to create an "or" match pattern.
+/// For example `tag!(<head> | </>)` will match a "head" start tag or any end tag.
+#[rustfmt::skip]
+macro_rules! tag {
+    // Any start tag
+    (<>) => {
+        crate::tokenizer::Tag { kind: crate::tokenizer::StartTag, .. }
+
+--- src/tree_builder/tag_sets.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! Various sets of HTML tag names, and macros for declaring them.
+
+use crate::ExpandedName;
+use markup5ever::{expanded_name, local_name, ns};
+
+macro_rules! declare_tag_set_impl ( ($param:ident, $b:ident, $supr:ident, $($tag:tt)+) => (
+    match $param {
+        $( expanded_name!(html $tag) => $b, )+
+        p => $supr(p),
+    }
+));
+
+macro_rules! declare_tag_set_body (
+    ($param:ident = [$supr:ident] - $($tag:tt)+)
+        => ( declare_tag_set_impl!($param, false, $supr, $($tag)+) );
+
+    ($param:ident = [$supr:ident] + $($tag:tt)+)
+        => ( declare_tag_set_impl!($param, true, $supr, $($tag)+) );
+
+    ($param:ident = $($tag:tt)+)
+        => ( declare_tag_set_impl!($param, true, empty_set, $($tag)+) );
+);
+
+macro_rules! declare_tag_set (
+    (pub $name:ident = $($toks:tt)+) => (
+        pub(crate) fn $name(p: crate::ExpandedName) -> bool {
+            declare_tag_set_body!(p = $($toks)+)
+        }
+    );
+
+    ($name:ident = $($toks:tt)+) => (
+        fn $name(p: crate::ExpandedName) -> bool {
+            declare_tag_set_body!(p = $($toks)+)
+        }
+    );
+);
+
+#[inline(always)]
+pub(crate) fn empty_set(_: ExpandedName) -> bool {
+    false
+}
+
+declare_tag_set!(pub html_default_scope =
+    "applet" "caption" "html" "table" "td" "th" "marquee" "object" "select" "template");
+
+#[inline(always)]
+
+--- src/tree_builder/types.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! Types used within the tree builder code. Not exported to users.
+
+use crate::tokenizer::states::RawKind;
+use crate::tokenizer::Tag;
+
+use crate::tendril::StrTendril;
+
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+pub(crate) enum InsertionMode {
+    /// <https://html.spec.whatwg.org/#the-initial-insertion-mode>
+    Initial,
+    /// <https://html.spec.whatwg.org/#the-before-html-insertion-mode>
+    BeforeHtml,
+    /// <https://html.spec.whatwg.org/#the-before-head-insertion-mode>
+    BeforeHead,
+    /// <https://html.spec.whatwg.org/#parsing-main-inhead>
+    InHead,
+    /// <https://html.spec.whatwg.org/#parsing-main-inheadnoscript>
+    InHeadNoscript,
+    /// <https://html.spec.whatwg.org/#the-after-head-insertion-mode>
+    AfterHead,
+    /// <https://html.spec.whatwg.org/#parsing-main-inbody>
+    InBody,
+    /// <https://html.spec.whatwg.org/#parsing-main-incdata>
+    Text,
+    /// <https://html.spec.whatwg.org/#parsing-main-intable>
+    InTable,
+    /// <https://html.spec.whatwg.org/#parsing-main-intabletext>
+    InTableText,
+    /// <https://html.spec.whatwg.org/#parsing-main-incaption>
+    InCaption,
+    /// <https://html.spec.whatwg.org/#parsing-main-incolgroup>
+    InColumnGroup,
+    /// <https://html.spec.whatwg.org/#parsing-main-intbody>
+    InTableBody,
+    /// <https://html.spec.whatwg.org/#parsing-main-intr>
+    InRow,
+    /// <https://html.spec.whatwg.org/#parsing-main-intd>
+    InCell,
+    /// <https://html.spec.whatwg.org/#parsing-main-intemplate>
+    InTemplate,
+    /// <https://html.spec.whatwg.org/#parsing-main-afterbody>
+    AfterBody,
+    /// <https://html.spec.whatwg.org/#parsing-main-inframeset>
+    InFrameset,
+    /// <https://html.spec.whatwg.org/#parsing-main-afterframeset>
+
+--- src/util/str.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::fmt;
+
+pub(crate) fn to_escaped_string<T: fmt::Debug>(x: &T) -> String {
+    // FIXME: don't allocate twice
+    let string = format!("{x:?}");
+    string.chars().flat_map(|c| c.escape_default()).collect()
+}
+
+/// If `c` is an ASCII letter, return the corresponding lowercase
+/// letter, otherwise None.
+pub(crate) fn lower_ascii_letter(c: char) -> Option<char> {
+    match c {
+        'a'..='z' => Some(c),
+        'A'..='Z' => Some((c as u8 - b'A' + b'a') as char),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+#[allow(non_snake_case)]
+mod test {
+    use super::lower_ascii_letter;
+
+    #[test]
+    fn lower_letter_a_is_a() {
+        assert_eq!(lower_ascii_letter('a'), Some('a'));
+    }
+
+    #[test]
+    fn lower_letter_A_is_a() {
+        assert_eq!(lower_ascii_letter('A'), Some('a'));
+    }
+
+    #[test]
+    fn lower_letter_symbol_is_None() {
+        assert_eq!(lower_ascii_letter('!'), None);
+    }
+
+    #[test]
+    fn lower_letter_nonascii_is_None() {
+        assert_eq!(lower_ascii_letter('\u{a66e}'), None);
+    }
+}

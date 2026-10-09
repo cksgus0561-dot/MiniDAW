@@ -1,0 +1,341 @@
+--- build.rs ---
+// Copyright (c) The camino Contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! Adapted from
+//! https://github.com/dtolnay/syn/blob/a54fb0098c6679f1312113ae2eec0305c51c7390/build.rs.
+
+use std::{env, process::Command, str};
+
+// The rustc-cfg strings below are *not* public API. Please let us know by
+// opening a GitHub issue if your build environment requires some way to enable
+// these cfgs other than by executing our build script.
+fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+
+    // Required by Rust 1.79+.
+    println!("cargo:rustc-check-cfg=cfg(doc_cfg)");
+    println!("cargo:rustc-check-cfg=cfg(path_buf_deref_mut)");
+    println!("cargo:rustc-check-cfg=cfg(try_reserve_2)");
+    println!("cargo:rustc-check-cfg=cfg(os_str_bytes)");
+    println!("cargo:rustc-check-cfg=cfg(os_string_pathbuf_leak)");
+    println!("cargo:rustc-check-cfg=cfg(absolute_path)");
+    println!("cargo:rustc-check-cfg=cfg(path_add_extension)");
+    println!("cargo:rustc-check-cfg=cfg(pathbuf_const_new)");
+
+    let compiler = match rustc_version() {
+        Some(compiler) => compiler,
+        None => return,
+    };
+
+    // NOTE:
+    // Adding a new cfg gated by Rust version MUST be accompanied by an addition to the matrix in
+    // .github/workflows/ci.yml.
+    //
+    // try_reserve_2 was added in a 1.63 nightly.
+    if (compiler.minor >= 63
+        && (compiler.channel == ReleaseChannel::Stable || compiler.channel == ReleaseChannel::Beta))
+        || compiler.minor >= 64
+    {
+        println!("cargo:rustc-cfg=try_reserve_2");
+    }
+    // path_buf_deref_mut was added in a 1.68 nightly.
+    if (compiler.minor >= 68
+        && (compiler.channel == ReleaseChannel::Stable || compiler.channel == ReleaseChannel::Beta))
+        || compiler.minor >= 69
+    {
+        println!("cargo:rustc-cfg=path_buf_deref_mut");
+    }
+    // os_str_bytes was added in 1.74.
+    if (compiler.minor >= 74 && compiler.channel == ReleaseChannel::Stable) || compiler.minor >= 75
+    {
+        println!("cargo:rustc-cfg=os_str_bytes");
+    }
+    // absolute_path was added in 1.79.
+    if (compiler.minor >= 79 && compiler.channel == ReleaseChannel::Stable) || compiler.minor >= 80
+    {
+
+--- src/lib.rs ---
+// Copyright (c) The camino Contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+#![warn(missing_docs)]
+#![cfg_attr(doc_cfg, feature(doc_cfg))]
+
+//! UTF-8 encoded paths.
+//!
+//! `camino` is an extension of the [`std::path`] module that adds new [`Utf8PathBuf`] and [`Utf8Path`]
+//! types. These are like the standard library's [`PathBuf`] and [`Path`] types, except they are
+//! guaranteed to only contain UTF-8 encoded data. Therefore, they expose the ability to get their
+//! contents as strings, they implement [`Display`], etc.
+//!
+//! The [`std::path`] types are not guaranteed to be valid UTF-8. This is the right decision for the standard library,
+//! since it must be as general as possible. However, on all platforms, non-Unicode paths are vanishingly uncommon for a
+//! number of reasons:
+//! * Unicode won. There are still some legacy codebases that store paths in encodings like Shift-JIS, but most
+//!   have been converted to Unicode at this point.
+//! * Unicode is the common subset of supported paths across Windows and Unix platforms. (On Windows, Rust stores paths
+//!   as [an extension to UTF-8](https://simonsapin.github.io/wtf-8/), and converts them to UTF-16 at Win32
+//!   API boundaries.)
+//! * There are already many systems, such as Cargo, that only support UTF-8 paths. If your own tool interacts with any such
+//!   system, you can assume that paths are valid UTF-8 without creating any additional burdens on consumers.
+//! * The ["makefile problem"](https://www.mercurial-scm.org/wiki/EncodingStrategy#The_.22makefile_problem.22)
+//!   (which also applies to `Cargo.toml`, and any other metadata file that lists the names of other files) has *no general,
+//!   cross-platform solution* in systems that support non-UTF-8 paths. However, restricting paths to UTF-8 eliminates
+//!   this problem.
+//!
+//! Therefore, many programs that want to manipulate paths *do* assume they contain UTF-8 data, and convert them to [`str`]s
+//! as  necessary. However, because this invariant is not encoded in the [`Path`] type, conversions such as
+//! `path.to_str().unwrap()` need to be repeated again and again, creating a frustrating experience.
+//!
+//! Instead, `camino` allows you to check that your paths are UTF-8 *once*, and then manipulate them
+//! as valid UTF-8 from there on, avoiding repeated lossy and confusing conversions.
+
+// General note: we use #[allow(clippy::incompatible_msrv)] for code that's already guarded by a
+// version-specific cfg conditional.
+
+use std::{
+    borrow::{Borrow, Cow},
+    cmp::Ordering,
+    convert::{Infallible, TryFrom, TryInto},
+    error,
+    ffi::{OsStr, OsString},
+    fmt,
+    fs::{self, Metadata},
+    hash::{Hash, Hasher},
+    io,
+    iter::FusedIterator,
+    ops::Deref,
+    path::*,
+    rc::Rc,
+    str::FromStr,
+    sync::Arc,
+};
+
+--- src/proptest_impls.rs ---
+// Copyright (c) The camino Contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! [proptest::Arbitrary](Arbitrary) implementation for `Utf8PathBuf` and `Box<Utf8Path>`.  Note
+//! that implementations for `Rc<Utf8Path>` and `Arc<Utf8Path>` are not currently possible due to
+//! orphan rules - this crate doesn't define `Rc`/`Arc` nor `Arbitrary`, so it can't define those
+//! implementations.
+
+// NOTE: #[cfg(feature = "proptest1")] is specified here to work with `doc_cfg`.
+
+use crate::{Utf8Path, Utf8PathBuf};
+use proptest::{arbitrary::StrategyFor, prelude::*, strategy::MapInto};
+
+/// The [`Arbitrary`] impl for `Utf8PathBuf` returns a path with between 0 and 8 components,
+/// joined by the [`MAIN_SEPARATOR`](std::path::MAIN_SEPARATOR) for the platform. (Each component is
+/// randomly generated, and may itself contain one or more separators.)
+///
+/// On Unix, this generates an absolute path half of the time and a relative path the other half.
+///
+/// On Windows, this implementation doesn't currently generate
+/// [`Utf8PrefixComponent`](crate::Utf8PrefixComponent) instances, though in the future it might.
+#[cfg(feature = "proptest1")]
+impl Arbitrary for Utf8PathBuf {
+    type Parameters = <String as Arbitrary>::Parameters;
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        (
+            any::<bool>(),
+            prop::collection::vec(any_with::<String>(args), 0..8),
+        )
+            .prop_map(|(is_relative, components)| {
+                let initial_component = if is_relative {
+                    Some(format!("{}", std::path::MAIN_SEPARATOR))
+                } else {
+                    None
+                };
+                initial_component.into_iter().chain(components).collect()
+            })
+            .boxed()
+    }
+}
+
+/// The [`Arbitrary`] impl for `Box<Utf8Path>` returns a path with between 0 and 8 components,
+/// joined by the [`MAIN_SEPARATOR`](std::path::MAIN_SEPARATOR) for the platform. (Each component is
+/// randomly generated, and may itself contain one or more separators.)
+///
+/// On Unix, this generates an absolute path half of the time and a relative path the other half.
+///
+/// On Windows, this implementation doesn't currently generate
+/// [`Utf8PrefixComponent`](crate::Utf8PrefixComponent) instances, though in the future it might.
+#[cfg(feature = "proptest1")]
+impl Arbitrary for Box<Utf8Path> {
+    type Parameters = <Utf8PathBuf as Arbitrary>::Parameters;
+    type Strategy = MapInto<StrategyFor<Utf8PathBuf>, Self>;
+
+--- src/serde_impls.rs ---
+// Copyright (c) The camino Contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! Serde implementations for the types in this crate.
+//!
+//! * `Utf8Path` is an unsized type which the derive impls can't handle.
+//! * `Utf8PathBuf` could be derived, but we don't depend on serde_derive to
+//!   improve compile times. It's also very straightforward to implement.
+
+use crate::{Utf8Path, Utf8PathBuf};
+use serde_core::{Deserialize, Deserializer, Serialize, Serializer, de};
+use std::fmt;
+
+struct Utf8PathBufVisitor;
+
+impl<'a> de::Visitor<'a> for Utf8PathBufVisitor {
+    type Value = Utf8PathBuf;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a UTF-8 path string")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(v.into())
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(v.into())
+    }
+
+    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        std::str::from_utf8(v)
+            .map(Into::into)
+            .map_err(|_| de::Error::invalid_value(de::Unexpected::Bytes(v), &self))
+    }
+
+    fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        String::from_utf8(v)
+            .map(Into::into)
+            .map_err(|e| de::Error::invalid_value(de::Unexpected::Bytes(&e.into_bytes()), &self))
+    }
+}
+
+
+--- src/tests.rs ---
+// Copyright (c) The camino Contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// Test that all required impls exist.
+
+use crate::{Utf8Path, Utf8PathBuf};
+use std::{
+    borrow::Cow,
+    path::{Path, PathBuf},
+    rc::Rc,
+    sync::Arc,
+};
+
+macro_rules! all_into {
+    ($t:ty, $x:ident) => {
+        test_into::<$t, Utf8PathBuf>($x.clone());
+        test_into::<$t, Box<Utf8Path>>($x.clone());
+        test_into::<$t, Arc<Utf8Path>>($x.clone());
+        test_into::<$t, Rc<Utf8Path>>($x.clone());
+        test_into::<$t, Cow<'_, Utf8Path>>($x.clone());
+        test_into::<$t, PathBuf>($x.clone());
+        test_into::<$t, Box<Path>>($x.clone());
+        test_into::<$t, Arc<Path>>($x.clone());
+        test_into::<$t, Rc<Path>>($x.clone());
+        test_into::<$t, Cow<'_, Path>>($x.clone());
+    };
+}
+
+#[test]
+fn test_borrowed_into() {
+    let utf8_path = Utf8Path::new("test/path");
+    all_into!(&Utf8Path, utf8_path);
+}
+
+#[test]
+fn test_owned_into() {
+    let utf8_path_buf = Utf8PathBuf::from("test/path");
+    all_into!(Utf8PathBuf, utf8_path_buf);
+}
+
+#[test]
+fn test_boxed_into() {
+    // Exercise Utf8PathBuf -> Box<Utf8Path> (mostly intended for Miri).
+    let utf8_path_buf = Utf8PathBuf::from("test/path");
+    // This exercises Clone.
+    let boxed: Box<Utf8Path> = utf8_path_buf.clone().into();
+
+    assert_eq!(
+        &*boxed.clone().into_std_boxed_path(),
+        Path::new("test/path")
+    );
+    let from_boxed: Box<Path> = boxed.clone().into();
+    assert_eq!(&*from_boxed, Path::new("test/path"));
+
+    // Box<Utf8Path> -> Utf8PathBuf.
+
+--- tests/integration_tests.rs ---
+// Copyright (c) The camino Contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+use camino::{Utf8Path, Utf8PathBuf};
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+    path::Path,
+};
+
+static PATH_CORPUS: &[&str] = &[
+    "",
+    "foo",
+    "foo/bar",
+    "foo//bar",
+    "foo/bar/baz",
+    "foo/bar/./baz",
+    "foo/bar/../baz",
+    "../foo/bar/./../baz",
+    "/foo",
+    "/foo/bar",
+    "/",
+    "///",
+    // ---
+    // Windows-only paths
+    // ---
+    #[cfg(windows)]
+    "foo\\bar",
+    #[cfg(windows)]
+    "\\foo\\bar",
+    #[cfg(windows)]
+    "C:\\foo",
+    #[cfg(windows)]
+    "C:foo\\bar",
+    #[cfg(windows)]
+    "C:\\foo\\..\\.\\bar",
+    #[cfg(windows)]
+    "\\\\server\\foo\\bar",
+    #[cfg(windows)]
+    "\\\\.\\C:\\foo\\bar.txt",
+];
+
+#[test]
+fn test_borrow_eq_ord() {
+    // Utf8PathBuf implements Borrow<Utf8Path> so equality and ordering comparisons should
+    // match.
+    for (idx, &path1) in PATH_CORPUS.iter().enumerate() {
+        for &path2 in &PATH_CORPUS[idx..] {
+            let borrowed1 = Utf8Path::new(path1);
+            let borrowed2 = Utf8Path::new(path2);
+            let owned1 = Utf8PathBuf::from(path1);
+            let owned2 = Utf8PathBuf::from(path2);
+
+            assert_eq!(
+                borrowed1 == borrowed2,

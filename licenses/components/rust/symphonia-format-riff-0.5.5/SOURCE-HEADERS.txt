@@ -1,0 +1,314 @@
+--- src/aiff/chunks.rs ---
+// Symphonia
+// Copyright (c) 2019-2023 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::fmt;
+
+use symphonia_core::codecs::{
+    CODEC_TYPE_PCM_ALAW, CODEC_TYPE_PCM_F32BE, CODEC_TYPE_PCM_F64BE, CODEC_TYPE_PCM_MULAW,
+    CODEC_TYPE_PCM_S16BE, CODEC_TYPE_PCM_S16LE, CODEC_TYPE_PCM_S24BE, CODEC_TYPE_PCM_S32BE,
+    CODEC_TYPE_PCM_S8,
+};
+use symphonia_core::errors::{decode_error, unsupported_error, Result};
+use symphonia_core::io::{MediaSourceStream, ReadBytes};
+
+use crate::common::{
+    try_channel_count_to_mask, ChunkParser, FormatALaw, FormatData, FormatIeeeFloat, FormatMuLaw,
+    FormatPcm, PacketInfo, ParseChunk, ParseChunkTag,
+};
+
+use extended::Extended;
+
+/// `CommonChunk` is a required AIFF chunk, containing metadata.
+pub struct CommonChunk {
+    /// The number of channels.
+    pub n_channels: i16,
+    /// The number of audio frames.
+    #[allow(dead_code)]
+    pub n_sample_frames: u32,
+    /// The sample size in bits.
+    pub sample_size: i16,
+    /// The sample rate in Hz.
+    pub sample_rate: u32,
+    /// Extra data associated with the format block conditional upon the format tag.
+    pub format_data: FormatData,
+}
+
+impl CommonChunk {
+    fn read_pcm_fmt(bits_per_sample: u16, n_channels: u16) -> Result<FormatData> {
+        // Bits per sample for PCM is both the encoded sample width, and the actual sample width.
+        // Strictly, this must either be 8 or 16 bits, but there is no reason why 24 and 32 bits
+        // can't be supported. Since these files do exist, allow for 8/16/24/32-bit samples, but
+        // error if not a multiple of 8 or greater than 32-bits.
+        //
+        // It is possible though for AIFF to have a sample size not divisible by 8.
+        // Data is left justified, with the remaining bits zeroed. Currently not supported.
+        //
+        // Select the appropriate codec using bits per sample. Samples are always interleaved and
+        // little-endian encoded for the PCM format.
+        let codec = match bits_per_sample {
+            8 => CODEC_TYPE_PCM_S8,
+            16 => CODEC_TYPE_PCM_S16BE,
+            24 => CODEC_TYPE_PCM_S24BE,
+
+--- src/aiff/mod.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::io::{Seek, SeekFrom};
+
+use symphonia_core::codecs::CodecParameters;
+use symphonia_core::errors::{seek_error, unsupported_error};
+use symphonia_core::errors::{Result, SeekErrorKind};
+use symphonia_core::formats::prelude::*;
+use symphonia_core::io::*;
+use symphonia_core::meta::{Metadata, MetadataLog};
+use symphonia_core::probe::{Descriptor, Instantiate, QueryDescriptor};
+use symphonia_core::support_format;
+
+use log::debug;
+
+use crate::common::{
+    append_data_params, append_format_params, next_packet, ByteOrder, ChunksReader, PacketInfo,
+};
+mod chunks;
+use chunks::*;
+
+/// Aiff is actually a RIFF stream, with a "FORM" ASCII stream marker.
+const AIFF_STREAM_MARKER: [u8; 4] = *b"FORM";
+/// A possible RIFF form is "aiff".
+const AIFF_RIFF_FORM: [u8; 4] = *b"AIFF";
+/// A possible RIFF form is "aifc", using compressed data.
+const AIFC_RIFF_FORM: [u8; 4] = *b"AIFC";
+
+/// Audio Interchange File Format (AIFF) format reader.
+///
+/// `AiffReader` implements a demuxer for the AIFF container format.
+pub struct AiffReader {
+    reader: MediaSourceStream,
+    tracks: Vec<Track>,
+    cues: Vec<Cue>,
+    metadata: MetadataLog,
+    packet_info: PacketInfo,
+    data_start_pos: u64,
+    data_end_pos: u64,
+}
+
+impl QueryDescriptor for AiffReader {
+    fn query() -> &'static [Descriptor] {
+        &[
+            // AIFF RIFF form
+            support_format!(
+                "riff",
+                " Resource Interchange File Format",
+                &["aiff", "aif", "aifc"],
+                &["audio/aiff", "audio/x-aiff", " sound/aiff", "audio/x-pn-aiff"],
+
+--- src/common.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+/// `PacketInfo` helps to simulate packetization over a number of blocks of data.
+/// In case the codec is blockless the block size equals one full audio frame in bytes.
+use std::marker::PhantomData;
+
+use symphonia_core::audio::Channels;
+use symphonia_core::codecs::CodecParameters;
+use symphonia_core::codecs::CodecType;
+use symphonia_core::errors::{decode_error, end_of_stream_error, Error, Result};
+use symphonia_core::formats::prelude::*;
+use symphonia_core::io::{MediaSourceStream, ReadBytes};
+
+use log::{debug, info};
+
+pub enum ByteOrder {
+    LittleEndian,
+    BigEndian,
+}
+
+/// The maximum number of frames that will be in a packet.
+/// Since there are no real packets in AIFF, this is arbitrary, used same value as MP3.
+const MAX_FRAMES_PER_PACKET: u64 = 1152;
+
+/// `ParseChunkTag` implements `parse_tag` to map between the 4-byte chunk identifier and the
+/// enumeration
+pub trait ParseChunkTag: Sized {
+    fn parse_tag(tag: [u8; 4], len: u32) -> Option<Self>;
+}
+
+pub enum NullChunks {}
+
+impl ParseChunkTag for NullChunks {
+    fn parse_tag(_tag: [u8; 4], _len: u32) -> Option<Self> {
+        None
+    }
+}
+
+pub fn fix_channel_mask(mut channel_mask: u32, n_channels: u16) -> u32 {
+    let channel_diff = n_channels as i32 - channel_mask.count_ones() as i32;
+
+    if channel_diff != 0 {
+        info!("Channel mask not set correctly, channel positions may be incorrect!");
+    }
+
+    // Check that the number of ones in the channel mask match the number of channels.
+    if channel_diff > 0 {
+        // Too few ones in mask so add extra ones above the most significant one
+        let shift = 32 - (!channel_mask).leading_ones();
+        channel_mask |= ((1 << channel_diff) - 1) << shift;
+
+--- src/lib.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+#![warn(rust_2018_idioms)]
+#![forbid(unsafe_code)]
+// The following lints are allowed in all Symphonia crates. Please see clippy.toml for their
+// justification.
+#![allow(clippy::comparison_chain)]
+#![allow(clippy::excessive_precision)]
+#![allow(clippy::identity_op)]
+#![allow(clippy::manual_range_contains)]
+
+mod common;
+
+#[cfg(feature = "aiff")]
+mod aiff;
+#[cfg(feature = "wav")]
+mod wave;
+
+#[cfg(feature = "aiff")]
+pub use aiff::AiffReader;
+#[cfg(feature = "wav")]
+pub use wave::WavReader;
+
+
+--- src/wave/chunks.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::fmt;
+
+use symphonia_core::audio::Channels;
+use symphonia_core::codecs::CodecParameters;
+use symphonia_core::codecs::CodecType;
+use symphonia_core::codecs::{
+    CODEC_TYPE_ADPCM_IMA_WAV, CODEC_TYPE_ADPCM_MS, CODEC_TYPE_PCM_ALAW, CODEC_TYPE_PCM_F32LE,
+    CODEC_TYPE_PCM_F64LE, CODEC_TYPE_PCM_MULAW, CODEC_TYPE_PCM_S16LE, CODEC_TYPE_PCM_S24LE,
+    CODEC_TYPE_PCM_S32LE, CODEC_TYPE_PCM_U8,
+};
+use symphonia_core::errors::{decode_error, unsupported_error, Result};
+use symphonia_core::io::{MediaSourceStream, ReadBytes};
+use symphonia_core::meta::{MetadataBuilder, MetadataRevision, Tag};
+use symphonia_metadata::riff;
+
+use crate::common::{
+    fix_channel_mask, try_channel_count_to_mask, ByteOrder, ChunkParser, ChunksReader, FormatALaw,
+    FormatAdpcm, FormatData, FormatExtensible, FormatIeeeFloat, FormatMuLaw, FormatPcm, NullChunks,
+    PacketInfo, ParseChunk, ParseChunkTag,
+};
+
+pub struct WaveFormatChunk {
+    /// The number of channels.
+    pub n_channels: u16,
+    /// The sample rate in Hz. For non-PCM formats, this value must be interpreted as per the
+    /// format's specifications.
+    pub sample_rate: u32,
+    /// The required average data rate required in bytes/second. For non-PCM formats, this value
+    /// must be interpreted as per the format's specifications.
+    pub avg_bytes_per_sec: u32,
+    /// The byte alignment of one audio frame. For PCM formats, this is equal to
+    /// `(n_channels * format_data.bits_per_sample) / 8`. For non-PCM formats, this value must be
+    /// interpreted as per the format's specifications.
+    pub block_align: u16,
+    /// Extra data associated with the format block conditional upon the format tag.
+    pub format_data: FormatData,
+}
+
+impl WaveFormatChunk {
+    fn read_pcm_fmt<B: ReadBytes>(
+        reader: &mut B,
+        bits_per_sample: u16,
+        n_channels: u16,
+        len: u32,
+    ) -> Result<FormatData> {
+        // WaveFormat for a PCM format may be extended with an extra data length field followed by
+        // the extension data itself. Use the chunk length to determine if the format chunk is
+        // extended.
+
+--- src/wave/mod.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::io::{Seek, SeekFrom};
+
+use symphonia_core::codecs::CodecParameters;
+use symphonia_core::errors::{seek_error, unsupported_error};
+use symphonia_core::errors::{Result, SeekErrorKind};
+use symphonia_core::formats::prelude::*;
+use symphonia_core::io::*;
+use symphonia_core::meta::{Metadata, MetadataLog};
+use symphonia_core::probe::{Descriptor, Instantiate, QueryDescriptor};
+use symphonia_core::support_format;
+
+use log::{debug, error};
+
+use crate::common::{
+    append_data_params, append_format_params, next_packet, ByteOrder, ChunksReader, PacketInfo,
+};
+mod chunks;
+use chunks::*;
+
+/// WAVE is actually a RIFF stream, with a "RIFF" ASCII stream marker.
+const WAVE_STREAM_MARKER: [u8; 4] = *b"RIFF";
+/// A possible RIFF form is "wave".
+const WAVE_RIFF_FORM: [u8; 4] = *b"WAVE";
+
+/// Waveform Audio File Format (WAV) format reader.
+///
+/// `WavReader` implements a demuxer for the WAVE container format.
+pub struct WavReader {
+    reader: MediaSourceStream,
+    tracks: Vec<Track>,
+    cues: Vec<Cue>,
+    metadata: MetadataLog,
+    packet_info: PacketInfo,
+    data_start_pos: u64,
+    data_end_pos: u64,
+}
+
+impl QueryDescriptor for WavReader {
+    fn query() -> &'static [Descriptor] {
+        &[
+            // WAVE RIFF form
+            support_format!(
+                "wave",
+                "Waveform Audio File Format",
+                &["wav", "wave"],
+                &["audio/vnd.wave", "audio/x-wav", "audio/wav", "audio/wave"],
+                &[b"RIFF"]
+            ),

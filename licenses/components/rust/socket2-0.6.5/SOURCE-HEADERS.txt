@@ -1,0 +1,227 @@
+--- src/lib.rs ---
+// Copyright 2015 The Rust Project Developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+#![allow(clippy::needless_lifetimes)]
+
+//! Utilities for creating and using sockets.
+//!
+//! The goal of this crate is to create and use a socket using advanced
+//! configuration options (those that are not available in the types in the
+//! standard library) without using any unsafe code.
+//!
+//! This crate provides as direct as possible access to the system's
+//! functionality for sockets, this means little effort to provide
+//! cross-platform utilities. It is up to the user to know how to use sockets
+//! when using this crate. *If you don't know how to create a socket using
+//! libc/system calls then this crate is not for you*. Most, if not all,
+//! functions directly relate to the equivalent system call with no error
+//! handling applied, so no handling errors such as [`EINTR`]. As a result using
+//! this crate can be a little wordy, but it should give you maximal flexibility
+//! over configuration of sockets.
+//!
+//! [`EINTR`]: std::io::ErrorKind::Interrupted
+//!
+//! # Examples
+//!
+//! ```no_run
+//! # fn main() -> std::io::Result<()> {
+//! use std::net::{SocketAddr, TcpListener};
+//! use socket2::{Socket, Domain, Type};
+//!
+//! // Create a TCP listener bound to two addresses.
+//! let socket = Socket::new(Domain::IPV6, Type::STREAM, None)?;
+//!
+//! socket.set_only_v6(false)?;
+//! let address: SocketAddr = "[::1]:12345".parse().unwrap();
+//! socket.bind(&address.into())?;
+//! socket.listen(128)?;
+//!
+//! let listener: TcpListener = socket.into();
+//! // ...
+//! # drop(listener);
+//! # Ok(()) }
+//! ```
+//!
+//! ## Features
+//!
+//! This crate has a single feature `all`, which enables all functions even ones
+//! that are not available on all OSs.
+
+#![deny(missing_docs, missing_debug_implementations, rust_2018_idioms)]
+
+--- src/socket.rs ---
+// Copyright 2015 The Rust Project Developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::fmt;
+use std::io::{self, Read, Write};
+#[cfg(not(any(target_os = "redox", target_os = "wasi", target_os = "horizon")))]
+use std::io::{IoSlice, IoSliceMut};
+use std::mem::MaybeUninit;
+#[cfg(not(any(target_os = "nto", target_os = "nuttx")))]
+use std::net::Ipv6Addr;
+use std::net::{self, Ipv4Addr, Shutdown};
+#[cfg(any(unix, all(target_os = "wasi", not(target_env = "p1"))))]
+use std::os::fd::{FromRawFd, IntoRawFd};
+#[cfg(windows)]
+use std::os::windows::io::{FromRawSocket, IntoRawSocket};
+use std::time::Duration;
+
+use crate::sys::{self, c_int, getsockopt, setsockopt, Bool};
+#[cfg(all(unix, not(any(target_os = "redox", target_os = "horizon"))))]
+use crate::MsgHdrMut;
+use crate::{Domain, Protocol, SockAddr, TcpKeepalive, Type};
+#[cfg(not(any(target_os = "redox", target_os = "wasi", target_os = "horizon")))]
+use crate::{MaybeUninitSlice, MsgHdr, RecvFlags};
+
+/// Owned wrapper around a system socket.
+///
+/// This type simply wraps an instance of a file descriptor (`c_int`) on Unix
+/// and an instance of `SOCKET` on Windows. This is the main type exported by
+/// this crate and is intended to mirror the raw semantics of sockets on
+/// platforms as closely as possible. Almost all methods correspond to
+/// precisely one libc or OS API call which is essentially just a "Rustic
+/// translation" of what's below.
+///
+/// ## Converting to and from other types
+///
+/// This type can be freely converted into the network primitives provided by
+/// the standard library, such as [`TcpStream`] or [`UdpSocket`], using the
+/// [`From`] trait, see the example below.
+///
+/// [`TcpStream`]: std::net::TcpStream
+/// [`UdpSocket`]: std::net::UdpSocket
+///
+/// # Notes
+///
+/// Some methods that set options on `Socket` require two system calls to set
+/// their options without overwriting previously set options. We do this by
+/// first getting the current settings, applying the desired changes, and then
+/// updating the settings. This means that the operation is **not** atomic. This
+/// can lead to a data race when two threads are changing options in parallel.
+///
+
+--- src/sys/unix.rs ---
+// Copyright 2015 The Rust Project Developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::cmp::min;
+#[cfg(not(target_os = "wasi"))]
+use std::ffi::OsStr;
+#[cfg(not(any(target_os = "redox", target_os = "wasi", target_os = "horizon")))]
+use std::io::IoSlice;
+use std::marker::PhantomData;
+use std::mem::{self, size_of, MaybeUninit};
+use std::net::Shutdown;
+use std::net::{Ipv4Addr, Ipv6Addr};
+#[cfg(all(
+    feature = "all",
+    any(
+        target_os = "ios",
+        target_os = "visionos",
+        target_os = "macos",
+        target_os = "tvos",
+        target_os = "watchos",
+        target_os = "illumos",
+        target_os = "solaris",
+        target_os = "linux",
+        target_os = "android",
+    )
+))]
+use std::num::NonZeroU32;
+#[cfg(all(
+    feature = "all",
+    any(
+        target_os = "aix",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "ios",
+        target_os = "visionos",
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "tvos",
+        target_os = "watchos",
+    )
+))]
+use std::num::NonZeroUsize;
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
+#[cfg(not(target_os = "wasi"))]
+use std::os::unix::ffi::OsStrExt;
+#[cfg(all(feature = "all", unix))]
+use std::os::unix::net::{UnixDatagram, UnixListener, UnixStream};
+#[cfg(not(target_os = "wasi"))]
+use std::path::Path;
+use std::ptr;
+
+--- src/sys/windows.rs ---
+// Copyright 2015 The Rust Project Developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::cmp::min;
+use std::io::{self, IoSlice};
+use std::marker::PhantomData;
+use std::mem::{self, size_of, MaybeUninit};
+use std::net::{self, Ipv4Addr, Ipv6Addr, Shutdown};
+use std::os::windows::io::{
+    AsRawSocket, AsSocket, BorrowedSocket, FromRawSocket, IntoRawSocket, OwnedSocket,
+    RawSocket as StdRawSocket,
+};
+use std::path::Path;
+use std::sync::Once;
+use std::time::{Duration, Instant};
+use std::{process, ptr, slice};
+
+use windows_sys::Win32::Foundation::{SetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT};
+use windows_sys::Win32::Networking::WinSock::{
+    self, tcp_keepalive, FIONBIO, IN6_ADDR, IN6_ADDR_0, INVALID_SOCKET, IN_ADDR, IN_ADDR_0,
+    POLLERR, POLLHUP, POLLRDNORM, POLLWRNORM, SD_BOTH, SD_RECEIVE, SD_SEND, SIO_KEEPALIVE_VALS,
+    SOCKET_ERROR, WSABUF, WSAEMSGSIZE, WSAESHUTDOWN, WSAPOLLFD, WSAPROTOCOL_INFOW,
+    WSA_FLAG_NO_HANDLE_INHERIT, WSA_FLAG_OVERLAPPED, WSA_FLAG_REGISTERED_IO,
+};
+
+#[cfg(feature = "all")]
+use windows_sys::Win32::Networking::WinSock::{
+    SIO_TCP_SET_ACK_FREQUENCY, TCP_ACK_FREQUENCY_PARAMETERS,
+};
+
+#[cfg(feature = "all")]
+use windows_sys::Win32::Networking::WinSock::{
+    IP6T_SO_ORIGINAL_DST, SOL_IP, SO_ORIGINAL_DST, SO_PROTOCOL_INFOW,
+};
+use windows_sys::Win32::System::Threading::INFINITE;
+
+use crate::{MsgHdr, RecvFlags, SockAddr, SockAddrStorage, TcpKeepalive, Type};
+
+#[allow(non_camel_case_types)]
+pub(crate) type c_int = std::ffi::c_int;
+
+/// Fake MSG_TRUNC flag for the [`RecvFlags`] struct.
+///
+/// The flag is enabled when a `WSARecv[From]` call returns `WSAEMSGSIZE`. The
+/// value of the flag is defined by us.
+pub(crate) const MSG_TRUNC: c_int = 0x01;
+
+// Used in `Domain`.
+pub(crate) const AF_INET: c_int = windows_sys::Win32::Networking::WinSock::AF_INET as c_int;
+pub(crate) const AF_INET6: c_int = windows_sys::Win32::Networking::WinSock::AF_INET6 as c_int;

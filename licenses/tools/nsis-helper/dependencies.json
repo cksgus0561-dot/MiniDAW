@@ -1,0 +1,78 @@
+{
+  "version": "0.5.3",
+  "target": "i686-pc-windows-msvc",
+  "lockHash": "93518da5a9ebb61ac5df4c021707f5d936307e3380d01a8f037da33592b63ac8",
+  "packages": [
+    {
+      "name": "proc-macro2",
+      "version": "1.0.107",
+      "license": "MIT OR Apache-2.0",
+      "scope": "Helper build only",
+      "notices": [
+        "licenses/tools/nsis-helper/proc-macro2-1.0.107/LICENSE-APACHE",
+        "licenses/tools/nsis-helper/proc-macro2-1.0.107/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "quote",
+      "version": "1.0.47",
+      "license": "MIT OR Apache-2.0",
+      "scope": "Helper build only",
+      "notices": [
+        "licenses/tools/nsis-helper/quote-1.0.47/LICENSE-APACHE",
+        "licenses/tools/nsis-helper/quote-1.0.47/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "semver",
+      "version": "1.0.28",
+      "license": "MIT OR Apache-2.0",
+      "scope": "Installer helper runtime",
+      "notices": [
+        "licenses/tools/nsis-helper/semver-1.0.28/LICENSE-APACHE",
+        "licenses/tools/nsis-helper/semver-1.0.28/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "syn",
+      "version": "2.0.119",
+      "license": "MIT OR Apache-2.0",
+      "scope": "Helper build only",
+      "notices": [
+        "licenses/tools/nsis-helper/syn-2.0.119/LICENSE-APACHE",
+        "licenses/tools/nsis-helper/syn-2.0.119/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "unicode-ident",
+      "version": "1.0.26",
+      "license": "(MIT OR Apache-2.0) AND Unicode-3.0",
+      "scope": "Helper build only",
+      "notices": [
+        "licenses/tools/nsis-helper/unicode-ident-1.0.26/LICENSE-APACHE",
+        "licenses/tools/nsis-helper/unicode-ident-1.0.26/LICENSE-MIT",
+        "licenses/tools/nsis-helper/unicode-ident-1.0.26/LICENSE-UNICODE"
+      ]
+    },
+    {
+      "name": "windows-link",
+      "version": "0.2.1",
+      "license": "MIT OR Apache-2.0",
+      "scope": "Installer helper runtime",
+      "notices": [
+        "licenses/tools/nsis-helper/windows-link-0.2.1/license-apache-2.0",
+        "licenses/tools/nsis-helper/windows-link-0.2.1/license-mit"
+      ]
+    },
+    {
+      "name": "windows-sys",
+      "version": "0.61.2",
+      "license": "MIT OR Apache-2.0",
+      "scope": "Installer helper runtime",
+      "notices": [
+        "licenses/tools/nsis-helper/windows-sys-0.61.2/license-apache-2.0",
+        "licenses/tools/nsis-helper/windows-sys-0.61.2/license-mit"
+      ]
+    }
+  ]
+}

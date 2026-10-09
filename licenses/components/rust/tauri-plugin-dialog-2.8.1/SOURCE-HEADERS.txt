@@ -1,0 +1,351 @@
+--- build.rs ---
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+const COMMANDS: &[&str] = &["open", "save", "message"];
+
+fn main() {
+    let result = tauri_plugin::Builder::new(COMMANDS)
+        .global_api_script_path("./api-iife.js")
+        .android_path("android")
+        .ios_path("ios")
+        .try_build();
+
+    // when building documentation for Android the plugin build result is always Err() (docs.rs mounts the sources read-only) and is irrelevant to the crate documentation build
+    // `cfg(docsrs)` only reaches rustdoc, build scripts must check the `DOCS_RS` env var instead
+    if !(std::env::var_os("DOCS_RS").is_some()
+        && std::env::var("TARGET").unwrap().contains("android"))
+    {
+        result.unwrap();
+    }
+}
+
+
+--- src/commands.rs ---
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+use tauri::{Manager, Runtime, State, Window, command};
+use tauri_plugin_fs::FsExt;
+
+use crate::{
+    Dialog, FileAccessMode, FileDialogBuilder, FilePath, MessageDialogButtons, MessageDialogKind,
+    MessageDialogResult, PickerMode, Result,
+};
+
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum OpenResponse {
+    #[cfg(desktop)]
+    Folders(Option<Vec<FilePath>>),
+    #[cfg(desktop)]
+    Folder(Option<FilePath>),
+    Files(Option<Vec<FilePath>>),
+    File(Option<FilePath>),
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DialogFilter {
+    name: String,
+    extensions: Vec<String>,
+}
+
+/// The options for the open dialog API.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenDialogOptions {
+    /// The title of the dialog window.
+    title: Option<String>,
+    /// The filters of the dialog.
+    #[serde(default)]
+    filters: Vec<DialogFilter>,
+    /// Whether the dialog allows multiple selection or not.
+    #[serde(default)]
+    multiple: bool,
+    /// Whether the dialog is a directory selection (`true` value) or file selection (`false` value).
+    #[serde(default)]
+    directory: bool,
+    /// The initial path of the dialog.
+    default_path: Option<PathBuf>,
+    /// If [`Self::directory`] is true, indicates that it will be read recursively later.
+    /// Defines whether subdirectories will be allowed on the scope or not.
+    #[serde(default)]
+    #[cfg_attr(mobile, allow(dead_code))]
+
+--- src/desktop.rs ---
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! Use native message and file open/save dialogs.
+//!
+//! This module exposes non-blocking APIs on its root, relying on callback closures
+//! to give results back. This is particularly useful when running dialogs from the main thread.
+//! When using on asynchronous contexts such as async commands, the [`blocking`] APIs are recommended.
+
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
+use rfd::{AsyncFileDialog, AsyncMessageDialog};
+use serde::de::DeserializeOwned;
+use tauri::{AppHandle, Runtime, plugin::PluginApi};
+
+use crate::{FileDialogBuilder, FilePath, MessageDialogBuilder, models::*};
+
+pub fn init<R: Runtime, C: DeserializeOwned>(
+    app: &AppHandle<R>,
+    _api: PluginApi<R, C>,
+) -> crate::Result<Dialog<R>> {
+    Ok(Dialog(app.clone()))
+}
+
+/// Access to the dialog APIs.
+#[derive(Debug)]
+pub struct Dialog<R: Runtime>(AppHandle<R>);
+
+impl<R: Runtime> Clone for Dialog<R> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<R: Runtime> Dialog<R> {
+    pub(crate) fn app_handle(&self) -> &AppHandle<R> {
+        &self.0
+    }
+}
+
+impl From<MessageDialogKind> for rfd::MessageLevel {
+    fn from(kind: MessageDialogKind) -> Self {
+        match kind {
+            MessageDialogKind::Info => Self::Info,
+            MessageDialogKind::Warning => Self::Warning,
+            MessageDialogKind::Error => Self::Error,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct WindowHandle {
+    window_handle: RawWindowHandle,
+    display_handle: RawDisplayHandle,
+}
+
+--- src/error.rs ---
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use serde::{Serialize, ser::Serializer};
+
+/// Alias for `Result<T, Error>` used throughout this crate.
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// Errors that can occur while showing or interacting with a dialog.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Error {
+    /// An error forwarded from the Tauri core.
+    #[error(transparent)]
+    Tauri(#[from] tauri::Error),
+    /// An I/O error, for example while resolving a picked path.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    /// Forwarding a request to, or receiving a response from, the mobile plugin failed.
+    #[cfg(mobile)]
+    #[error(transparent)]
+    PluginInvoke(#[from] tauri::plugin::mobile::PluginInvokeError),
+    /// The folder picker was requested through the `open` command, but folder picking is not implemented on mobile.
+    #[cfg(mobile)]
+    #[error("Folder picker is not implemented on mobile")]
+    FolderPickerNotImplemented,
+    /// An error forwarded from the `fs` plugin, returned when granting filesystem scope to a picked path fails.
+    #[error(transparent)]
+    Fs(#[from] tauri_plugin_fs::Error),
+}
+
+impl Serialize for Error {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.to_string().as_ref())
+    }
+}
+
+
+--- src/lib.rs ---
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! Native system dialogs for opening and saving files along with message dialogs.
+//!
+//! ## Cargo features
+//!
+//! - **gtk3** *(enabled by default)*: Uses GTK for dialogs on Linux & BSDs; has no effect on Windows and macOS
+//! - **xdg-portal**:  Uses XDG Desktop Portal instead of GTK on Linux & BSDs
+
+#![doc(
+    html_logo_url = "https://github.com/tauri-apps/tauri/raw/dev/app-icon.png",
+    html_favicon_url = "https://github.com/tauri-apps/tauri/raw/dev/app-icon.png"
+)]
+
+use serde::{Deserialize, Serialize};
+use tauri::{
+    Manager, Runtime,
+    plugin::{Builder, TauriPlugin},
+};
+
+use std::{
+    path::{Path, PathBuf},
+    sync::mpsc::sync_channel,
+};
+
+pub use models::*;
+
+pub use tauri_plugin_fs::FilePath;
+#[cfg(desktop)]
+mod desktop;
+#[cfg(mobile)]
+mod mobile;
+
+mod commands;
+mod error;
+mod models;
+
+pub use error::{Error, Result};
+
+#[cfg(desktop)]
+use desktop::*;
+#[cfg(mobile)]
+use mobile::*;
+
+#[cfg(desktop)]
+pub use desktop::Dialog;
+#[cfg(mobile)]
+pub use mobile::Dialog;
+
+/// The preferred mode of the file picker on mobile platforms (iOS and Android), which have
+/// distinct file and media pickers. On desktop, this option is ignored.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "lowercase")]
+
+--- src/mobile.rs ---
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use serde::{Deserialize, de::DeserializeOwned};
+use tauri::{
+    AppHandle, Runtime,
+    plugin::{PluginApi, PluginHandle},
+};
+
+use crate::{FileDialogBuilder, FilePath, MessageDialogBuilder, MessageDialogResult};
+
+#[cfg(target_os = "android")]
+const PLUGIN_IDENTIFIER: &str = "app.tauri.dialog";
+
+#[cfg(target_os = "ios")]
+tauri::ios_plugin_binding!(init_plugin_dialog);
+
+// initializes the Kotlin or Swift plugin classes
+pub fn init<R: Runtime, C: DeserializeOwned>(
+    _app: &AppHandle<R>,
+    api: PluginApi<R, C>,
+) -> crate::Result<Dialog<R>> {
+    #[cfg(target_os = "android")]
+    let handle = api.register_android_plugin(PLUGIN_IDENTIFIER, "DialogPlugin")?;
+    #[cfg(target_os = "ios")]
+    let handle = api.register_ios_plugin(init_plugin_dialog)?;
+    Ok(Dialog(handle))
+}
+
+/// Access to the dialog APIs.
+#[derive(Debug)]
+pub struct Dialog<R: Runtime>(PluginHandle<R>);
+
+impl<R: Runtime> Clone for Dialog<R> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<R: Runtime> Dialog<R> {
+    pub(crate) fn app_handle(&self) -> &AppHandle<R> {
+        self.0.app()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct FilePickerResponse {
+    files: Vec<FilePath>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SaveFileResponse {
+    file: FilePath,
+}
+
+--- src/models.rs ---
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+/// Types of message, ask and confirm dialogs.
+#[non_exhaustive]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
+pub enum MessageDialogKind {
+    /// Information dialog.
+    #[default]
+    Info,
+    /// Warning dialog.
+    Warning,
+    /// Error dialog.
+    Error,
+}
+
+impl<'de> Deserialize<'de> for MessageDialogKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(match s.to_lowercase().as_str() {
+            "info" => MessageDialogKind::Info,
+            "warning" => MessageDialogKind::Warning,
+            "error" => MessageDialogKind::Error,
+            _ => MessageDialogKind::Info,
+        })
+    }
+}
+
+impl Serialize for MessageDialogKind {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Info => serializer.serialize_str("info"),
+            Self::Warning => serializer.serialize_str("warning"),
+            Self::Error => serializer.serialize_str("error"),
+        }
+    }
+}
+
+/// Set of button that will be displayed on the dialog
+#[non_exhaustive]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub enum MessageDialogButtons {
+    #[default]
+    /// A single `Ok` button with OS default dialog text
+    Ok,
+    /// 2 buttons `Ok` and `Cancel` with OS default dialog texts

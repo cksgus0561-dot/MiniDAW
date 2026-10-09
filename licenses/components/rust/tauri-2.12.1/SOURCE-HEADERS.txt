@@ -1,0 +1,3729 @@
+--- build.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use heck::AsShoutySnakeCase;
+use tauri_utils::write_if_changed;
+
+use std::{
+  collections::BTreeMap,
+  env, fs,
+  path::{Path, PathBuf},
+};
+
+const PLUGINS: &[(&str, &[(&str, bool)])] = &[
+  // (plugin_name, &[(command, enabled-by_default)])
+  // TODO: Enable this in v3
+  // ("core:channel", &[("fetch", true)]),
+  (
+    "core:path",
+    &[
+      ("resolve_directory", true),
+      ("resolve", true),
+      ("normalize", true),
+      ("join", true),
+      ("dirname", true),
+      ("extname", true),
+      ("basename", true),
+      ("is_absolute", true),
+    ],
+  ),
+  (
+    "core:event",
+    &[
+      ("listen", true),
+      ("unlisten", true),
+      ("emit", true),
+      ("emit_to", true),
+    ],
+  ),
+  (
+    "core:window",
+    &[
+      ("create", false),
+      // getters
+      ("get_all_windows", true),
+      ("scale_factor", true),
+      ("inner_position", true),
+      ("outer_position", true),
+      ("inner_size", true),
+      ("outer_size", true),
+      ("is_fullscreen", true),
+      ("is_minimized", true),
+      ("is_maximized", true),
+      ("is_focused", true),
+      ("is_decorated", true),
+
+--- src/app/plugin.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use tauri_utils::{Theme, config::BundleType};
+
+use crate::{
+  AppHandle, Manager, ResourceId, Runtime, Webview, command,
+  plugin::{Builder, TauriPlugin},
+};
+
+#[command(root = "crate")]
+pub fn version<R: Runtime>(app: AppHandle<R>) -> String {
+  app.package_info().version.to_string()
+}
+
+#[command(root = "crate")]
+pub fn name<R: Runtime>(app: AppHandle<R>) -> String {
+  app.package_info().name.clone()
+}
+
+#[command(root = "crate")]
+pub fn tauri_version() -> &'static str {
+  crate::VERSION
+}
+
+#[command(root = "crate")]
+pub fn identifier<R: Runtime>(app: AppHandle<R>) -> String {
+  app.config().identifier.clone()
+}
+
+#[command(root = "crate")]
+#[allow(unused_variables)]
+pub fn app_show<R: Runtime>(app: AppHandle<R>) -> crate::Result<()> {
+  #[cfg(target_os = "macos")]
+  app.show()?;
+  Ok(())
+}
+
+#[command(root = "crate")]
+#[allow(unused_variables)]
+pub fn app_hide<R: Runtime>(app: AppHandle<R>) -> crate::Result<()> {
+  #[cfg(target_os = "macos")]
+  app.hide()?;
+  Ok(())
+}
+
+#[command(root = "crate")]
+pub fn exit<R: Runtime>(app: AppHandle<R>, code: i32) {
+  app.exit(code)
+}
+
+#[command(root = "crate")]
+#[allow(unused_variables)]
+pub async fn fetch_data_store_identifiers<R: Runtime>(
+
+--- src/app.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::{
+  Context, DeviceEventFilter, Emitter, EventLoopMessage, EventName, Listener, Manager, Monitor,
+  Runtime, Scopes, StateManager, Theme, Webview, WebviewWindowBuilder, Window,
+  image::Image,
+  ipc::{
+    CallbackFn, CommandArg, CommandItem, Invoke, InvokeError, InvokeHandler, InvokeResponseBody,
+    channel::ChannelDataIpcQueue,
+  },
+  manager::{AppManager, Asset, webview::UriSchemeProtocol},
+  plugin::{Plugin, PluginStore},
+  resources::ResourceTable,
+  runtime::{
+    ExitRequestedEventAction, RunEvent as RuntimeRunEvent,
+    window::{WebviewEvent as RuntimeWebviewEvent, WindowEvent as RuntimeWindowEvent},
+  },
+  sealed::{ManagerBase, RuntimeOrDispatch},
+  utils::{Env, config::Config},
+  webview::PageLoadPayload,
+};
+
+#[cfg(desktop)]
+use crate::menu::{Menu, MenuEvent};
+#[cfg(all(desktop, feature = "tray-icon"))]
+use crate::tray::{TrayIcon, TrayIconBuilder, TrayIconEvent, TrayIconId};
+use raw_window_handle::HasDisplayHandle;
+use serialize_to_javascript::{DefaultTemplate, Template, default_template};
+use tauri_macros::default_runtime;
+#[cfg(desktop)]
+use tauri_runtime::EventLoopProxy;
+use tauri_runtime::{
+  RuntimeInitArgs,
+  dpi::{PhysicalPosition, PhysicalSize},
+  window::DragDropEvent,
+};
+use tauri_utils::{PackageInfo, assets::AssetsIter};
+
+use std::{
+  borrow::Cow,
+  collections::HashMap,
+  fmt,
+  sync::{Arc, Mutex, MutexGuard, atomic, mpsc::Sender},
+  thread::ThreadId,
+  time::Duration,
+};
+
+use crate::{Event, EventTarget, event::EventId, runtime::RuntimeHandle};
+
+#[cfg(target_os = "macos")]
+use crate::ActivationPolicy;
+
+pub(crate) mod plugin;
+
+--- src/async_runtime.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! The singleton async runtime used by Tauri and exposed to users.
+//!
+//! Tauri uses [`tokio`] Runtime to initialize code, such as
+//! [`Plugin::initialize`](../plugin/trait.Plugin.html#method.initialize) and [`crate::Builder::setup`] hooks.
+//! This module also re-export some common items most developers need from [`tokio`]. If there's
+//! one you need isn't here, you could use types in [`tokio`] directly.
+//! For custom command handlers, it's recommended to use a plain `async fn` command.
+
+pub use tokio::{
+  runtime::{Handle as TokioHandle, Runtime as TokioRuntime},
+  sync::{
+    Mutex, RwLock,
+    mpsc::{Receiver, Sender, channel},
+  },
+  task::JoinHandle as TokioJoinHandle,
+};
+
+use std::{
+  future::Future,
+  pin::Pin,
+  sync::OnceLock,
+  task::{Context, Poll},
+};
+
+static RUNTIME: OnceLock<GlobalRuntime> = OnceLock::new();
+
+struct GlobalRuntime {
+  runtime: Option<Runtime>,
+  handle: RuntimeHandle,
+}
+
+impl GlobalRuntime {
+  fn handle(&self) -> RuntimeHandle {
+    if let Some(r) = &self.runtime {
+      r.handle()
+    } else {
+      self.handle.clone()
+    }
+  }
+
+  #[track_caller]
+  fn spawn<F>(&self, task: F) -> JoinHandle<F::Output>
+  where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+  {
+    if let Some(r) = &self.runtime {
+      r.spawn(task)
+    } else {
+      self.handle.spawn(task)
+    }
+
+--- src/error.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::fmt;
+
+/// A generic boxed error.
+#[derive(Debug)]
+pub struct SetupError(Box<dyn std::error::Error>);
+
+impl From<Box<dyn std::error::Error>> for SetupError {
+  fn from(error: Box<dyn std::error::Error>) -> Self {
+    Self(error)
+  }
+}
+
+// safety: the setup error is only used on the main thread
+// and we exit the process immediately.
+unsafe impl Send for SetupError {}
+unsafe impl Sync for SetupError {}
+
+impl fmt::Display for SetupError {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    self.0.fmt(f)
+  }
+}
+
+impl std::error::Error for SetupError {}
+
+/// Runtime errors that can happen inside a Tauri application.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Error {
+  /// Runtime error.
+  #[error("runtime error: {0}")]
+  Runtime(#[from] tauri_runtime::Error),
+  /// Window label must be unique.
+  #[error("a window with label `{0}` already exists")]
+  WindowLabelAlreadyExists(String),
+  /// Webview label must be unique.
+  #[error("a webview with label `{0}` already exists")]
+  WebviewLabelAlreadyExists(String),
+  /// Cannot use the webview reparent function on webview windows.
+  #[error("cannot reparent when using a WebviewWindow")]
+  CannotReparentWebviewWindow,
+  /// Embedded asset not found.
+  #[error("asset not found: {0}")]
+  AssetNotFound(String),
+  /// Failed to serialize/deserialize.
+  #[error("JSON error: {0}")]
+  Json(#[from] serde_json::Error),
+  /// IO error.
+  #[error("{0}")]
+  Io(#[from] std::io::Error),
+  /// Failed to load window icon.
+
+--- src/event/event_name.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use serde::{Deserialize, Deserializer};
+
+/// Checks if an event name is valid.
+fn is_event_name_valid(event: &str) -> bool {
+  event
+    .chars()
+    .all(|c| c.is_alphanumeric() || c == '-' || c == '/' || c == ':' || c == '_')
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct EventName<S = String>(S);
+
+impl Copy for EventName<&str> {}
+
+impl<S: AsRef<str>> EventName<S> {
+  pub(crate) fn new(s: S) -> crate::Result<EventName<S>> {
+    if !is_event_name_valid(s.as_ref()) {
+      return Err(crate::Error::IllegalEventName(s.as_ref().to_string()));
+    }
+    Ok(EventName(s))
+  }
+
+  pub(crate) fn as_str_event(&self) -> EventName<&str> {
+    EventName(self.0.as_ref())
+  }
+
+  pub(crate) fn as_str(&self) -> &str {
+    self.0.as_ref()
+  }
+}
+
+impl<S: std::fmt::Display> std::fmt::Display for EventName<S> {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    self.0.fmt(f)
+  }
+}
+
+impl EventName<&'static str> {
+  // this convenience method is for using in const contexts to discharge the preconditions
+  // &'static prevents using this function accidentally with dynamically built string slices
+  pub(crate) const fn from_str(s: &'static str) -> EventName<&'static str> {
+    EventName(s)
+  }
+}
+
+impl EventName<&str> {
+  pub fn into_owned(self) -> EventName {
+    EventName(self.0.to_string())
+  }
+}
+
+
+--- src/event/listener.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::{Runtime, Webview};
+
+use super::{EmitArgs, Event, EventId, EventTarget};
+
+use std::{
+  boxed::Box,
+  cell::Cell,
+  collections::{HashMap, HashSet},
+  sync::{
+    Arc, Mutex,
+    atomic::{AtomicU32, Ordering},
+  },
+};
+
+/// What to do with the pending handler when resolving it?
+enum Pending {
+  Unlisten(EventId),
+  Listen {
+    id: EventId,
+    event: crate::EventName,
+    handler: Handler,
+  },
+  Emit(EmitArgs),
+  RemoveForTarget(EventTarget),
+}
+
+/// Stored in [`Listeners`] to be called upon, when the event that stored it, is triggered.
+struct Handler {
+  target: EventTarget,
+  callback: Box<dyn Fn(Event) + Send>,
+}
+
+impl Handler {
+  fn new<F: Fn(Event) + Send + 'static>(target: EventTarget, callback: F) -> Self {
+    Self {
+      target,
+      callback: Box::new(callback),
+    }
+  }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct JsHandler {
+  target: EventTarget,
+  id: EventId,
+}
+
+impl JsHandler {
+  fn new(target: EventTarget, id: EventId) -> Self {
+    Self { target, id }
+  }
+
+--- src/event/mod.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+mod listener;
+pub(crate) mod plugin;
+use std::{convert::Infallible, str::FromStr};
+
+pub(crate) use listener::Listeners;
+use serde::{Deserialize, Serialize};
+
+mod event_name;
+
+pub(crate) use event_name::EventName;
+
+use crate::ipc::CallbackFn;
+
+/// Unique id of an event.
+pub type EventId = u32;
+
+/// Event Target
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
+#[serde(tag = "kind")]
+#[non_exhaustive]
+pub enum EventTarget {
+  /// Any and all event targets.
+  Any,
+
+  /// Any [`Window`](crate::Window), [`Webview`](crate::Webview) or [`WebviewWindow`](crate::WebviewWindow) that have this label.
+  AnyLabel {
+    /// Target label.
+    label: String,
+  },
+
+  /// [`App`](crate::App) and [`AppHandle`](crate::AppHandle) targets.
+  App,
+
+  /// [`Window`](crate::Window) target.
+  Window {
+    /// window label.
+    label: String,
+  },
+
+  /// [`Webview`](crate::Webview) target.
+  Webview {
+    /// webview label.
+    label: String,
+  },
+
+  /// [`WebviewWindow`](crate::WebviewWindow) target.
+  WebviewWindow {
+    /// webview window label.
+    label: String,
+  },
+}
+
+--- src/event/plugin.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+use serde_json::Value as JsonValue;
+use serialize_to_javascript::{DefaultTemplate, Template, default_template};
+
+use crate::plugin::{Builder, TauriPlugin};
+use crate::{AppHandle, Emitter, Manager, Webview};
+use crate::{EventId, Result, Runtime, command, ipc::CallbackFn};
+
+use super::EventName;
+use super::EventTarget;
+
+#[command(root = "crate")]
+async fn listen<R: Runtime>(
+  webview: Webview<R>,
+  event: EventName,
+  target: EventTarget,
+  handler: CallbackFn,
+) -> Result<EventId> {
+  webview.listen_js(event.as_str_event(), target, handler)
+}
+
+#[command(root = "crate")]
+async fn unlisten<R: Runtime>(
+  webview: Webview<R>,
+  event: EventName,
+  event_id: EventId,
+) -> Result<()> {
+  webview.unlisten_js(event.as_str_event(), event_id)
+}
+
+#[command(root = "crate")]
+async fn emit<R: Runtime>(
+  app: AppHandle<R>,
+  event: EventName,
+  payload: Option<JsonValue>,
+) -> Result<()> {
+  app.emit(event.as_str(), payload)
+}
+
+#[command(root = "crate")]
+async fn emit_to<R: Runtime>(
+  app: AppHandle<R>,
+  target: EventTarget,
+  event: EventName,
+  payload: Option<JsonValue>,
+) -> Result<()> {
+  app.emit_to(target, event.as_str(), payload)
+}
+
+/// Initializes the event plugin.
+pub(crate) fn init<R: Runtime, M: Manager<R>>(manager: &M) -> TauriPlugin<R> {
+  let listeners = manager.manager().listeners();
+
+
+--- src/image/mod.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! Image types used by this crate and also referenced by the JavaScript API layer.
+
+pub(crate) mod plugin;
+
+use std::borrow::Cow;
+use std::sync::Arc;
+
+#[cfg(windows)]
+use windows::{
+  Win32::{
+    Foundation::{E_FAIL, ERROR_INVALID_PARAMETER, ERROR_NOT_SUPPORTED, WIN32_ERROR},
+    Graphics::Gdi::{
+      BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC,
+      GetDIBits, HBITMAP,
+    },
+    System::LibraryLoader::GetModuleHandleW,
+    UI::WindowsAndMessaging::{
+      GetIconInfo, GetSystemMetrics, HICON, ICONINFO, IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW,
+      SM_CXICON, SM_CYICON,
+    },
+  },
+  core::{Owned, PCWSTR},
+};
+
+use crate::{Resource, ResourceId, ResourceTable};
+
+/// Identifies an icon resource embedded in the executable.
+#[cfg(windows)]
+#[cfg_attr(docsrs, doc(cfg(windows)))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IconResource<'a> {
+  /// An integer resource identifier (`MAKEINTRESOURCE`).
+  Id(u16),
+  /// A string resource name.
+  Name(&'a str),
+}
+
+#[cfg(windows)]
+impl From<u16> for IconResource<'_> {
+  fn from(id: u16) -> Self {
+    Self::Id(id)
+  }
+}
+
+#[cfg(windows)]
+impl<'a> From<&'a str> for IconResource<'a> {
+  fn from(name: &'a str) -> Self {
+    Self::Name(name)
+  }
+}
+
+
+--- src/image/plugin.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use serde::Serialize;
+
+use crate::Manager;
+use crate::plugin::{Builder, TauriPlugin};
+use crate::{ResourceId, Runtime, Webview, command, image::Image};
+
+#[command(root = "crate")]
+fn new<R: Runtime>(
+  webview: Webview<R>,
+  rgba: Vec<u8>,
+  width: u32,
+  height: u32,
+) -> crate::Result<ResourceId> {
+  let image = Image::new_owned(rgba, width, height);
+  let mut resources_table = webview.resources_table();
+  let rid = resources_table.add(image);
+  Ok(rid)
+}
+
+#[cfg(any(feature = "image-ico", feature = "image-png"))]
+#[command(root = "crate")]
+fn from_bytes<R: Runtime>(webview: Webview<R>, bytes: Vec<u8>) -> crate::Result<ResourceId> {
+  let image = Image::from_bytes(&bytes)?.to_owned();
+  let mut resources_table = webview.resources_table();
+  let rid = resources_table.add(image);
+  Ok(rid)
+}
+
+#[cfg(not(any(feature = "image-ico", feature = "image-png")))]
+#[command(root = "crate")]
+fn from_bytes() -> std::result::Result<(), &'static str> {
+  Err("from_bytes is only supported if the `image-ico` or `image-png` Cargo features are enabled")
+}
+
+#[cfg(any(feature = "image-ico", feature = "image-png"))]
+#[command(root = "crate")]
+fn from_path<R: Runtime>(
+  webview: Webview<R>,
+  path: std::path::PathBuf,
+) -> crate::Result<ResourceId> {
+  let image = Image::from_path(path)?.to_owned();
+  let mut resources_table = webview.resources_table();
+  let rid = resources_table.add(image);
+  Ok(rid)
+}
+
+#[cfg(not(any(feature = "image-ico", feature = "image-png")))]
+#[command(root = "crate")]
+fn from_path() -> std::result::Result<(), &'static str> {
+  Err("from_path is only supported if the `image-ico` or `image-png` Cargo features are enabled")
+}
+
+--- src/ios.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use swift_rs::{SRString, SwiftArg, swift};
+
+use std::{
+  ffi::c_void,
+  os::raw::{c_char, c_int, c_ulonglong},
+};
+
+type PluginMessageCallbackFn = unsafe extern "C" fn(c_int, c_int, *const c_char);
+pub struct PluginMessageCallback(pub PluginMessageCallbackFn);
+
+impl<'a> SwiftArg<'a> for PluginMessageCallback {
+  type ArgType = PluginMessageCallbackFn;
+
+  unsafe fn as_arg(&'a self) -> Self::ArgType {
+    self.0
+  }
+}
+
+type ChannelSendDataCallbackFn = unsafe extern "C" fn(c_ulonglong, *const c_char);
+pub struct ChannelSendDataCallback(pub ChannelSendDataCallbackFn);
+
+impl<'a> SwiftArg<'a> for ChannelSendDataCallback {
+  type ArgType = ChannelSendDataCallbackFn;
+
+  unsafe fn as_arg(&'a self) -> Self::ArgType {
+    self.0
+  }
+}
+
+swift!(pub fn run_plugin_command(
+  id: i32,
+  name: &SRString,
+  method: &SRString,
+  data: &SRString,
+  callback: PluginMessageCallback,
+  send_channel_data_callback: ChannelSendDataCallback
+));
+swift!(pub fn register_plugin(
+  name: &SRString,
+  plugin: *const c_void,
+  config: &SRString,
+  webview: *const c_void
+));
+swift!(pub fn on_webview_created(webview: *const c_void, controller: *const c_void));
+swift!(pub fn log_stdout());
+
+
+--- src/ipc/authority.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::collections::BTreeMap;
+use std::fmt::{Debug, Display};
+use std::sync::Arc;
+
+use serde::de::DeserializeOwned;
+
+#[cfg(feature = "dynamic-acl")]
+use tauri_utils::acl::capability::CapabilityFile;
+#[cfg(any(feature = "dynamic-acl", debug_assertions))]
+use tauri_utils::acl::manifest::Manifest;
+use tauri_utils::acl::{
+  APP_ACL_KEY, ExecutionContext, Value,
+  resolved::{Resolved, ResolvedCommand, ResolvedScope, ScopeKey},
+};
+
+use url::Url;
+
+use crate::{AppHandle, Manager, StateManager, Webview};
+use crate::{Runtime, ipc::InvokeError, sealed::ManagerBase};
+
+use super::{CommandArg, CommandItem};
+
+/// The runtime authority used to authorize IPC execution based on the Access Control List.
+pub struct RuntimeAuthority {
+  #[cfg(any(feature = "dynamic-acl", debug_assertions))]
+  acl: BTreeMap<String, Manifest>,
+  has_app_acl: bool,
+  allowed_commands: BTreeMap<String, Vec<ResolvedCommand>>,
+  denied_commands: BTreeMap<String, Vec<ResolvedCommand>>,
+  pub(crate) scope_manager: ScopeManager,
+}
+
+/// The origin trying to access the IPC.
+pub enum Origin {
+  /// Local app origin.
+  Local,
+  /// Remote origin.
+  Remote {
+    /// Remote URL.
+    url: Url,
+  },
+}
+
+impl Display for Origin {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      Self::Local => write!(f, "local"),
+      Self::Remote { url } => write!(f, "remote: {url}"),
+    }
+  }
+}
+
+--- src/ipc/capability_builder.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use serde::Serialize;
+use tauri_utils::{
+  acl::{
+    Scopes,
+    capability::{Capability, CapabilityFile, PermissionEntry},
+  },
+  platform::Target,
+};
+
+/// A capability that can be added at runtime.
+pub trait RuntimeCapability {
+  /// Creates the capability file.
+  fn build(self) -> CapabilityFile;
+}
+
+impl<T: AsRef<str>> RuntimeCapability for T {
+  fn build(self) -> CapabilityFile {
+    self.as_ref().parse().expect("invalid capability")
+  }
+}
+
+/// A builder for a [`Capability`].
+pub struct CapabilityBuilder(Capability);
+
+impl CapabilityBuilder {
+  /// Creates a new capability builder with a unique identifier.
+  pub fn new(identifier: impl Into<String>) -> Self {
+    Self(Capability {
+      identifier: identifier.into(),
+      description: "".into(),
+      remote: None,
+      local: true,
+      windows: Vec::new(),
+      webviews: Vec::new(),
+      permissions: Vec::new(),
+      platforms: None,
+    })
+  }
+
+  /// Allows this capability to be used by a remote URL.
+  pub fn remote(mut self, url: String) -> Self {
+    self
+      .0
+      .remote
+      .get_or_insert_with(Default::default)
+      .urls
+      .push(url);
+    self
+  }
+
+  /// Whether this capability is applied on local app URLs or not. Defaults to `true`.
+
+--- src/ipc/channel.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{
+  collections::HashMap,
+  str::FromStr,
+  sync::{
+    Arc, Mutex,
+    atomic::{AtomicU32, AtomicUsize, Ordering},
+  },
+};
+
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+use crate::{
+  Manager, Runtime, State, Webview, command,
+  ipc::{CommandArg, CommandItem},
+  plugin::{Builder as PluginBuilder, TauriPlugin},
+};
+
+use super::{
+  CallbackFn, InvokeError, InvokeResponseBody, IpcResponse, Request, Response,
+  format_callback::format_raw_js,
+};
+
+pub const IPC_PAYLOAD_PREFIX: &str = "__CHANNEL__:";
+// TODO: Change this to `channel` in v3
+pub const CHANNEL_PLUGIN_NAME: &str = "__TAURI_CHANNEL__";
+// TODO: Change this to `plugin:channel|fetch` in v3
+pub const FETCH_CHANNEL_DATA_COMMAND: &str = "plugin:__TAURI_CHANNEL__|fetch";
+const CHANNEL_ID_HEADER_NAME: &str = "Tauri-Channel-Id";
+
+/// Maximum size a JSON we should send directly without going through the fetch process
+// 8192 byte JSON payload runs roughly 2x faster through eval than through fetch on WebView2 v135
+const MAX_JSON_DIRECT_EXECUTE_THRESHOLD: usize = 8192;
+// 1024 byte payload runs  roughly 30% faster through eval than through fetch on macOS
+const MAX_RAW_DIRECT_EXECUTE_THRESHOLD: usize = 1024;
+
+static CHANNEL_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+/// Maps channel ids to pending data that must be sent to the JavaScript side via the IPC.
+///
+/// Scoped per webview: each webview has its own id sequence and lookups only
+/// ever touch the calling webview's entries.
+#[derive(Default, Clone)]
+pub struct ChannelDataIpcQueue(Arc<Mutex<HashMap<String, WebviewChannelDataQueue>>>);
+
+/// Pending channel data of one webview.
+#[derive(Default)]
+struct WebviewChannelDataQueue {
+  next_id: u32,
+  entries: HashMap<u32, InvokeResponseBody>,
+}
+
+
+--- src/ipc/command.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! The Tauri custom commands types and traits.
+//!
+//! You usually don't need to create these items yourself. These are created from [command](../attr.command.html)
+//! attribute macro along the way and used by [`crate::generate_handler`] macro.
+
+use crate::{
+  Runtime,
+  ipc::{InvokeBody, InvokeError, InvokeMessage},
+};
+use serde::{
+  Deserialize, Deserializer,
+  de::{Error, Visitor},
+};
+
+use tauri_utils::acl::resolved::ResolvedCommand;
+
+/// Represents a custom command.
+pub struct CommandItem<'a, R: Runtime> {
+  /// Name of the plugin if this command targets one.
+  pub plugin: Option<&'static str>,
+
+  /// The name of the command, e.g. `handler` on `#[command] fn handler(value: u64)`
+  pub name: &'static str,
+
+  /// The key of the command item, e.g. `value` on `#[command] fn handler(value: u64)`
+  pub key: &'static str,
+
+  /// The [`InvokeMessage`] that was passed to this command.
+  pub message: &'a InvokeMessage<R>,
+
+  /// The resolved ACL for this command.
+  pub acl: &'a Option<Vec<ResolvedCommand>>,
+}
+
+/// Trait implemented by command arguments to derive a value from a [`CommandItem`].
+///
+/// # Command Arguments
+///
+/// A command argument is any type that represents an item parsable from a [`CommandItem`]. Most
+/// implementations will use the data stored in [`InvokeMessage`] since [`CommandItem`] is mostly a
+/// wrapper around it.
+///
+/// # Provided Implementations
+///
+/// Tauri implements [`CommandArg`] automatically for a number of types.
+/// * [`crate::AppHandle`]
+/// * [`crate::Window`]
+/// * [`crate::Webview`]
+/// * [`crate::WebviewWindow`]
+/// * [`crate::State`]
+/// * [`crate::ipc::Channel`]
+
+--- src/ipc/format_callback.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use serde::Serialize;
+use serde_json::value::RawValue;
+use serialize_to_javascript::Serialized;
+
+use super::CallbackFn;
+
+/// The information about this is quite limited. On Chrome/Edge and Firefox, [the maximum string size is approximately 1 GB](https://stackoverflow.com/a/34958490).
+///
+/// [From MDN:](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/length#description)
+///
+/// ECMAScript 2016 (ed. 7) established a maximum length of 2^53 - 1 elements. Previously, no maximum length was specified.
+///
+/// In Firefox, strings have a maximum length of 2\*\*30 - 2 (~1GB). In versions prior to Firefox 65, the maximum length was 2\*\*28 - 1 (~256MB).
+const MAX_JSON_STR_LEN: usize = usize::pow(2, 30) - 2;
+
+/// Minimum size JSON needs to be in order to convert it to JSON.parse with [`format_json`].
+// TODO: this number should be benchmarked and checked for optimal range, I set 10 KiB arbitrarily
+// we don't want to lose the gained object parsing time to extra allocations preparing it
+const MIN_JSON_PARSE_LEN: usize = 10_240;
+
+/// Transforms & escapes a JSON value.
+///
+/// If it's an object or array, JSON.parse('{json}') is used, with the '{json}' string properly escaped.
+/// The return value of this function can be safely used on [`eval`](crate::Window#method.eval) calls.
+///
+/// Single quotes chosen because double quotes are already used in JSON. With single quotes, we only
+/// need to escape strings that include backslashes or single quotes. If we used double quotes, then
+/// there would be no cases that a string doesn't need escaping.
+///
+/// The function takes a closure to handle the escaped string in order to avoid unnecessary allocations.
+///
+/// # Safety
+///
+/// The ability to safely escape JSON into a JSON.parse('{json}') relies entirely on 2 things.
+///
+/// 1. `serde_json`'s ability to correctly escape and format json into a string.
+/// 2. JavaScript engines not accepting anything except another unescaped, literal single quote
+///    character to end a string that was opened with it.
+fn serialize_js_with<F: FnOnce(&str) -> String>(
+  json_string: String,
+  options: serialize_to_javascript::Options,
+  cb: F,
+) -> crate::Result<String> {
+  // get a raw &str representation of a serialized json value.
+
+  let raw = RawValue::from_string(json_string)?;
+
+  // from here we know json.len() > 1 because an empty string is not a valid json value.
+  let json = raw.get();
+  let first = json.as_bytes()[0];
+
+
+--- src/ipc/mod.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! Types and functions related to Inter Procedure Call(IPC).
+//!
+//! This module includes utilities to send messages to the JS layer of the webview.
+
+use std::{
+  future::Future,
+  sync::{Arc, Mutex},
+};
+
+use http::HeaderMap;
+use serde::{
+  Deserialize, Serialize,
+  de::{DeserializeOwned, IntoDeserializer},
+};
+use serde_json::Value as JsonValue;
+pub use serialize_to_javascript::Options as SerializeOptions;
+use tauri_macros::default_runtime;
+use tauri_utils::acl::resolved::ResolvedCommand;
+
+use crate::{Runtime, StateManager, webview::Webview};
+
+mod authority;
+#[cfg(feature = "dynamic-acl")]
+mod capability_builder;
+pub(crate) mod channel;
+mod command;
+pub(crate) mod format_callback;
+pub(crate) mod protocol;
+
+pub use authority::{
+  CommandScope, GlobalScope, Origin, RuntimeAuthority, ScopeObject, ScopeObjectMatch, ScopeValue,
+};
+#[cfg(feature = "dynamic-acl")]
+pub use capability_builder::{CapabilityBuilder, RuntimeCapability};
+pub use channel::{Channel, JavaScriptChannelId};
+pub use command::{CommandArg, CommandItem, private};
+
+/// A closure that is run every time Tauri receives a message it doesn't explicitly handle.
+pub type InvokeHandler<R> = dyn Fn(Invoke<R>) -> bool + Send + Sync + 'static;
+
+/// A closure that is responsible for respond a JS message.
+pub type InvokeResponder<R> =
+  dyn Fn(&Webview<R>, &str, &InvokeResponse, CallbackFn, CallbackFn) + Send + Sync + 'static;
+/// Similar to [`InvokeResponder`] but taking owned arguments.
+pub type OwnedInvokeResponder<R> =
+  dyn FnOnce(Webview<R>, String, InvokeResponse, CallbackFn, CallbackFn) + Send + 'static;
+
+/// Possible values of an IPC payload.
+///
+/// ### Android
+/// On Android, [InvokeBody::Raw] is not supported. The enum will always contain [InvokeBody::Json].
+
+--- src/ipc/protocol.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{borrow::Cow, sync::Arc};
+
+use crate::{
+  Runtime,
+  ipc::InvokeResponseBody,
+  manager::AppManager,
+  webview::{InvokeRequest, UriSchemeProtocolHandler},
+};
+use http::{
+  HeaderValue, Method, Request, StatusCode,
+  header::{
+    ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_EXPOSE_HEADERS,
+    CONTENT_TYPE,
+  },
+};
+use url::Url;
+
+use super::{CallbackFn, InvokeResponse};
+
+const TAURI_CALLBACK_HEADER_NAME: &str = "Tauri-Callback";
+const TAURI_ERROR_HEADER_NAME: &str = "Tauri-Error";
+const TAURI_INVOKE_KEY_HEADER_NAME: &str = "Tauri-Invoke-Key";
+
+const TAURI_RESPONSE_HEADER_NAME: &str = "Tauri-Response";
+const TAURI_RESPONSE_HEADER_ERROR: &str = "error";
+const TAURI_RESPONSE_HEADER_OK: &str = "ok";
+
+pub fn message_handler<R: Runtime>(
+  manager: Arc<AppManager<R>>,
+) -> crate::runtime::webview::WebviewIpcHandler<crate::EventLoopMessage, R> {
+  Box::new(move |webview, request| handle_ipc_message(request, &manager, &webview.label))
+}
+
+pub fn get<R: Runtime>(manager: Arc<AppManager<R>>) -> UriSchemeProtocolHandler {
+  Box::new(move |label, request, responder| {
+    #[cfg(feature = "tracing")]
+    let span = tracing::trace_span!(
+      "ipc::request",
+      kind = "custom-protocol",
+      request = tracing::field::Empty
+    )
+    .entered();
+
+    let respond = move |mut response: http::Response<Cow<'static, [u8]>>| {
+      response
+        .headers_mut()
+        .insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+      response.headers_mut().insert(
+        ACCESS_CONTROL_EXPOSE_HEADERS,
+        HeaderValue::from_static(TAURI_RESPONSE_HEADER_NAME),
+      );
+
+--- src/lib.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! Tauri is a framework for building tiny, blazing fast binaries for all major desktop platforms.
+//! Developers can integrate any front-end framework that compiles to HTML, JS and CSS for building their user interface.
+//! The backend of the application is a rust-sourced binary with an API that the front-end can interact with.
+//!
+//! # Cargo features
+//!
+//! The following are a list of [Cargo features](https://doc.rust-lang.org/stable/cargo/reference/manifest.html#the-features-section) that can be enabled or disabled:
+//!
+//! - **wry** *(enabled by default)*: Enables the [wry](https://github.com/tauri-apps/wry) runtime. Only disable it if you want a custom runtime.
+//! - **common-controls-v6** *(enabled by default)*: Enables [Common Controls v6](https://learn.microsoft.com/en-us/windows/win32/controls/common-control-versions) support on Windows, mainly for the predefined `about` menu item.
+//! - **x11** *(enabled by default)*: Enables X11 support. Disable this if you only target Wayland.
+//! - **dbus** *(enabled by default)*: Enables dbus dependency for theme support on Linux. Disable this if you do not need theme support or don't want to build the dbus rust crate. The WebView dependencies use dbus either way.
+//! - **unstable**: Enables unstable features. Be careful, it might introduce breaking changes in future minor releases.
+//!   It unlocks the multiwebview APIs, where a [`Window`] (the native window) and a [`Webview`] (the web content it hosts)
+//!   are separate objects instead of the single [`WebviewWindow`] you get by default:
+//!   - `window::WindowBuilder` and `Window::builder` to create a window that has no webview attached to it;
+//!   - `webview::WebviewBuilder` and `Window::add_child` to attach one or more webviews to an existing window;
+//!   - [`Webview::reparent`] to move a webview to another window (it always fails on a [`WebviewWindow`] webview
+//!     when this feature is disabled) and [`Webview::set_auto_resize`] to make a child webview follow the window size;
+//!   - the [`Manager`] getters for these objects: `get_window`, `get_focused_window`, `windows`, `get_webview` and `webviews`.
+//!
+//!   See the [multiwebview example](https://github.com/tauri-apps/tauri/tree/dev/examples/multiwebview).
+//! - **tracing**: Enables [`tracing`](https://docs.rs/tracing/latest/tracing) for window startup, plugins, `Window::eval`, events, IPC, updater and custom protocol request handlers.
+//! - **test**: Enables the [`mod@test`] module exposing unit test helpers.
+//! - **objc-exception**: This feature flag is no-op since 2.3.0.
+//! - **linux-libxdo**: Enables linking to libxdo which enables Cut, Copy, Paste and SelectAll menu items to work on Linux.
+//! - **isolation**: Enables the isolation pattern. Enabled by default if the `app > security > pattern > use` config option is set to `isolation` on the `tauri.conf.json` file.
+//! - **custom-protocol**: Feature managed by the Tauri CLI. When enabled, Tauri assumes a production environment instead of a development one.
+//! - **devtools**: Enables the developer tools (Web inspector) and [`window::Window#method.open_devtools`]. Enabled by default on debug builds.
+//!   On macOS it uses private APIs, so you can't enable it if your app will be published to the App Store.
+//! - **native-tls**: Provides TLS support to connect over HTTPS.
+//! - **native-tls-vendored**: Compile and statically link to a vendored copy of OpenSSL.
+//! - **rustls-tls**: Provides TLS support to connect over HTTPS using rustls.
+//! - **process-relaunch-dangerous-allow-symlink-macos**: Allows the [`process::current_binary`] function to allow symlinks on macOS (this is dangerous, see the Security section in the documentation website).
+//! - **tray-icon**: Enables application tray icon APIs. Enabled by default if the `trayIcon` config is defined on the `tauri.conf.json` file.
+//! - **macos-private-api**: Enables features only available in **macOS**'s private APIs, currently the `transparent` window functionality and the `fullScreenEnabled` preference setting to `true`. Enabled by default if the `tauri > macosPrivateApi` config flag is set to `true` on the `tauri.conf.json` file. **No-op since Tauri 2.12.1** because the APIs are always enabled now.
+//! - **webview-data-url**: Enables usage of data URLs on the webview.
+//! - **compression** *(enabled by default)*: Enables asset compression. You should only disable this if you want faster compile times in release builds - it produces larger binaries.
+//! - **config-json5**: Adds support to JSON5 format for `tauri.conf.json`.
+//! - **config-toml**: Adds support to TOML format for the configuration `Tauri.toml`.
+//! - **image-ico**: Adds support to parse `.ico` image, see [`image::Image`].
+//! - **image-png**: Adds support to parse `.png` image, see [`image::Image`].
+//! - **macos-proxy**: Adds support for [`WebviewBuilder::proxy_url`] on macOS. Requires macOS 14+.
+//! - **specta**: Add support for [`specta::specta`](https://docs.rs/specta/%5E2.0.0-rc.9/specta/attr.specta.html) with Tauri arguments such as [`State`], [`Window`] and [`AppHandle`]
+//! - **dynamic-acl** *(enabled by default)*: Enables you to add ACLs at runtime, notably it enables the [`Manager::add_capability`] function.
+//!
+//! ## Cargo allowlist features
+//!
+//! The following are a list of [Cargo features](https://doc.rust-lang.org/stable/cargo/reference/manifest.html#the-features-section) that enables commands for Tauri's API package.
+//! These features are automatically enabled by the Tauri CLI based on the `allowlist` configuration under `tauri.conf.json`.
+//!
+
+--- src/manager/menu.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{
+  collections::HashMap,
+  sync::{Arc, Mutex, MutexGuard},
+};
+
+use crate::{
+  AppHandle, Runtime, Window,
+  menu::{Menu, MenuEvent, MenuId},
+};
+
+pub struct MenuManager<R: Runtime> {
+  /// A set containing a reference to the active menus, including
+  /// the app-wide menu and the window-specific menus
+  ///
+  /// This should be mainly used to access [`Menu::haccel`]
+  /// to setup the accelerator handling in the event loop
+  pub menus: Arc<Mutex<HashMap<MenuId, Menu<R>>>>,
+  /// The menu set to all windows.
+  pub menu: Mutex<Option<Menu<R>>>,
+  /// Menu event listeners to all windows.
+  pub global_event_listeners: Mutex<Vec<crate::app::GlobalMenuEventListener<AppHandle<R>>>>,
+  /// Menu event listeners to specific windows.
+  pub event_listeners: Mutex<HashMap<String, crate::app::GlobalMenuEventListener<Window<R>>>>,
+}
+
+impl<R: Runtime> MenuManager<R> {
+  /// App-wide menu.
+  pub fn menu_lock(&self) -> MutexGuard<'_, Option<Menu<R>>> {
+    self.menu.lock().expect("poisoned menu mutex")
+  }
+
+  pub fn menus_stash_lock(&self) -> MutexGuard<'_, HashMap<MenuId, Menu<R>>> {
+    self.menus.lock().expect("poisoned menu mutex")
+  }
+
+  pub fn is_menu_in_use<I: PartialEq<MenuId>>(&self, id: &I) -> bool {
+    self
+      .menu_lock()
+      .as_ref()
+      .map(|m| id.eq(m.id()))
+      .unwrap_or(false)
+  }
+
+  pub fn insert_menu_into_stash(&self, menu: &Menu<R>) {
+    self
+      .menus_stash_lock()
+      .insert(menu.id().clone(), menu.clone());
+  }
+
+  pub(crate) fn prepare_window_menu_creation_handler(
+    &self,
+
+--- src/manager/mod.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{
+  borrow::Cow,
+  collections::HashMap,
+  fmt,
+  sync::{Arc, Mutex, MutexGuard, atomic::AtomicBool},
+};
+
+use serde::Serialize;
+use url::Url;
+
+use tauri_macros::default_runtime;
+use tauri_utils::{
+  assets::{AssetKey, CspHash, SCRIPT_NONCE_TOKEN, STYLE_NONCE_TOKEN},
+  config::{Csp, CspDirectiveSources},
+};
+
+use crate::{
+  Assets, Context, DebugAppIcon, EventName, Pattern, Runtime, StateManager, Webview, Window,
+  app::{
+    AppHandle, ChannelInterceptor, GlobalWebviewEventListener, GlobalWindowEventListener,
+    OnPageLoad,
+  },
+  event::{EmitArgs, Event, EventId, EventTarget, Listeners},
+  ipc::{Invoke, InvokeHandler, RuntimeAuthority},
+  plugin::PluginStore,
+  resources::ResourceTable,
+  utils::{PackageInfo, config::Config},
+};
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+use crate::app::OnWebContentProcessTerminate;
+
+#[cfg(desktop)]
+mod menu;
+#[cfg(all(desktop, feature = "tray-icon"))]
+mod tray;
+pub mod webview;
+pub mod window;
+
+#[derive(Default)]
+/// Spaced and quoted Content-Security-Policy hash values.
+struct CspHashStrings {
+  script: Vec<String>,
+  style: Vec<String>,
+}
+
+/// Sets the CSP value to the asset HTML if needed (on Linux).
+/// Returns the CSP string for access on the response header (on Windows and macOS).
+pub(crate) fn set_csp<R: Runtime>(
+  asset: &mut String,
+  assets: &impl std::borrow::Borrow<dyn Assets<R>>,
+
+--- src/manager/tray.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{
+  collections::HashMap,
+  fmt,
+  sync::{Arc, Mutex},
+};
+
+use crate::{
+  AppHandle, Manager, Resource, ResourceId, Runtime,
+  app::GlobalTrayIconEventListener,
+  image::Image,
+  tray::{TrayIcon, TrayIconEvent, TrayIconId},
+};
+
+pub struct TrayManager<R: Runtime> {
+  /// icon passed in from [`tauri_utils::config::TrayIconConfig::icon_path`],
+  /// used when creating tray icons from the configs.
+  pub(crate) icon: Option<Image<'static>>,
+  /// Tray icons
+  pub(crate) icons: Mutex<Vec<(TrayIconId, ResourceId)>>,
+  /// Global Tray icon event listeners.
+  pub(crate) global_event_listeners: Mutex<Vec<GlobalTrayIconEventListener<AppHandle<R>>>>,
+  /// Tray icon event listeners.
+  pub(crate) event_listeners: Mutex<HashMap<TrayIconId, GlobalTrayIconEventListener<TrayIcon<R>>>>,
+}
+
+impl<R: Runtime> fmt::Debug for TrayManager<R> {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.debug_struct("TrayManager")
+      .field("icon", &self.icon)
+      .finish()
+  }
+}
+
+impl<R: Runtime> TrayManager<R> {
+  pub fn on_tray_icon_event<F: Fn(&AppHandle<R>, TrayIconEvent) + Send + Sync + 'static>(
+    &self,
+    handler: F,
+  ) {
+    self
+      .global_event_listeners
+      .lock()
+      .unwrap()
+      .push(Box::new(handler));
+  }
+
+  pub fn tray_by_id<'a, I>(&self, app: &AppHandle<R>, id: &'a I) -> Option<TrayIcon<R>>
+  where
+    I: ?Sized,
+    TrayIconId: PartialEq<&'a I>,
+  {
+    let icons = self.icons.lock().unwrap();
+
+--- src/manager/webview.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{
+  borrow::Cow,
+  collections::{HashMap, HashSet},
+  fmt,
+  fs::create_dir_all,
+  sync::{Arc, Mutex, MutexGuard},
+};
+
+use serde::Serialize;
+use serialize_to_javascript::{DefaultTemplate, Template, default_template};
+use tauri_runtime::{
+  webview::{DetachedWebview, InitializationScript, PendingWebview},
+  window::DragDropEvent,
+};
+use tauri_utils::config::WebviewUrl;
+use url::Url;
+
+use crate::{
+  EventLoopMessage, EventTarget, Manager, Runtime, Scopes, UriSchemeContext, Webview, Window,
+  app::{GlobalWebviewEventListener, OnPageLoad, UriSchemeResponder, WebviewEvent},
+  ipc::InvokeHandler,
+  pattern::PatternJavascript,
+  sealed::ManagerBase,
+  webview::PageLoadPayload,
+};
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+use crate::app::OnWebContentProcessTerminate;
+
+use super::{
+  window::{DRAG_DROP_EVENT, DRAG_ENTER_EVENT, DRAG_LEAVE_EVENT, DRAG_OVER_EVENT, DragDropPayload},
+  {AppManager, EmitPayload},
+};
+
+// we need to proxy the dev server on mobile because we can't use `localhost`, so we use the local IP address
+// and we do not get a secure context without the custom protocol that proxies to the dev server
+// additionally, we need the custom protocol to inject the initialization scripts on Android
+// must also keep in sync with the `let mut response` assignment in prepare_uri_scheme_protocol
+pub(crate) const PROXY_DEV_SERVER: bool = cfg!(all(dev, mobile));
+
+pub(crate) const PROCESS_IPC_MESSAGE_FN: &str =
+  include_str!("../../scripts/process-ipc-message-fn.js");
+
+#[cfg(feature = "isolation")]
+#[derive(Template)]
+#[default_template("../../scripts/isolation.js")]
+pub(crate) struct IsolationJavascript<'a> {
+  pub(crate) isolation_src: &'a str,
+  pub(crate) style: &'a str,
+}
+
+
+--- src/manager/window.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{
+  collections::{HashMap, HashSet},
+  fmt,
+  path::PathBuf,
+  sync::{Arc, Mutex, MutexGuard},
+};
+
+use serde::Serialize;
+use tauri_runtime::{
+  dpi::{PhysicalPosition, PhysicalSize},
+  window::WindowBuilder,
+  window::{DetachedWindow, DragDropEvent, PendingWindow},
+};
+
+use crate::{
+  AppHandle, EventLoopMessage, EventTarget, Manager, Runtime, Scopes, Window, WindowEvent,
+  app::GlobalWindowEventListener, event::EventName, image::Image, sealed::ManagerBase,
+};
+
+use super::EmitPayload;
+
+const WINDOW_RESIZED_EVENT: EventName<&str> = EventName::from_str("tauri://resize");
+const WINDOW_MOVED_EVENT: EventName<&str> = EventName::from_str("tauri://move");
+const WINDOW_CLOSE_REQUESTED_EVENT: EventName<&str> =
+  EventName::from_str("tauri://close-requested");
+const WINDOW_DESTROYED_EVENT: EventName<&str> = EventName::from_str("tauri://destroyed");
+const WINDOW_FOCUS_EVENT: EventName<&str> = EventName::from_str("tauri://focus");
+const WINDOW_BLUR_EVENT: EventName<&str> = EventName::from_str("tauri://blur");
+const WINDOW_SCALE_FACTOR_CHANGED_EVENT: EventName<&str> =
+  EventName::from_str("tauri://scale-change");
+const WINDOW_THEME_CHANGED: EventName<&str> = EventName::from_str("tauri://theme-changed");
+pub(crate) const DRAG_ENTER_EVENT: EventName<&str> = EventName::from_str("tauri://drag-enter");
+pub(crate) const DRAG_OVER_EVENT: EventName<&str> = EventName::from_str("tauri://drag-over");
+pub(crate) const DRAG_DROP_EVENT: EventName<&str> = EventName::from_str("tauri://drag-drop");
+pub(crate) const DRAG_LEAVE_EVENT: EventName<&str> = EventName::from_str("tauri://drag-leave");
+#[cfg(mobile)]
+pub(crate) const WINDOW_SUSPENDED_EVENT: EventName<&str> = EventName::from_str("tauri://suspended");
+#[cfg(mobile)]
+pub(crate) const WINDOW_RESUMED_EVENT: EventName<&str> = EventName::from_str("tauri://resumed");
+
+pub struct WindowManager<R: Runtime> {
+  pub windows: Mutex<HashMap<String, Window<R>>>,
+  pub default_icon: Option<Image<'static>>,
+  /// Window event listeners to all windows.
+  pub event_listeners: Arc<Vec<GlobalWindowEventListener<R>>>,
+}
+
+impl<R: Runtime> fmt::Debug for WindowManager<R> {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.debug_struct("WindowManager")
+      .field("default_window_icon", &self.default_icon)
+
+--- src/menu/builders/check.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::{Manager, Runtime, menu::CheckMenuItem, menu::MenuId};
+
+/// A builder type for [`CheckMenuItem`]
+pub struct CheckMenuItemBuilder {
+  id: Option<MenuId>,
+  text: String,
+  enabled: bool,
+  checked: bool,
+  accelerator: Option<String>,
+}
+
+impl CheckMenuItemBuilder {
+  /// Create a new menu item builder.
+  ///
+  /// - `text` could optionally contain an `&` before a character to assign this character as the mnemonic
+  ///   for this menu item. To display a `&` without assigning a mnemenonic, use `&&`.
+  pub fn new<S: AsRef<str>>(text: S) -> Self {
+    Self {
+      id: None,
+      text: text.as_ref().to_string(),
+      enabled: true,
+      checked: true,
+      accelerator: None,
+    }
+  }
+
+  /// Create a new menu item builder with the specified id.
+  ///
+  /// - `text` could optionally contain an `&` before a character to assign this character as the mnemonic
+  ///   for this menu item. To display a `&` without assigning a mnemenonic, use `&&`.
+  pub fn with_id<I: Into<MenuId>, S: AsRef<str>>(id: I, text: S) -> Self {
+    Self {
+      id: Some(id.into()),
+      text: text.as_ref().to_string(),
+      enabled: true,
+      checked: true,
+      accelerator: None,
+    }
+  }
+
+  /// Set the id for this menu item.
+  pub fn id<I: Into<MenuId>>(mut self, id: I) -> Self {
+    self.id.replace(id.into());
+    self
+  }
+
+  /// Set the enabled state for this menu item.
+  pub fn enabled(mut self, enabled: bool) -> Self {
+    self.enabled = enabled;
+    self
+  }
+
+--- src/menu/builders/icon.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::{
+  Manager, Runtime,
+  image::Image,
+  menu::{IconMenuItem, MenuId, NativeIcon},
+};
+
+/// A builder type for [`IconMenuItem`]
+pub struct IconMenuItemBuilder<'a> {
+  id: Option<MenuId>,
+  text: String,
+  enabled: bool,
+  icon: Option<Image<'a>>,
+  native_icon: Option<NativeIcon>,
+  accelerator: Option<String>,
+}
+
+impl<'a> IconMenuItemBuilder<'a> {
+  /// Create a new menu item builder.
+  ///
+  /// - `text` could optionally contain an `&` before a character to assign this character as the mnemonic
+  ///   for this menu item. To display a `&` without assigning a mnemenonic, use `&&`.
+  pub fn new<S: AsRef<str>>(text: S) -> Self {
+    Self {
+      id: None,
+      text: text.as_ref().to_string(),
+      enabled: true,
+      icon: None,
+      native_icon: None,
+      accelerator: None,
+    }
+  }
+
+  /// Create a new menu item builder with the specified id.
+  ///
+  /// - `text` could optionally contain an `&` before a character to assign this character as the mnemonic
+  ///   for this menu item. To display a `&` without assigning a mnemenonic, use `&&`.
+  pub fn with_id<I: Into<MenuId>, S: AsRef<str>>(id: I, text: S) -> Self {
+    Self {
+      id: Some(id.into()),
+      text: text.as_ref().to_string(),
+      enabled: true,
+      icon: None,
+      native_icon: None,
+      accelerator: None,
+    }
+  }
+
+  /// Set the id for this menu item.
+  pub fn id<I: Into<MenuId>>(mut self, id: I) -> Self {
+    self.id.replace(id.into());
+    self
+
+--- src/menu/builders/menu.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::{Manager, Runtime, image::Image, menu::*};
+
+/// A builder type for [`Menu`]
+///
+/// ## Platform-specific:
+///
+/// - **macOS**: if using [`MenuBuilder`] for the global menubar, it can only contain [`Submenu`]s
+///
+/// # Example
+///
+/// ```no_run
+/// use tauri::menu::*;
+/// tauri::Builder::default()
+///   .setup(move |app| {
+///     let handle = app.handle();
+///     # let icon1 = tauri::image::Image::new(&[], 0, 0);
+///     let menu = MenuBuilder::new(handle)
+///       .item(&MenuItem::new(handle, "MenuItem 1", true, None::<&str>)?)
+///       .items(&[
+///         &CheckMenuItem::new(handle, "CheckMenuItem 1", true, true, None::<&str>)?,
+///         &IconMenuItem::new(handle, "IconMenuItem 1", true, Some(icon1), None::<&str>)?,
+///       ])
+///       .separator()
+///       .cut()
+///       .copy()
+///       .paste()
+///       .separator()
+///       .text("item2", "MenuItem 2")
+///       .check("checkitem2", "CheckMenuItem 2")
+///       .icon("iconitem2", "IconMenuItem 2", app.default_window_icon().cloned().unwrap())
+///       .build()?;
+///     app.set_menu(menu);
+///     Ok(())
+///   });
+/// ```
+pub struct MenuBuilder<'m, R: Runtime, M: Manager<R>> {
+  pub(crate) id: Option<MenuId>,
+  pub(crate) manager: &'m M,
+  pub(crate) items: Vec<crate::Result<MenuItemKind<R>>>,
+}
+
+impl<'m, R: Runtime, M: Manager<R>> MenuBuilder<'m, R, M> {
+  /// Create a new menu builder.
+  pub fn new(manager: &'m M) -> Self {
+    Self {
+      id: None,
+      items: Vec::new(),
+      manager,
+    }
+  }
+
+
+--- src/menu/builders/mod.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+#![cfg(desktop)]
+
+//! A module containing menu builder types
+
+mod menu;
+pub use menu::MenuBuilder;
+pub use menu::SubmenuBuilder;
+mod normal;
+pub use normal::MenuItemBuilder;
+mod check;
+pub use check::CheckMenuItemBuilder;
+mod icon;
+pub use icon::IconMenuItemBuilder;
+
+
+--- src/menu/builders/normal.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::{Manager, Runtime, menu::MenuId, menu::MenuItem};
+
+/// A builder type for [`MenuItem`]
+pub struct MenuItemBuilder {
+  id: Option<MenuId>,
+  text: String,
+  enabled: bool,
+  accelerator: Option<String>,
+}
+
+impl MenuItemBuilder {
+  /// Create a new menu item builder.
+  ///
+  /// - `text` could optionally contain an `&` before a character to assign this character as the mnemonic
+  ///   for this menu item. To display a `&` without assigning a mnemenonic, use `&&`.
+  pub fn new<S: AsRef<str>>(text: S) -> Self {
+    Self {
+      id: None,
+      text: text.as_ref().to_string(),
+      enabled: true,
+      accelerator: None,
+    }
+  }
+
+  /// Create a new menu item builder with the specified id.
+  ///
+  /// - `text` could optionally contain an `&` before a character to assign this character as the mnemonic
+  ///   for this menu item. To display a `&` without assigning a mnemenonic, use `&&`.
+  pub fn with_id<I: Into<MenuId>, S: AsRef<str>>(id: I, text: S) -> Self {
+    Self {
+      id: Some(id.into()),
+      text: text.as_ref().to_string(),
+      enabled: true,
+      accelerator: None,
+    }
+  }
+
+  /// Set the id for this menu item.
+  pub fn id<I: Into<MenuId>>(mut self, id: I) -> Self {
+    self.id.replace(id.into());
+    self
+  }
+
+  /// Set the enabled state for this menu item.
+  pub fn enabled(mut self, enabled: bool) -> Self {
+    self.enabled = enabled;
+    self
+  }
+
+  /// Set the accelerator for this menu item.
+  pub fn accelerator<S: AsRef<str>>(mut self, accelerator: S) -> Self {
+
+--- src/menu/check.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::sync::Arc;
+
+use super::run_item_main_thread;
+use crate::menu::CheckMenuItemInner;
+use crate::run_main_thread;
+use crate::{AppHandle, Manager, Runtime, menu::MenuId};
+
+use super::CheckMenuItem;
+
+impl<R: Runtime> CheckMenuItem<R> {
+  /// Create a new menu item.
+  ///
+  /// - `text` could optionally contain an `&` before a character to assign this character as the mnemonic
+  ///   for this menu item. To display a `&` without assigning a mnemenonic, use `&&`.
+  pub fn new<M, T, A>(
+    manager: &M,
+    text: T,
+    enabled: bool,
+    checked: bool,
+    accelerator: Option<A>,
+  ) -> crate::Result<Self>
+  where
+    M: Manager<R>,
+    T: AsRef<str>,
+    A: AsRef<str>,
+  {
+    let handle = manager.app_handle();
+    let app_handle = handle.clone();
+
+    let text = text.as_ref().to_owned();
+    let accelerator = accelerator.and_then(|s| s.as_ref().parse().ok());
+
+    let item = run_main_thread!(handle, || {
+      let item = muda::CheckMenuItem::new(text, enabled, checked, accelerator);
+      CheckMenuItemInner::new(app_handle, item)
+    })?;
+
+    Ok(Self(Arc::new(item)))
+  }
+
+  /// Create a new menu item with the specified id.
+  ///
+  /// - `text` could optionally contain an `&` before a character to assign this character as the mnemonic
+  ///   for this menu item. To display a `&` without assigning a mnemenonic, use `&&`.
+  pub fn with_id<M, I, T, A>(
+    manager: &M,
+    id: I,
+    text: T,
+    enabled: bool,
+    checked: bool,
+    accelerator: Option<A>,
+
+--- src/menu/icon.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::sync::Arc;
+
+use super::run_item_main_thread;
+use super::{IconMenuItem, NativeIcon};
+use crate::menu::IconMenuItemInner;
+use crate::run_main_thread;
+use crate::{AppHandle, Manager, Runtime, image::Image, menu::MenuId};
+
+impl<R: Runtime> IconMenuItem<R> {
+  /// Create a new menu item.
+  ///
+  /// - `text` could optionally contain an `&` before a character to assign this character as the mnemonic
+  ///   for this menu item. To display a `&` without assigning a mnemenonic, use `&&`.
+  pub fn new<M, T, A>(
+    manager: &M,
+    text: T,
+    enabled: bool,
+    icon: Option<Image<'_>>,
+    accelerator: Option<A>,
+  ) -> crate::Result<Self>
+  where
+    M: Manager<R>,
+    T: AsRef<str>,
+    A: AsRef<str>,
+  {
+    let handle = manager.app_handle();
+    let app_handle = handle.clone();
+
+    let text = text.as_ref().to_owned();
+    let accelerator = accelerator.and_then(|s| s.as_ref().parse().ok());
+    let icon = match icon {
+      Some(i) => Some(i.try_into()?),
+      None => None,
+    };
+
+    let item = run_main_thread!(handle, || {
+      let item = muda::IconMenuItem::new(text, enabled, icon, accelerator);
+      IconMenuItemInner::new(app_handle, item)
+    })?;
+
+    Ok(Self(Arc::new(item)))
+  }
+
+  /// Create a new menu item with the specified id.
+  ///
+  /// - `text` could optionally contain an `&` before a character to assign this character as the mnemonic
+  ///   for this menu item. To display a `&` without assigning a mnemenonic, use `&&`.
+  pub fn with_id<M, I, T, A>(
+    manager: &M,
+    id: I,
+    text: T,
+
+--- src/menu/menu.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::sync::Arc;
+
+use super::run_item_main_thread;
+use super::sealed::ContextMenuBase;
+use super::{
+  AboutMetadata, IsMenuItem, Menu, MenuInner, MenuItemKind, PredefinedMenuItem, Submenu,
+};
+use crate::Window;
+use crate::run_main_thread;
+use crate::{AppHandle, Manager, Position, Runtime};
+use muda::ContextMenu;
+use muda::MenuId;
+
+/// Expected submenu id of the Window menu for macOS.
+pub const WINDOW_SUBMENU_ID: &str = "__tauri_window_menu__";
+/// Expected submenu id of the Help menu for macOS.
+pub const HELP_SUBMENU_ID: &str = "__tauri_help_menu__";
+
+impl<R: Runtime> super::ContextMenu for Menu<R> {
+  #[cfg(target_os = "windows")]
+  fn hpopupmenu(&self) -> crate::Result<isize> {
+    run_item_main_thread!(self, |self_: Self| (*self_.0).as_ref().hpopupmenu())
+  }
+
+  fn popup<T: Runtime>(&self, window: Window<T>) -> crate::Result<()> {
+    self.popup_inner(window, None::<Position>)
+  }
+
+  fn popup_at<T: Runtime, P: Into<Position>>(
+    &self,
+    window: Window<T>,
+    position: P,
+  ) -> crate::Result<()> {
+    self.popup_inner(window, Some(position))
+  }
+}
+
+impl<R: Runtime> ContextMenuBase for Menu<R> {
+  fn popup_inner<T: Runtime, P: Into<crate::Position>>(
+    &self,
+    window: crate::Window<T>,
+    position: Option<P>,
+  ) -> crate::Result<()> {
+    let position = position.map(Into::into);
+    run_item_main_thread!(self, move |self_: Self| {
+      #[cfg(target_os = "macos")]
+      if let Ok(view) = window.ns_view() {
+        unsafe {
+          self_
+            .inner()
+            .show_context_menu_for_nsview(view as _, position);
+
+--- src/menu/mod.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! Menu types and utilities.
+
+mod builders;
+mod check;
+mod icon;
+#[allow(clippy::module_inception)]
+mod menu;
+mod normal;
+pub(crate) mod plugin;
+mod predefined;
+mod submenu;
+use std::{mem::ManuallyDrop, sync::Arc};
+
+pub use builders::*;
+pub use menu::{HELP_SUBMENU_ID, WINDOW_SUBMENU_ID};
+use serde::{Deserialize, Serialize};
+
+use crate::menu::plugin::remove_menu_channel;
+use crate::{AppHandle, Runtime, image::Image};
+pub use muda::MenuId;
+
+macro_rules! run_item_main_thread {
+  ($self:ident, $ex:expr) => {{
+    use std::sync::mpsc::channel;
+    let (tx, rx) = channel();
+    let self_ = $self.clone();
+    let task = move || {
+      let f = $ex;
+      let _ = tx.send(f(self_));
+    };
+    $self
+      .app_handle()
+      .run_on_main_thread(task)
+      .and_then(|_| rx.recv().map_err(|_| crate::Error::FailedToReceiveMessage))
+  }};
+}
+
+pub(crate) use run_item_main_thread;
+
+/// Describes a menu event emitted when a menu item is activated
+#[derive(Debug, Clone, Serialize)]
+pub struct MenuEvent {
+  /// Id of the menu item which triggered this event
+  pub id: MenuId,
+}
+
+impl MenuEvent {
+  /// Returns the id of the menu item which triggered this event
+  pub fn id(&self) -> &MenuId {
+    &self.id
+  }
+
+--- src/menu/normal.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::sync::Arc;
+
+use super::run_item_main_thread;
+use crate::menu::MenuItemInner;
+use crate::run_main_thread;
+use crate::{AppHandle, Manager, Runtime, menu::MenuId};
+
+use super::MenuItem;
+
+impl<R: Runtime> MenuItem<R> {
+  /// Create a new menu item.
+  ///
+  /// - `text` could optionally contain an `&` before a character to assign this character as the mnemonic
+  ///   for this menu item. To display a `&` without assigning a mnemenonic, use `&&`.
+  pub fn new<M, T, A>(
+    manager: &M,
+    text: T,
+    enabled: bool,
+    accelerator: Option<A>,
+  ) -> crate::Result<Self>
+  where
+    M: Manager<R>,
+    T: AsRef<str>,
+    A: AsRef<str>,
+  {
+    let handle = manager.app_handle();
+    let app_handle = handle.clone();
+
+    let text = text.as_ref().to_owned();
+    let accelerator = accelerator.and_then(|s| s.as_ref().parse().ok());
+
+    let item = run_main_thread!(handle, || {
+      let item = muda::MenuItem::new(text, enabled, accelerator);
+      MenuItemInner::new(app_handle, item)
+    })?;
+
+    Ok(Self(Arc::new(item)))
+  }
+
+  /// Create a new menu item with the specified id.
+  ///
+  /// - `text` could optionally contain an `&` before a character to assign this character as the mnemonic
+  ///   for this menu item. To display a `&` without assigning a mnemenonic, use `&&`.
+  pub fn with_id<M, I, T, A>(
+    manager: &M,
+    id: I,
+    text: T,
+    enabled: bool,
+    accelerator: Option<A>,
+  ) -> crate::Result<Self>
+  where
+
+--- src/menu/plugin.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{collections::HashMap, sync::Mutex};
+
+use serde::{Deserialize, Serialize};
+use tauri_runtime::dpi::Position;
+
+use super::{sealed::ContextMenuBase, *};
+use crate::{
+  Manager, ResourceTable, RunEvent, Runtime, State, Webview, Window, command,
+  image::JsImage,
+  ipc::{Channel, channel::JavaScriptChannelId},
+  plugin::{Builder, TauriPlugin},
+  resources::ResourceId,
+  sealed::ManagerBase,
+};
+use tauri_macros::do_menu_item;
+
+#[derive(Deserialize, Serialize)]
+pub(crate) enum ItemKind {
+  Menu,
+  MenuItem,
+  Predefined,
+  Submenu,
+  Check,
+  Icon,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AboutMetadata {
+  pub name: Option<String>,
+  pub version: Option<String>,
+  pub short_version: Option<String>,
+  pub authors: Option<Vec<String>>,
+  pub comments: Option<String>,
+  pub copyright: Option<String>,
+  pub license: Option<String>,
+  pub website: Option<String>,
+  pub website_label: Option<String>,
+  pub credits: Option<String>,
+  pub icon: Option<JsImage>,
+}
+
+impl AboutMetadata {
+  pub fn into_metadata(
+    self,
+    resources_table: &ResourceTable,
+  ) -> crate::Result<super::AboutMetadata<'_>> {
+    let icon = match self.icon {
+      Some(i) => Some(i.into_img(resources_table)?.as_ref().clone()),
+      None => None,
+    };
+
+--- src/menu/predefined.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::sync::Arc;
+
+use super::run_item_main_thread;
+use super::{AboutMetadata, PredefinedMenuItem};
+use crate::menu::PredefinedMenuItemInner;
+use crate::run_main_thread;
+use crate::{AppHandle, Manager, Runtime, menu::MenuId};
+
+impl<R: Runtime> PredefinedMenuItem<R> {
+  /// Separator menu item
+  pub fn separator<M: Manager<R>>(manager: &M) -> crate::Result<Self> {
+    let handle = manager.app_handle();
+    let app_handle = handle.clone();
+
+    let item = run_main_thread!(handle, || {
+      let item = muda::PredefinedMenuItem::separator();
+      PredefinedMenuItemInner::new(app_handle, item)
+    })?;
+
+    Ok(Self(Arc::new(item)))
+  }
+
+  /// Copy menu item
+  pub fn copy<M: Manager<R>>(manager: &M, text: Option<&str>) -> crate::Result<Self> {
+    let handle = manager.app_handle();
+    let app_handle = handle.clone();
+
+    let text = text.map(|t| t.to_owned());
+
+    let item = run_main_thread!(handle, || {
+      let item = muda::PredefinedMenuItem::copy(text.as_deref());
+      PredefinedMenuItemInner::new(app_handle, item)
+    })?;
+
+    Ok(Self(Arc::new(item)))
+  }
+
+  /// Cut menu item
+  pub fn cut<M: Manager<R>>(manager: &M, text: Option<&str>) -> crate::Result<Self> {
+    let handle = manager.app_handle();
+    let app_handle = handle.clone();
+
+    let text = text.map(|t| t.to_owned());
+
+    let item = run_main_thread!(handle, || {
+      let item = muda::PredefinedMenuItem::cut(text.as_deref());
+      PredefinedMenuItemInner::new(app_handle, item)
+    })?;
+
+    Ok(Self(Arc::new(item)))
+  }
+
+--- src/menu/submenu.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::sync::Arc;
+
+use super::Submenu;
+use super::run_item_main_thread;
+use super::{IsMenuItem, MenuItemKind, sealed::ContextMenuBase};
+use crate::menu::NativeIcon;
+use crate::menu::SubmenuInner;
+use crate::run_main_thread;
+use crate::{AppHandle, Manager, Position, Runtime, Window};
+use muda::{ContextMenu, Icon as MudaIcon, MenuId};
+
+impl<R: Runtime> super::ContextMenu for Submenu<R> {
+  #[cfg(target_os = "windows")]
+  fn hpopupmenu(&self) -> crate::Result<isize> {
+    run_item_main_thread!(self, |self_: Self| (*self_.0).as_ref().hpopupmenu())
+  }
+
+  fn popup<T: Runtime>(&self, window: Window<T>) -> crate::Result<()> {
+    self.popup_inner(window, None::<Position>)
+  }
+
+  fn popup_at<T: Runtime, P: Into<Position>>(
+    &self,
+    window: Window<T>,
+    position: P,
+  ) -> crate::Result<()> {
+    self.popup_inner(window, Some(position))
+  }
+}
+
+impl<R: Runtime> ContextMenuBase for Submenu<R> {
+  fn popup_inner<T: Runtime, P: Into<crate::Position>>(
+    &self,
+    window: crate::Window<T>,
+    position: Option<P>,
+  ) -> crate::Result<()> {
+    let position = position.map(Into::into);
+    run_item_main_thread!(self, move |self_: Self| {
+      #[cfg(target_os = "macos")]
+      if let Ok(view) = window.ns_view() {
+        unsafe {
+          self_
+            .inner()
+            .show_context_menu_for_nsview(view as _, position);
+        }
+      }
+
+      #[cfg(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+
+--- src/path/android.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use super::{AppDirectory, Result};
+use crate::{AppHandle, Runtime, plugin::PluginHandle};
+use std::path::{Path, PathBuf};
+
+/// A helper class to access the mobile path APIs.
+pub struct PathResolver<R: Runtime>(pub(crate) PluginHandle<R>);
+
+impl<R: Runtime> Clone for PathResolver<R> {
+  fn clone(&self) -> Self {
+    Self(self.0.clone())
+  }
+}
+
+#[derive(serde::Deserialize)]
+struct PathResponse {
+  path: PathBuf,
+}
+
+#[derive(serde::Serialize)]
+struct GetFileNameFromUriRequest<'a> {
+  uri: &'a str,
+}
+
+#[derive(serde::Deserialize)]
+struct GetFileNameFromUriResponse {
+  name: Option<String>,
+}
+
+impl<R: Runtime> PathResolver<R> {
+  /// Returns the final component of the `Path`, if there is one.
+  ///
+  /// If the path is a normal file, this is the file name. If it's the path of a directory, this
+  /// is the directory name.
+  ///
+  /// Returns [`None`] if the path terminates in `..`.
+  ///
+  /// On Android this also supports checking the file name of content URIs, such as the values returned by the dialog plugin.
+  ///
+  /// If you are dealing with plain file system paths or not worried about Android content URIs, prefer [`Path::file_name`].
+  pub fn file_name(&self, path: &str) -> Option<String> {
+    if path.starts_with("content://") || path.starts_with("file://") {
+      self
+        .0
+        .run_mobile_plugin::<GetFileNameFromUriResponse>(
+          "getFileNameFromUri",
+          GetFileNameFromUriRequest { uri: path },
+        )
+        .map(|r| r.name)
+        .unwrap_or_else(|e| {
+          log::error!("failed to get file name from URI: {e}");
+          None
+
+--- src/path/desktop.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use super::{AppDirectory, Error, Result};
+use crate::{AppHandle, Manager, Runtime};
+use std::path::{Path, PathBuf};
+
+/// The path resolver is a helper class for general and application-specific path APIs.
+pub struct PathResolver<R: Runtime>(pub(crate) AppHandle<R>);
+
+impl<R: Runtime> Clone for PathResolver<R> {
+  fn clone(&self) -> Self {
+    Self(self.0.clone())
+  }
+}
+
+impl<R: Runtime> PathResolver<R> {
+  /// Returns the final component of the `Path`, if there is one.
+  ///
+  /// If the path is a normal file, this is the file name. If it's the path of a directory, this
+  /// is the directory name.
+  ///
+  /// Returns [`None`] if the path terminates in `..`.
+  ///
+  /// On Android this also supports checking the file name of content URIs, such as the values returned by the dialog plugin.
+  ///
+  /// If you are dealing with plain file system paths or not worried about Android content URIs, prefer [`Path::file_name`].
+  pub fn file_name(&self, path: &str) -> Option<String> {
+    Path::new(path)
+      .file_name()
+      .map(|name| name.to_string_lossy().into_owned())
+  }
+
+  /// Returns the path to the user's audio directory.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **Linux:** Resolves to [`xdg-user-dirs`](https://www.freedesktop.org/wiki/Software/xdg-user-dirs/)' `XDG_MUSIC_DIR`.
+  /// - **macOS:** Resolves to `$HOME/Music`.
+  /// - **Windows:** Resolves to `{FOLDERID_Music}`.
+  pub fn audio_dir(&self) -> Result<PathBuf> {
+    dirs::audio_dir().ok_or(Error::UnknownPath)
+  }
+
+  /// Returns the path to the user's cache directory.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **Linux:** Resolves to `$XDG_CACHE_HOME` or `$HOME/.cache`.
+  /// - **macOS:** Resolves to `$HOME/Library/Caches`.
+  /// - **Windows:** Resolves to `{FOLDERID_LocalAppData}`.
+  pub fn cache_dir(&self) -> Result<PathBuf> {
+    dirs::cache_dir().ok_or(Error::UnknownPath)
+  }
+
+--- src/path/mod.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{
+  path::{Component, Display, Path, PathBuf},
+  str::FromStr,
+};
+
+use crate::Runtime;
+use tauri_utils::config::AppDirectoriesOverride;
+
+use serde::{Deserialize, Deserializer, Serialize, de::Error as DeError};
+use serde_repr::{Deserialize_repr, Serialize_repr};
+
+pub(crate) mod plugin;
+
+use crate::error::*;
+
+#[cfg(target_os = "android")]
+mod android;
+#[cfg(not(target_os = "android"))]
+mod desktop;
+
+#[cfg(target_os = "android")]
+pub use android::PathResolver;
+#[cfg(not(target_os = "android"))]
+pub use desktop::PathResolver;
+
+/// A wrapper for [`PathBuf`] that prevents path traversal.
+///
+/// # Examples
+///
+/// ```
+/// # use tauri::path::SafePathBuf;
+/// assert!(SafePathBuf::new("../secret.txt".into()).is_err());
+/// assert!(SafePathBuf::new("/home/user/stuff/../secret.txt".into()).is_err());
+///
+/// assert!(SafePathBuf::new("./file.txt".into()).is_ok());
+/// assert!(SafePathBuf::new("/home/user/secret.txt".into()).is_ok());
+/// ```
+#[derive(Clone, Debug, Serialize)]
+pub struct SafePathBuf(PathBuf);
+
+impl SafePathBuf {
+  /// Validates the path for directory traversal vulnerabilities and returns a new [`SafePathBuf`] instance if it is safe.
+  pub fn new(path: PathBuf) -> std::result::Result<Self, &'static str> {
+    if path.components().any(|x| matches!(x, Component::ParentDir)) {
+      return Err("cannot traverse directory, rewrite the path without the use of `../`");
+    }
+    Ok(Self(path))
+  }
+
+  /// Returns an object that implements [`std::fmt::Display`] for safely printing paths.
+  ///
+
+--- src/path/plugin.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::path::{Component, MAIN_SEPARATOR, Path, PathBuf};
+
+use serialize_to_javascript::{DefaultTemplate, Template, default_template};
+
+use super::{BaseDirectory, Error, PathResolver, Result};
+use crate::{
+  AppHandle, Manager, Runtime, State, command,
+  plugin::{Builder, TauriPlugin},
+};
+
+/// Normalize a path, removing things like `.` and `..`, this snippet is taken from cargo's paths util.
+/// <https://github.com/rust-lang/cargo/blob/46fa867ff7043e3a0545bf3def7be904e1497afd/crates/cargo-util/src/paths.rs#L73-L106>
+fn normalize_path(path: &Path) -> PathBuf {
+  let mut components = path.components().peekable();
+  let mut ret = if let Some(c @ Component::Prefix(..)) = components.peek().copied() {
+    components.next();
+    PathBuf::from(c.as_os_str())
+  } else {
+    PathBuf::new()
+  };
+
+  for component in components {
+    match component {
+      Component::Prefix(..) => unreachable!(),
+      Component::RootDir => {
+        ret.push(component.as_os_str());
+      }
+      Component::CurDir => {}
+      Component::ParentDir => {
+        ret.pop();
+      }
+      Component::Normal(c) => {
+        ret.push(c);
+      }
+    }
+  }
+  ret
+}
+
+/// Normalize a path, removing things like `.` and `..`, this snippet is taken from cargo's paths util but
+/// slightly modified to not resolve absolute paths.
+/// <https://github.com/rust-lang/cargo/blob/46fa867ff7043e3a0545bf3def7be904e1497afd/crates/cargo-util/src/paths.rs#L73-L106>
+fn normalize_path_no_absolute(path: &Path) -> PathBuf {
+  let mut components = path.components().peekable();
+  let mut ret = if let Some(c @ Component::Prefix(..)) = components.peek().copied() {
+    components.next();
+    PathBuf::from(c.as_os_str())
+  } else {
+    PathBuf::new()
+  };
+
+
+--- src/pattern.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+#[cfg(feature = "isolation")]
+use std::sync::Arc;
+
+use serde::Serialize;
+use serialize_to_javascript::{Template, default_template};
+
+/// The domain of the isolation iframe source.
+#[cfg(feature = "isolation")]
+pub const ISOLATION_IFRAME_SRC_DOMAIN: &str = "localhost";
+
+/// An application pattern.
+#[derive(Debug)]
+pub enum Pattern {
+  /// The brownfield pattern.
+  Brownfield,
+  /// Isolation pattern. Recommended for security purposes.
+  #[cfg(feature = "isolation")]
+  Isolation {
+    /// The HTML served on `isolation://index.html`.
+    assets: Arc<tauri_utils::assets::EmbeddedAssets>,
+
+    /// The schema used for the isolation frames.
+    schema: String,
+
+    /// A random string used to ensure that the message went through the isolation frame.
+    ///
+    /// This should be regenerated at runtime.
+    key: String,
+
+    /// Cryptographically secure keys
+    crypto_keys: Box<tauri_utils::pattern::isolation::Keys>,
+  },
+}
+
+/// The shape of the JavaScript Pattern config
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase", tag = "pattern")]
+pub(crate) enum PatternObject {
+  /// Brownfield pattern.
+  Brownfield,
+  /// Isolation pattern. Recommended for security purposes.
+  #[cfg(feature = "isolation")]
+  Isolation {
+    /// Which `IsolationSide` this `PatternObject` is getting injected into
+    side: IsolationSide,
+  },
+}
+
+impl From<&Pattern> for PatternObject {
+  fn from(pattern: &Pattern) -> Self {
+    match pattern {
+
+--- src/plugin/mobile.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use super::{PluginApi, PluginHandle};
+
+use crate::{AppHandle, Runtime, ipc::Channel};
+#[cfg(target_os = "android")]
+use crate::{
+  runtime::RuntimeHandle,
+  sealed::{ManagerBase, RuntimeOrDispatch},
+};
+
+#[cfg(mobile)]
+use std::sync::atomic::{AtomicI32, Ordering};
+#[cfg(mobile)]
+use tokio::sync::oneshot;
+
+use serde::{Serialize, de::DeserializeOwned};
+
+use std::{
+  collections::HashMap,
+  fmt,
+  sync::{Mutex, OnceLock, mpsc::channel},
+};
+
+type PluginResponse = Result<serde_json::Value, serde_json::Value>;
+
+type PendingPluginCallHandler = Box<dyn FnOnce(PluginResponse) + Send + 'static>;
+
+#[cfg(mobile)]
+static PENDING_PLUGIN_CALLS_ID: AtomicI32 = AtomicI32::new(0);
+static PENDING_PLUGIN_CALLS: OnceLock<Mutex<HashMap<i32, PendingPluginCallHandler>>> =
+  OnceLock::new();
+static CHANNELS: OnceLock<Mutex<HashMap<u32, Channel<serde_json::Value>>>> = OnceLock::new();
+
+/// Possible errors when invoking a plugin.
+#[derive(Debug, thiserror::Error)]
+pub enum PluginInvokeError {
+  /// Failed to reach platform webview handle.
+  #[error("the webview is unreachable")]
+  UnreachableWebview,
+  /// JNI error.
+  #[cfg(target_os = "android")]
+  #[error("jni error: {0}")]
+  Jni(#[from] jni::errors::Error),
+  /// Error returned from direct mobile plugin invoke.
+  #[error(transparent)]
+  InvokeRejected(#[from] ErrorResponse),
+  /// Failed to deserialize response.
+  #[error("failed to deserialize response: {0}")]
+  CannotDeserializeResponse(serde_json::Error),
+  /// Failed to serialize request payload.
+  #[error("failed to serialize payload: {0}")]
+  CannotSerializePayload(serde_json::Error),
+
+--- src/plugin.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! The Tauri plugin extension to expand Tauri functionality.
+
+use crate::{
+  AppHandle, Error, RunEvent, Runtime, UriSchemeContext, Webview, Window,
+  app::UriSchemeResponder,
+  ipc::{Invoke, InvokeHandler, ScopeObject, ScopeValue},
+  manager::webview::UriSchemeProtocol,
+  utils::config::PluginConfig,
+  webview::PageLoadPayload,
+};
+use serde::{
+  Serialize, Serializer,
+  de::{Deserialize, DeserializeOwned, Deserializer, Error as DeError},
+};
+use serde_json::Value as JsonValue;
+use tauri_macros::default_runtime;
+use tauri_runtime::webview::InitializationScript;
+use thiserror::Error;
+use url::Url;
+
+use std::{
+  borrow::Cow,
+  collections::HashMap,
+  fmt::{self, Debug},
+  sync::Arc,
+};
+
+/// Mobile APIs.
+#[cfg(mobile)]
+pub mod mobile;
+
+/// The plugin interface.
+pub trait Plugin<R: Runtime>: Send {
+  /// The plugin name. Used as key on the plugin config object.
+  fn name(&self) -> &'static str;
+
+  /// Initializes the plugin.
+  #[allow(unused_variables)]
+  fn initialize(
+    &mut self,
+    app: &AppHandle<R>,
+    config: JsonValue,
+  ) -> Result<(), Box<dyn std::error::Error>> {
+    Ok(())
+  }
+
+  /// Add the provided JavaScript to a list of scripts that should be run after the global object has been created,
+  /// but before the HTML document has been parsed and before any other script included by the HTML document is run.
+  ///
+  /// The script is wrapped into its own context with `(function () { /* your script here */ })();`,
+  /// so global variables must be assigned to `window` instead of implicitly declared.
+
+--- src/process.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! Types and functions related to child processes management.
+
+use crate::Env;
+
+use std::path::PathBuf;
+
+/// Finds the current running binary's path.
+///
+/// With exception to any following platform-specific behavior, the path is cached as soon as
+/// possible, and then used repeatedly instead of querying for a new path every time this function
+/// is called.
+///
+/// # Platform-specific behavior
+///
+/// ## Linux
+///
+/// On Linux, this function will **attempt** to detect if it's currently running from a
+/// valid [AppImage] and use that path instead.
+///
+/// ## macOS
+///
+/// On `macOS`, this function will return an error if the original path contained any symlinks
+/// due to less protection on macOS regarding symlinks. This behavior can be disabled by setting the
+/// `process-relaunch-dangerous-allow-symlink-macos` feature, although it is *highly discouraged*.
+///
+/// # Security
+///
+/// See [`tauri_utils::platform::current_exe`] for possible security implications.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use tauri::{process::current_binary, Env, Manager};
+/// let current_binary_path = current_binary(&Env::default()).unwrap();
+///
+/// tauri::Builder::default()
+///   .setup(|app| {
+///     let current_binary_path = current_binary(&app.env())?;
+///     Ok(())
+///   });
+/// ```
+///
+/// [AppImage]: https://appimage.org/
+pub fn current_binary(_env: &Env) -> std::io::Result<PathBuf> {
+  // if we are running from an AppImage, we ONLY want the set AppImage path
+  #[cfg(target_os = "linux")]
+  if let Some(app_image_path) = &_env.appimage {
+    return Ok(PathBuf::from(app_image_path));
+  }
+
+  tauri_utils::platform::current_exe()
+
+--- src/protocol/asset.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::{path::SafePathBuf, scope, webview::UriSchemeProtocolHandler};
+use http::{Request, Response, header::*, status::StatusCode};
+use http_range::HttpRange;
+use std::{borrow::Cow, io::SeekFrom};
+use tauri_utils::mime_type::MimeType;
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+
+pub fn get(scope: scope::fs::Scope, window_origin: String) -> UriSchemeProtocolHandler {
+  Box::new(move |_, request, responder| {
+    let scope = scope.clone();
+    let window_origin = window_origin.clone();
+    crate::async_runtime::spawn(async move {
+      match get_response(request, &scope, &window_origin).await {
+        Ok(response) => responder.respond(response),
+        Err(e) => responder.respond(
+          http::Response::builder()
+            .status(http::StatusCode::INTERNAL_SERVER_ERROR)
+            .header(CONTENT_TYPE, mime::TEXT_PLAIN.essence_str())
+            .header("Access-Control-Allow-Origin", &window_origin)
+            .body(e.to_string().into_bytes())
+            .unwrap(),
+        ),
+      }
+    });
+  })
+}
+
+async fn get_response(
+  request: Request<Vec<u8>>,
+  scope: &scope::fs::Scope,
+  window_origin: &str,
+) -> Result<Response<Cow<'static, [u8]>>, Box<dyn std::error::Error>> {
+  // skip leading `/`
+  let path =
+    percent_encoding::percent_decode(&request.uri().path().as_bytes()[1..]).decode_utf8_lossy();
+
+  let mut resp = Response::builder().header("Access-Control-Allow-Origin", window_origin);
+
+  let safe_path = match SafePathBuf::new(path.as_ref().into()) {
+    Ok(path) => path,
+    Err(e) => {
+      log::error!("asset protocol path \"{path}\" is not valid: {e}");
+      return resp.status(403).body(Vec::new().into()).map_err(Into::into);
+    }
+  };
+
+  if !scope.is_allowed(&safe_path) {
+    log::error!("asset protocol not configured to allow the path: {path}");
+    return resp.status(403).body(Vec::new().into()).map_err(Into::into);
+  }
+
+--- src/protocol/isolation.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::Assets;
+use http::header::CONTENT_TYPE;
+use serialize_to_javascript::Template;
+use tauri_utils::{
+  assets::EmbeddedAssets,
+  config::{Csp, HeaderAddition},
+};
+
+use std::sync::Arc;
+
+use crate::{
+  Runtime,
+  manager::{AppManager, set_csp, webview::PROCESS_IPC_MESSAGE_FN},
+  webview::UriSchemeProtocolHandler,
+};
+
+pub fn get<R: Runtime>(
+  manager: Arc<AppManager<R>>,
+  schema: &str,
+  assets: Arc<EmbeddedAssets>,
+  aes_gcm_key: [u8; 32],
+  window_origin: String,
+  use_https_scheme: bool,
+) -> UriSchemeProtocolHandler {
+  let frame_src = if cfg!(any(windows, target_os = "android")) {
+    let https = if use_https_scheme { "https" } else { "http" };
+    format!("{https}://{schema}.localhost")
+  } else {
+    format!("{schema}:")
+  };
+
+  let assets = assets as Arc<dyn Assets<R>>;
+
+  Box::new(move |_, request, responder| {
+    let response = match request_to_path(&request).as_str() {
+      "index.html" => match assets.get(&"index.html".into()) {
+        Some(asset) => {
+          let mut asset = String::from_utf8_lossy(asset.as_ref()).into_owned();
+          let csp_map = set_csp(
+            &mut asset,
+            &assets,
+            &"index.html".into(),
+            &manager,
+            Csp::Policy(format!("default-src 'none'; frame-src {frame_src}")),
+          );
+          let csp = Csp::DirectiveMap(csp_map).to_string();
+
+          let template = tauri_utils::pattern::isolation::IsolationJavascriptRuntime {
+            runtime_aes_gcm_key: &aes_gcm_key,
+            origin: window_origin.clone(),
+            process_ipc_message_fn: PROCESS_IPC_MESSAGE_FN,
+
+--- src/protocol/mod.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! Custom protocol handlers
+
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC};
+
+#[cfg(feature = "protocol-asset")]
+pub mod asset;
+#[cfg(feature = "isolation")]
+pub mod isolation;
+pub mod tauri;
+
+/// Percent-encoding set matching JavaScript's `encodeURIComponent`,
+/// which leaves `A-Z a-z 0-9 - _ . ! ~ * ' ( )` unescaped.
+pub(crate) const ENCODE_URI_COMPONENT: &AsciiSet = &NON_ALPHANUMERIC
+  .remove(b'-')
+  .remove(b'_')
+  .remove(b'.')
+  .remove(b'!')
+  .remove(b'~')
+  .remove(b'*')
+  .remove(b'\'')
+  .remove(b'(')
+  .remove(b')');
+
+/// The origin (`scheme://host`, without a trailing slash) a custom protocol is served from.
+///
+/// On Windows and Android custom protocols are served over `http(s)://{scheme}.localhost`;
+/// everywhere else they are served over `{scheme}://localhost`.
+pub(crate) fn origin(scheme: &str, use_https: bool) -> String {
+  if cfg!(windows) || cfg!(target_os = "android") {
+    let http = if use_https { "https" } else { "http" };
+    format!("{http}://{scheme}.localhost")
+  } else {
+    format!("{scheme}://localhost")
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  #[test]
+  fn encode_uri_component_matches_js() {
+    // encodeURIComponent("aZ09-_.!~*'() /\\?#&%+é")
+    let input = "aZ09-_.!~*'() /\\?#&%+é";
+    let expected = "aZ09-_.!~*'()%20%2F%5C%3F%23%26%25%2B%C3%A9";
+    assert_eq!(
+      percent_encoding::utf8_percent_encode(input, super::ENCODE_URI_COMPONENT).to_string(),
+      expected
+    );
+  }
+}
+
+
+--- src/protocol/tauri.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{borrow::Cow, sync::Arc};
+
+use http::{Request, Response as HttpResponse, StatusCode, header::CONTENT_TYPE};
+use tauri_utils::config::HeaderAddition;
+
+use crate::{
+  Runtime,
+  manager::{AppManager, webview::PROXY_DEV_SERVER},
+  webview::{UriSchemeProtocolHandler, WebResourceRequestHandler},
+};
+
+#[cfg(all(dev, mobile))]
+use std::{collections::HashMap, sync::Mutex};
+
+#[cfg(all(dev, mobile))]
+#[derive(Clone)]
+struct CachedResponse {
+  status: http::StatusCode,
+  headers: http::HeaderMap,
+  body: Vec<u8>,
+}
+
+pub fn get<R: Runtime>(
+  manager: Arc<AppManager<R>>,
+  window_origin: String,
+  web_resource_request_handler: Option<Box<WebResourceRequestHandler>>,
+) -> UriSchemeProtocolHandler {
+  #[cfg(all(dev, mobile))]
+  let (url, client, response_cache) = {
+    let use_https = window_origin.starts_with("https");
+    let mut url = manager.get_app_url(use_https).as_str().to_string();
+    if url.ends_with('/') {
+      url.pop();
+    }
+
+    #[allow(unused_mut)]
+    let mut client_builder = reqwest::ClientBuilder::new();
+    if use_https {
+      #[cfg(feature = "rustls-tls")]
+      if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+      }
+
+      // we can't load env vars at runtime, gotta embed them in the lib
+      #[allow(unused_variables)]
+      if let Some(cert_pem) = option_env!("TAURI_DEV_ROOT_CERTIFICATE") {
+        #[cfg(any(
+          feature = "native-tls",
+          feature = "native-tls-vendored",
+          feature = "rustls-tls"
+        ))]
+
+--- src/resources/mod.rs ---
+// Copyright 2018-2023 the Deno authors. All rights reserved. MIT license.
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+// a modified version of https://github.com/denoland/deno/blob/0ae83847f498a2886ae32172e50fd5bdbab2f524/core/resources.rs#L220
+
+pub(crate) mod plugin;
+
+use std::{
+  any::{Any, TypeId, type_name},
+  borrow::Cow,
+  collections::BTreeMap,
+  sync::Arc,
+};
+
+/// Resources are Rust objects that are stored in [ResourceTable] and managed by tauri.
+///
+/// They are identified in JS by a numeric ID (the resource ID, or rid).
+/// Resources can be created in commands. Resources can also be retrieved in commands by
+/// their rid. Resources are thread-safe.
+///
+/// Resources are reference counted in Rust. This means that they can be
+/// cloned and passed around. When the last reference is dropped, the resource
+/// is automatically closed. As long as the resource exists in the resource
+/// table, the reference count is at least 1.
+pub trait Resource: Any + 'static + Send + Sync {
+  /// Returns a string representation of the resource. The default implementation
+  /// returns the Rust type name, but specific resource types may override this
+  /// trait method.
+  fn name(&self) -> Cow<'_, str> {
+    type_name::<Self>().into()
+  }
+
+  /// Resources may implement the `close()` trait method if they need to do
+  /// resource specific clean-ups, such as cancelling pending futures, after a
+  /// resource has been removed from the resource table.
+  fn close(self: Arc<Self>) {}
+}
+
+impl dyn Resource {
+  #[inline(always)]
+  fn is<T: Resource>(&self) -> bool {
+    self.type_id() == TypeId::of::<T>()
+  }
+
+  #[inline(always)]
+  pub(crate) fn downcast_arc<T: Resource>(self: &Arc<Self>) -> Option<&Arc<T>> {
+    if self.is::<T>() {
+      // A resource is stored as `Arc<T>` in a BTreeMap
+      // and is safe to cast to `Arc<T>` because of the runtime
+      // check done in `self.is::<T>()`
+      let ptr = self as *const Arc<_> as *const Arc<T>;
+      Some(unsafe { &*ptr })
+    } else {
+
+--- src/resources/plugin.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::{
+  Manager, Runtime, Webview, command,
+  plugin::{Builder, TauriPlugin},
+};
+
+use super::ResourceId;
+
+#[command(root = "crate")]
+fn close<R: Runtime>(webview: Webview<R>, rid: ResourceId) -> crate::Result<()> {
+  let mut result = webview.resources_table().close(rid);
+  if result.is_err() {
+    result = webview.window().resources_table().close(rid);
+    if result.is_err() {
+      result = webview.app_handle().resources_table().close(rid);
+    }
+  }
+  result
+}
+
+pub(crate) fn init<R: Runtime>() -> TauriPlugin<R> {
+  Builder::new("resources")
+    .invoke_handler(crate::generate_handler![
+      #![plugin(resources)]
+      close
+    ])
+    .build()
+}
+
+
+--- src/scope/fs.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{
+  collections::{HashMap, HashSet},
+  fmt,
+  path::{MAIN_SEPARATOR, Path, PathBuf},
+  sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, AtomicU32, Ordering},
+  },
+};
+
+use tauri_utils::config::FsScope;
+
+use crate::ScopeEventId;
+
+pub use glob::Pattern;
+
+/// Scope change event.
+#[derive(Debug, Clone)]
+pub enum Event {
+  /// A path has been allowed.
+  PathAllowed(PathBuf),
+  /// A path has been forbidden.
+  PathForbidden(PathBuf),
+}
+
+type EventListener = Box<dyn Fn(&Event) + Send>;
+
+enum Pending {
+  Unlisten(ScopeEventId),
+  Listen {
+    id: ScopeEventId,
+    handler: EventListener,
+  },
+  Emit(Event),
+}
+
+struct ScopeInner {
+  allowed_patterns: Mutex<HashSet<Pattern>>,
+  forbidden_patterns: Mutex<HashSet<Pattern>>,
+  match_options: glob::MatchOptions,
+  event_listeners: Mutex<HashMap<ScopeEventId, EventListener>>,
+  pending: Mutex<Vec<Pending>>,
+  emitting: AtomicBool,
+  next_event_id: AtomicU32,
+}
+
+/// Scope for filesystem access.
+#[derive(Clone)]
+pub struct Scope {
+  inner: Arc<ScopeInner>,
+}
+
+--- src/scope/mod.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! Runtime access scopes.
+//!
+//! A scope narrows what an allowed feature may actually touch at runtime.
+//! Tauri has two complementary scoping mechanisms:
+//!
+//! - **The IPC scope**, which is part of the [Access Control List](crate::ipc::RuntimeAuthority):
+//!   capabilities define which commands each window/webview and origin may call, and the scope
+//!   attached to a permission is read from a command with [`CommandScope`](crate::ipc::CommandScope)
+//!   and [`GlobalScope`](crate::ipc::GlobalScope). That scope is static - it is resolved from the
+//!   capability files at compile time (or added at runtime with
+//!   [`Manager::add_capability`](crate::Manager::add_capability)) - and it is the command
+//!   implementation that decides what to do with it.
+//! - **The file system scope** in [`mod@fs`], a mutable list of allowed and forbidden glob patterns
+//!   that the [asset protocol](https://v2.tauri.app/security/asset-protocol/) checks before serving
+//!   a file. It is seeded from `app > security > assetProtocol > scope` in the configuration and
+//!   can be changed while the application is running.
+//!
+//! Use `Manager::asset_protocol_scope` (`protocol-asset` Cargo feature) to get the asset
+//! protocol scope and [`fs::Scope::allow_directory`], [`fs::Scope::allow_file`],
+//! [`fs::Scope::forbid_directory`] and [`fs::Scope::forbid_file`] to change it, for instance to
+//! grant access to a file the user just picked in a dialog:
+//!
+//! ```rust
+//! # #[cfg(feature = "protocol-asset")]
+//! # fn run() {
+//! use tauri::Manager;
+//!
+//! tauri::Builder::default()
+//!   .setup(|app| {
+//!     app.asset_protocol_scope().allow_directory("/home/user/pictures", true)?;
+//!     Ok(())
+//!   });
+//! # }
+//! ```
+//!
+//! Scope changes are not persisted: they are lost when the application restarts.
+//! Use the [persisted scope plugin](https://v2.tauri.app/plugin/persisted-scope/)
+//! if you need them to survive a restart.
+
+/// FS scope.
+pub mod fs;
+
+use std::path::Path;
+
+/// Unique id of a scope event.
+pub type ScopeEventId = u32;
+
+/// Managed state for all the core scopes in a tauri application.
+pub struct Scopes {
+  #[cfg(feature = "protocol-asset")]
+  pub(crate) asset_protocol: fs::Scope,
+
+--- src/state.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{
+  any::{Any, TypeId},
+  collections::HashMap,
+  hash::BuildHasherDefault,
+  sync::Mutex,
+};
+
+use crate::{
+  Manager, Runtime,
+  ipc::{CommandArg, CommandItem, InvokeError},
+};
+
+/// A guard for a state value.
+///
+/// See [`Manager::manage`](`crate::Manager::manage`) for usage examples.
+pub struct State<'r, T>(&'r T);
+
+impl<'r, T> State<'r, T> {
+  /// Retrieve a borrow to the underlying value with a lifetime of `'r`.
+  /// Using this method is typically unnecessary as `State` implements
+  /// [`std::ops::Deref`] with a [`std::ops::Deref::Target`] of `T`.
+  #[inline(always)]
+  pub fn inner(&self) -> &'r T {
+    self.0
+  }
+}
+
+impl<T> std::ops::Deref for State<'_, T> {
+  type Target = T;
+
+  #[inline(always)]
+  fn deref(&self) -> &T {
+    self.0
+  }
+}
+
+impl<T> Clone for State<'_, T> {
+  fn clone(&self) -> Self {
+    State(self.0)
+  }
+}
+
+impl<T: PartialEq> PartialEq for State<'_, T> {
+  fn eq(&self, other: &Self) -> bool {
+    self.0 == other.0
+  }
+}
+
+impl<T: std::fmt::Debug> std::fmt::Debug for State<'_, T> {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_tuple("State").field(&self.0).finish()
+
+--- src/test/mock_runtime.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+#![allow(dead_code)]
+#![allow(missing_docs)]
+
+use tauri_runtime::{
+  DeviceEventFilter, Error, EventLoopProxy, ExitRequestedEventAction, Icon, ProgressBarState,
+  Result, RunEvent, Runtime, RuntimeHandle, RuntimeInitArgs, UserAttentionType, UserEvent,
+  WebviewDispatch, WindowDispatch, WindowEventId,
+  dpi::{PhysicalPosition, PhysicalSize, Position, Size},
+  monitor::Monitor,
+  webview::{DetachedWebview, PendingWebview},
+  window::{
+    CursorIcon, DetachedWindow, DetachedWindowWebview, PendingWindow, RawWindow, WindowBuilder,
+    WindowBuilderBase, WindowEvent, WindowId,
+  },
+};
+
+#[cfg(target_os = "macos")]
+use tauri_utils::TitleBarStyle;
+use tauri_utils::{Theme, config::WindowConfig};
+use url::Url;
+
+#[cfg(windows)]
+use windows::Win32::Foundation::HWND;
+
+use std::{
+  cell::RefCell,
+  collections::HashMap,
+  fmt,
+  sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, AtomicU32, Ordering},
+    mpsc::{Receiver, SyncSender, channel, sync_channel},
+  },
+};
+
+type ShortcutMap = HashMap<String, Box<dyn Fn() + Send + 'static>>;
+
+enum Message {
+  Task(Box<dyn FnOnce() + Send>),
+  CloseWindow(WindowId),
+  DestroyWindow(WindowId),
+}
+
+struct Webview;
+
+struct Window {
+  label: String,
+  webviews: Vec<Webview>,
+}
+
+#[derive(Clone)]
+
+--- src/test/mod.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! Utilities for unit testing on Tauri applications.
+//!
+//! # Stability
+//!
+//! This module is unstable.
+//!
+//! # Examples
+//!
+//! ```rust
+//! use tauri::test::{mock_builder, mock_context, noop_assets};
+//!
+//! #[tauri::command]
+//! fn ping() -> &'static str {
+//!     "pong"
+//! }
+//!
+//! fn create_app<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::App<R> {
+//!     builder
+//!         .invoke_handler(tauri::generate_handler![ping])
+//!         // remove the string argument to use your app's config file
+//!         .build(tauri::generate_context!("test/fixture/src-tauri/tauri.conf.json"))
+//!         .expect("failed to build app")
+//! }
+//!
+//! fn main() {
+//!     // Use `tauri::Builder::default()` to use the default runtime rather than the `MockRuntime`;
+//!     // let app = create_app(tauri::Builder::default());
+//!     let app = create_app(mock_builder());
+//!     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+//!
+//!     // run the `ping` command and assert it returns `pong`
+//!     let res = tauri::test::get_ipc_response(
+//!         &webview,
+//!         tauri::webview::InvokeRequest {
+//!             cmd: "ping".into(),
+//!             callback: tauri::ipc::CallbackFn(0),
+//!             error: tauri::ipc::CallbackFn(1),
+//!             // alternatively use "tauri://localhost"
+//!             url: "http://tauri.localhost".parse().unwrap(),
+//!             body: tauri::ipc::InvokeBody::default(),
+//!             headers: Default::default(),
+//!             invoke_key: tauri::test::INVOKE_KEY.to_string(),
+//!         },
+//!     ).map(|b| b.deserialize::<String>().unwrap());
+//! }
+//! ```
+
+#![allow(unused_variables)]
+
+mod mock_runtime;
+pub use mock_runtime::*;
+
+--- src/tray/mod.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! Tray icon types and utilities.
+
+pub(crate) mod plugin;
+
+use crate::app::{GlobalMenuEventListener, GlobalTrayIconEventListener};
+use crate::menu::ContextMenu;
+use crate::menu::MenuEvent;
+use crate::resources::Resource;
+use crate::{
+  AppHandle, Manager, PhysicalPosition, Rect, Runtime, image::Image, menu::run_item_main_thread,
+};
+use crate::{ResourceId, UnsafeSend};
+use serde::Serialize;
+use std::path::Path;
+pub use tray_icon::TrayIconId;
+
+/// Describes the mouse button state.
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug, Serialize)]
+pub enum MouseButtonState {
+  /// Mouse button pressed.
+  #[default]
+  Up,
+  /// Mouse button released.
+  Down,
+}
+
+impl From<tray_icon::MouseButtonState> for MouseButtonState {
+  fn from(value: tray_icon::MouseButtonState) -> Self {
+    match value {
+      tray_icon::MouseButtonState::Up => MouseButtonState::Up,
+      tray_icon::MouseButtonState::Down => MouseButtonState::Down,
+    }
+  }
+}
+
+/// Describes which mouse button triggered the event..
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Default)]
+pub enum MouseButton {
+  /// Left mouse button.
+  #[default]
+  Left,
+  /// Right mouse button.
+  Right,
+  /// Middle mouse button.
+  Middle,
+}
+
+impl From<tray_icon::MouseButton> for MouseButton {
+  fn from(value: tray_icon::MouseButton) -> Self {
+    match value {
+      tray_icon::MouseButton::Left => MouseButton::Left,
+
+--- src/tray/plugin.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use anyhow::Context;
+use serde::Deserialize;
+
+use crate::{
+  AppHandle, Manager, Runtime, Webview, command,
+  image::JsImage,
+  ipc::Channel,
+  menu::{Menu, Submenu, plugin::ItemKind},
+  plugin::{Builder, TauriPlugin},
+  resources::ResourceId,
+  tray::TrayIconBuilder,
+};
+
+use super::{TrayIcon, TrayIconEvent};
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TrayIconOptions {
+  id: Option<String>,
+  menu: Option<(ResourceId, ItemKind)>,
+  icon: Option<JsImage>,
+  tooltip: Option<String>,
+  title: Option<String>,
+  temp_dir_path: Option<PathBuf>,
+  icon_as_template: Option<bool>,
+  menu_on_left_click: Option<bool>,
+  show_menu_on_left_click: Option<bool>,
+}
+
+#[command(root = "crate")]
+fn new<R: Runtime>(
+  webview: Webview<R>,
+  options: TrayIconOptions,
+  handler: Channel<TrayIconEvent>,
+) -> crate::Result<(ResourceId, String)> {
+  let mut builder = if let Some(id) = options.id {
+    TrayIconBuilder::<R>::with_id(id)
+  } else {
+    TrayIconBuilder::<R>::new()
+  };
+
+  builder = builder.on_tray_icon_event(move |_tray, e| {
+    let _ = handler.send(e);
+  });
+
+  let resources_table = webview.resources_table();
+
+  if let Some((rid, kind)) = options.menu {
+
+--- src/vibrancy/macos.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+#![allow(deprecated)]
+
+use crate::utils::config::WindowEffectsConfig;
+use crate::window::{Effect, EffectState};
+use raw_window_handle::HasWindowHandle;
+use window_vibrancy::{
+  LiquidGlassOptions, NSGlassEffectViewStyle, NSVisualEffectMaterial, NSVisualEffectState,
+};
+
+pub fn apply_effects(window: impl HasWindowHandle, effects: WindowEffectsConfig) {
+  let WindowEffectsConfig {
+    effects,
+    radius,
+    state,
+    color,
+    interactive,
+  } = effects;
+
+  // window-vibrancy inserts a new subview on every call, so drop the previous effect first
+  clear_effects(&window);
+
+  if let Some(effect) = effects
+    .iter()
+    .find(|e| matches!(e, Effect::LiquidGlassRegular | Effect::LiquidGlassClear))
+  {
+    let mut options = LiquidGlassOptions::new(match effect {
+      Effect::LiquidGlassRegular => NSGlassEffectViewStyle::Regular,
+      Effect::LiquidGlassClear => NSGlassEffectViewStyle::Clear,
+      _ => unreachable!(),
+    })
+    .interactive(interactive);
+
+    if let Some(color) = color {
+      options = options.tint_color(color.into());
+    }
+    if let Some(radius) = radius {
+      options = options.radius(radius);
+    }
+
+    match window_vibrancy::apply_liquid_glass(&window, options) {
+      Ok(()) => return,
+      // macOS 15 and below: fall back to the Visual Effect material, if any
+      Err(window_vibrancy::Error::UnsupportedPlatformVersion(_)) => {}
+      Err(e) => {
+        log::error!("failed to apply liquid glass effect: {e}");
+        return;
+      }
+    }
+  }
+
+  let effect = if let Some(effect) = effects.into_iter().find(|e| {
+
+--- src/vibrancy/mod.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+#![allow(unused)]
+
+use tauri_utils::config::WindowEffectsConfig;
+
+use crate::{Runtime, Window};
+
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(windows)]
+mod windows;
+
+pub fn set_window_effects<R: Runtime>(
+  window: &Window<R>,
+  effects: Option<WindowEffectsConfig>,
+) -> crate::Result<()> {
+  if let Some(_effects) = effects {
+    #[cfg(windows)]
+    windows::apply_effects(window, _effects);
+    #[cfg(target_os = "macos")]
+    macos::apply_effects(window, _effects);
+  } else {
+    #[cfg(windows)]
+    windows::clear_effects(window);
+    #[cfg(target_os = "macos")]
+    macos::clear_effects(window);
+  }
+  Ok(())
+}
+
+
+--- src/vibrancy/windows.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+#![allow(non_snake_case)]
+#![allow(non_camel_case_types)]
+#![allow(clippy::upper_case_acronyms)]
+
+use std::ffi::c_void;
+
+use crate::utils::config::WindowEffectsConfig;
+use crate::window::{Color, Effect};
+use raw_window_handle::HasWindowHandle;
+use windows::Win32::Foundation::HWND;
+
+pub fn apply_effects(window: impl HasWindowHandle, effects: WindowEffectsConfig) {
+  let WindowEffectsConfig { effects, color, .. } = effects;
+  let effect = if let Some(effect) = effects.iter().find(|e| {
+    matches!(
+      e,
+      Effect::Mica
+        | Effect::MicaDark
+        | Effect::MicaLight
+        | Effect::Acrylic
+        | Effect::Blur
+        | Effect::Tabbed
+        | Effect::TabbedDark
+        | Effect::TabbedLight
+    )
+  }) {
+    effect
+  } else {
+    return;
+  };
+
+  match effect {
+    Effect::Blur => window_vibrancy::apply_blur(window, color.map(Into::into)),
+    Effect::Acrylic => window_vibrancy::apply_acrylic(window, color.map(Into::into)),
+    Effect::Mica => window_vibrancy::apply_mica(window, None),
+    Effect::MicaDark => window_vibrancy::apply_mica(window, Some(true)),
+    Effect::MicaLight => window_vibrancy::apply_mica(window, Some(false)),
+    Effect::Tabbed => window_vibrancy::apply_tabbed(window, None),
+    Effect::TabbedDark => window_vibrancy::apply_tabbed(window, Some(true)),
+    Effect::TabbedLight => window_vibrancy::apply_tabbed(window, Some(false)),
+    _ => unreachable!(),
+  };
+}
+
+pub fn clear_effects(window: impl HasWindowHandle) {
+  window_vibrancy::clear_blur(&window);
+  window_vibrancy::clear_acrylic(&window);
+  window_vibrancy::clear_mica(&window);
+}
+
+
+--- src/webview/mod.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! The Tauri webview types and functions.
+
+pub(crate) mod plugin;
+mod webview_window;
+
+pub use webview_window::{WebviewWindow, WebviewWindowBuilder};
+
+/// Cookie crate used for [`Webview::set_cookie`] and [`Webview::delete_cookie`].
+///
+/// # Stability
+///
+/// This re-exported crate is still on an alpha release and might receive updates in minor Tauri releases.
+pub use cookie;
+use http::HeaderMap;
+use serde::Serialize;
+use tauri_macros::default_runtime;
+pub use tauri_runtime::webview::{
+  NewWindowFeatures, PageLoadEvent, PermissionKind, PermissionResponse, ScrollBarStyle,
+};
+// Remove this re-export in v3
+pub use tauri_runtime::Cookie;
+use tauri_runtime::{
+  WebviewDispatch,
+  webview::{DetachedWebview, InitializationScript, PendingWebview, WebviewAttributes},
+};
+#[cfg(desktop)]
+use tauri_runtime::{
+  WindowDispatch,
+  dpi::{PhysicalPosition, PhysicalSize, Position, Size},
+};
+pub use tauri_utils::config::Color;
+use tauri_utils::config::{BackgroundThrottlingPolicy, WebviewUrl, WindowConfig};
+pub use url::Url;
+
+use crate::{
+  AppHandle, Emitter, Event, EventId, EventLoopMessage, EventName, Listener, Manager,
+  ResourceTable, Runtime, Window,
+  app::{UriSchemeResponder, WebviewEvent},
+  event::{EmitArgs, EventTarget},
+  ipc::{
+    CallbackFn, CommandArg, CommandItem, CommandScope, GlobalScope, Invoke, InvokeBody,
+    InvokeError, InvokeMessage, InvokeResolver, Origin, OwnedInvokeResponder, ScopeObject,
+  },
+  manager::AppManager,
+  path::SafePathBuf,
+  sealed::{ManagerBase, RuntimeOrDispatch},
+};
+
+use std::{
+  borrow::Cow,
+  hash::{Hash, Hasher},
+
+--- src/webview/plugin.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! The tauri plugin to create and manipulate windows from JS.
+
+use crate::{
+  AppHandle, Runtime, WebviewWindowBuilder, command,
+  plugin::{Builder, TauriPlugin},
+  sealed::ManagerBase,
+  utils::config::WindowConfig,
+};
+
+#[derive(serde::Serialize)]
+struct WebviewRef {
+  window_label: String,
+  label: String,
+}
+
+#[command(root = "crate")]
+async fn get_all_webviews<R: Runtime>(app: AppHandle<R>) -> Vec<WebviewRef> {
+  app
+    .manager()
+    .webviews()
+    .values()
+    .map(|webview| WebviewRef {
+      window_label: webview.window_ref().label().into(),
+      label: webview.label().into(),
+    })
+    .collect()
+}
+
+#[command(root = "crate")]
+async fn create_webview_window<R: Runtime>(
+  app: AppHandle<R>,
+  options: WindowConfig,
+) -> crate::Result<()> {
+  WebviewWindowBuilder::from_config(&app, &options)?.build()?;
+  Ok(())
+}
+
+#[cfg(desktop)]
+mod desktop_commands {
+  use super::*;
+  use crate::{
+    Webview, command,
+    runtime::dpi::{Position, Size},
+    utils::config::Color,
+  };
+
+  fn get_webview<R: Runtime>(
+    webview: Webview<R>,
+    label: Option<String>,
+  ) -> crate::Result<Webview<R>> {
+    match label {
+
+--- src/webview/webview_window.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! [`Window`] that hosts a single [`Webview`].
+
+use std::{
+  borrow::Cow,
+  path::{Path, PathBuf},
+  sync::{Arc, MutexGuard},
+};
+
+use crate::{
+  Emitter, EventName, Listener, ResourceTable, Window,
+  event::EventTarget,
+  ipc::ScopeObject,
+  runtime::dpi::{PhysicalPosition, PhysicalSize, Position, Size},
+  webview::{NewWindowResponse, ScrollBarStyle},
+  window::Monitor,
+};
+#[cfg(desktop)]
+use crate::{
+  image::Image,
+  menu::{ContextMenu, Menu},
+  runtime::{UserAttentionType, window::CursorIcon},
+};
+use tauri_runtime::webview::NewWindowFeatures;
+use tauri_utils::config::{BackgroundThrottlingPolicy, Color, WebviewUrl, WindowConfig};
+use url::Url;
+
+use crate::{
+  AppHandle, Event, EventId, Manager, Runtime, Webview, WindowEvent,
+  ipc::{CommandArg, CommandItem, InvokeError, OwnedInvokeResponder},
+  manager::AppManager,
+  sealed::{ManagerBase, RuntimeOrDispatch},
+  webview::{Cookie, PageLoadPayload, WebviewBuilder, WebviewEvent},
+  window::WindowBuilder,
+};
+
+use tauri_macros::default_runtime;
+
+#[cfg(windows)]
+use windows::Win32::Foundation::HWND;
+
+use super::{DownloadEvent, ResolvedScope};
+
+/// A builder for [`WebviewWindow`], a window that hosts a single webview.
+pub struct WebviewWindowBuilder<'a, R: Runtime, M: Manager<R>> {
+  window_builder: WindowBuilder<'a, R, M>,
+  webview_builder: WebviewBuilder<R>,
+}
+
+impl<'a, R: Runtime, M: Manager<R>> WebviewWindowBuilder<'a, R, M> {
+  /// Initializes a webview window builder with the given window label.
+  ///
+
+--- src/window/mod.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! The Tauri window types and functions.
+
+pub(crate) mod plugin;
+
+use tauri_runtime::{
+  dpi::{PhysicalPosition, PhysicalRect, PhysicalSize},
+  webview::PendingWebview,
+};
+pub use tauri_utils::{WindowEffect as Effect, WindowEffectState as EffectState, config::Color};
+
+#[cfg(desktop)]
+pub use crate::runtime::ProgressBarStatus;
+
+#[cfg(desktop)]
+use crate::{
+  CursorIcon,
+  image::Image,
+  menu::{ContextMenu, Menu, MenuId},
+  runtime::UserAttentionType,
+};
+use crate::{
+  Emitter, EventLoopMessage, EventName, Listener, Manager, ResourceTable, Runtime, Theme, Webview,
+  WindowEvent,
+  app::AppHandle,
+  event::{Event, EventId, EventTarget},
+  ipc::{CommandArg, CommandItem, InvokeError},
+  manager::{AppManager, EmitPayload},
+  runtime::{
+    RuntimeHandle, WindowDispatch,
+    dpi::{Position, Size},
+    monitor::Monitor as RuntimeMonitor,
+    window::{DetachedWindow, PendingWindow, WindowBuilder as _},
+  },
+  sealed::{ManagerBase, RuntimeOrDispatch},
+  utils::config::{WindowConfig, WindowEffectsConfig},
+  webview::WebviewBuilder,
+};
+
+use serde::Serialize;
+#[cfg(windows)]
+use windows::Win32::Foundation::HWND;
+
+use tauri_macros::default_runtime;
+
+use std::{
+  fmt,
+  hash::{Hash, Hasher},
+  sync::{Arc, Mutex, MutexGuard},
+};
+
+/// Monitor descriptor.
+
+--- src/window/plugin.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! The tauri plugin to create and manipulate windows from JS.
+
+use crate::{
+  Runtime, Window,
+  plugin::{Builder, TauriPlugin},
+  sealed::ManagerBase,
+};
+
+fn get_window<R: Runtime>(window: Window<R>, label: Option<String>) -> crate::Result<Window<R>> {
+  match label {
+    Some(l) if !l.is_empty() => window
+      .manager()
+      .get_window(&l)
+      .ok_or(crate::Error::WindowNotFound),
+    _ => Ok(window),
+  }
+}
+macro_rules! getter {
+  ($cmd: ident, $ret: ty) => {
+    #[command(root = "crate")]
+    pub async fn $cmd<R: Runtime>(window: Window<R>, label: Option<String>) -> crate::Result<$ret> {
+      get_window(window, label)?.$cmd().map_err(Into::into)
+    }
+  };
+}
+
+macro_rules! setter {
+  ($cmd: ident) => {
+    #[command(root = "crate")]
+    pub async fn $cmd<R: Runtime>(window: Window<R>, label: Option<String>) -> crate::Result<()> {
+      get_window(window, label)?.$cmd().map_err(Into::into)
+    }
+  };
+
+  ($cmd: ident, $input: ty) => {
+    #[command(root = "crate")]
+    pub async fn $cmd<R: Runtime>(
+      window: Window<R>,
+      label: Option<String>,
+      value: $input,
+    ) -> crate::Result<()> {
+      get_window(window, label)?.$cmd(value).map_err(Into::into)
+    }
+  };
+}
+
+mod commands {
+  use tauri_runtime::window::WindowSizeConstraints;
+
+  use super::*;
+  use crate::{

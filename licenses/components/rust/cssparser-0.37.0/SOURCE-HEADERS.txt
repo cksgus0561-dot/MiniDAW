@@ -1,0 +1,738 @@
+--- src/color.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+//! General color-parsing utilities, independent on the specific color storage and parsing
+//! implementation.
+//!
+//! For a more complete css-color implementation take a look at cssparser-color crate, or at
+//! Gecko's color module.
+
+// Allow text like <color> in docs.
+#![allow(rustdoc::invalid_html_tags)]
+
+/// The opaque alpha value of 1.0.
+pub const OPAQUE: f32 = 1.0;
+
+use crate::{BasicParseError, Parser, ToCss, Token};
+use std::fmt;
+
+/// Clamp a 0..1 number to a 0..255 range to u8.
+///
+/// Whilst scaling by 256 and flooring would provide
+/// an equal distribution of integers to percentage inputs,
+/// this is not what Gecko does so we instead multiply by 255
+/// and round (adding 0.5 and flooring is equivalent to rounding)
+///
+/// Chrome does something similar for the alpha value, but not
+/// the rgb values.
+///
+/// See <https://bugzilla.mozilla.org/show_bug.cgi?id=1340484>
+///
+/// Clamping to 256 and rounding after would let 1.0 map to 256, and
+/// `256.0_f32 as u8` is undefined behavior:
+///
+/// <https://github.com/rust-lang/rust/issues/10184>
+#[inline]
+pub fn clamp_unit_f32(val: f32) -> u8 {
+    clamp_floor_256_f32(val * 255.)
+}
+
+/// Round and clamp a single number to a u8.
+#[inline]
+pub fn clamp_floor_256_f32(val: f32) -> u8 {
+    val.round().clamp(0., 255.) as u8
+}
+
+/// Serialize the alpha copmonent of a color according to the specification.
+/// <https://drafts.csswg.org/css-color-4/#serializing-alpha-values>
+#[inline]
+pub fn serialize_color_alpha(
+    dest: &mut impl fmt::Write,
+    alpha: Option<f32>,
+    legacy_syntax: bool,
+) -> fmt::Result {
+    let alpha = match alpha {
+
+--- src/cow_rc_str.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+use std::borrow::{Borrow, Cow};
+use std::rc::Rc;
+use std::{cmp, fmt, hash, marker, mem, ops, ptr, slice, str};
+
+/// A string that is either shared (heap-allocated and reference-counted) or borrowed.
+///
+/// Equivalent to `enum { Borrowed(&'a str), Shared(Rc<String>) }`, but stored more compactly.
+///
+/// * If `borrowed_len_or_max == usize::MAX`, then `ptr` represents `NonZero<*const String>`
+///   from `Rc::into_raw`.
+///   The lifetime parameter `'a` is irrelevant in this case.
+///
+/// * Otherwise, `ptr` represents the `NonZero<*const u8>` data component of `&'a str`,
+///   and `borrowed_len_or_max` its length.
+pub struct CowRcStr<'a> {
+    ptr: ptr::NonNull<()>,
+    borrowed_len_or_max: usize,
+
+    phantom: marker::PhantomData<Result<&'a str, Rc<String>>>,
+}
+
+fn _static_assert_same_size() {
+    // "Instantiate" the generic function without calling it.
+    let _ = mem::transmute::<CowRcStr<'_>, Option<CowRcStr<'_>>>;
+}
+
+impl<'a> From<Cow<'a, str>> for CowRcStr<'a> {
+    #[inline]
+    fn from(s: Cow<'a, str>) -> Self {
+        match s {
+            Cow::Borrowed(s) => CowRcStr::from(s),
+            Cow::Owned(s) => CowRcStr::from(s),
+        }
+    }
+}
+
+impl<'a> From<&'a str> for CowRcStr<'a> {
+    #[inline]
+    fn from(s: &'a str) -> Self {
+        let len = s.len();
+        assert!(len < usize::MAX);
+        CowRcStr {
+            ptr: unsafe { ptr::NonNull::new_unchecked(s.as_ptr() as *mut ()) },
+            borrowed_len_or_max: len,
+            phantom: marker::PhantomData,
+        }
+    }
+}
+
+impl From<String> for CowRcStr<'_> {
+    #[inline]
+
+--- src/from_bytes.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+/// Abstraction for avoiding a dependency from cssparser to an encoding library
+pub trait EncodingSupport {
+    /// One character encoding
+    type Encoding;
+
+    /// https://encoding.spec.whatwg.org/#concept-encoding-get
+    fn from_label(ascii_label: &[u8]) -> Option<Self::Encoding>;
+
+    /// Return the UTF-8 encoding
+    fn utf8() -> Self::Encoding;
+
+    /// Whether the given encoding is UTF-16BE or UTF-16LE
+    fn is_utf16_be_or_le(encoding: &Self::Encoding) -> bool;
+}
+
+/// Determine the character encoding of a CSS stylesheet.
+///
+/// This is based on the presence of a BOM (Byte Order Mark), an `@charset` rule, and
+/// encoding meta-information.
+///
+/// * `css_bytes`: A byte string.
+/// * `protocol_encoding`: The encoding label, if any, defined by HTTP or equivalent protocol.
+///   (e.g. via the `charset` parameter of the `Content-Type` header.)
+/// * `environment_encoding`: An optional `Encoding` object for the [environment encoding]
+///   (https://drafts.csswg.org/css-syntax/#environment-encoding), if any.
+///
+/// Returns the encoding to use.
+pub fn stylesheet_encoding<E>(
+    css: &[u8],
+    protocol_encoding_label: Option<&[u8]>,
+    environment_encoding: Option<E::Encoding>,
+) -> E::Encoding
+where
+    E: EncodingSupport,
+{
+    // https://drafts.csswg.org/css-syntax/#the-input-byte-stream
+    if let Some(label) = protocol_encoding_label {
+        if let Some(protocol_encoding) = E::from_label(label) {
+            return protocol_encoding;
+        };
+    };
+
+    let prefix = b"@charset \"";
+    if css.starts_with(prefix) {
+        let rest = &css[prefix.len()..];
+        if let Some(label_length) = rest.iter().position(|&b| b == b'"') {
+            if rest[label_length..].starts_with(b"\";") {
+                let label = &rest[..label_length];
+                if let Some(charset_encoding) = E::from_label(label) {
+                    if E::is_utf16_be_or_le(&charset_encoding) {
+                        return E::utf8();
+
+--- src/lib.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#![crate_name = "cssparser"]
+#![crate_type = "rlib"]
+#![cfg_attr(feature = "bench", feature(test))]
+#![deny(missing_docs)]
+
+/*!
+
+Implementation of [CSS Syntax Module Level 3](https://drafts.csswg.org/css-syntax/) for Rust.
+
+# Input
+
+Everything is based on `Parser` objects, which borrow a `&str` input.
+If you have bytes (from a file, the network, or something)
+and want to support character encodings other than UTF-8,
+see the `stylesheet_encoding` function,
+which can be used together with rust-encoding or encoding-rs.
+
+# Conventions for parsing functions
+
+* Take (at least) a `input: &mut cssparser::Parser` parameter
+* Return `Result<_, ()>`
+* When returning `Ok(_)`,
+  the function must have consumed exactly the amount of input that represents the parsed value.
+* When returning `Err(())`, any amount of input may have been consumed.
+
+As a consequence, when calling another parsing function, either:
+
+* Any `Err(())` return value must be propagated.
+  This happens by definition for tail calls,
+  and can otherwise be done with the `?` operator.
+* Or the call must be wrapped in a `Parser::try` call.
+  `try` takes a closure that takes a `Parser` and returns a `Result`,
+  calls it once,
+  and returns itself that same result.
+  If the result is `Err`,
+  it restores the position inside the input to the one saved before calling the closure.
+
+Examples:
+
+```rust,ignore
+// 'none' | <image>
+fn parse_background_image(context: &ParserContext, input: &mut Parser)
+                                    -> Result<Option<Image>, ()> {
+    if input.try_parse(|input| input.expect_ident_matching("none")).is_ok() {
+        Ok(None)
+    } else {
+        Image::parse(context, input).map(Some)  // tail call
+    }
+}
+```
+
+
+--- src/macros.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+use std::mem::MaybeUninit;
+
+/// Expands to a `match` expression with string patterns,
+/// matching case-insensitively in the ASCII range.
+///
+/// The patterns must not contain ASCII upper case letters. (They must be already be lower-cased.)
+///
+/// # Example
+///
+/// ```rust
+/// # fn main() {}  // Make doctest not wrap everything in its own main
+/// # fn dummy(function_name: &String) { let _ =
+/// cssparser::match_ignore_ascii_case! { &function_name,
+///     "rgb" => parse_rgb(..),
+/// #   #[cfg(not(something))]
+///     "rgba" => parse_rgba(..),
+///     "hsl" => parse_hsl(..),
+///     "hsla" => parse_hsla(..),
+///     _ => Err(format!("unknown function: {}", function_name))
+/// }
+/// # ;}
+/// # use std::ops::RangeFull;
+/// # fn parse_rgb(_: RangeFull) -> Result<(), String> { Ok(()) }
+/// # fn parse_rgba(_: RangeFull) -> Result<(), String> { Ok(()) }
+/// # fn parse_hsl(_: RangeFull) -> Result<(), String> { Ok(()) }
+/// # fn parse_hsla(_: RangeFull) -> Result<(), String> { Ok(()) }
+/// ```
+#[macro_export]
+macro_rules! match_ignore_ascii_case {
+    ( $input:expr,
+        $(
+            $( #[$meta: meta] )*
+            $( $pattern:literal )|+ $( if $guard: expr )? => $then: expr
+        ),+
+        $(,_ => $fallback:expr)?
+        $(,)?
+    ) => {
+        {
+            #[inline(always)]
+            const fn const_usize_max(a: usize, b: usize) -> usize {
+                if a > b {
+                    a
+                } else {
+                    b
+                }
+            }
+
+            const MAX_LENGTH : usize = {
+                let mut maxlen : usize = 0;
+                $(
+                    $( #[$meta] )*
+
+--- src/nth.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+use super::{BasicParseError, Parser, ParserInput, Token};
+
+/// Parse the *An+B* notation, as found in the `:nth-child()` selector.
+/// The input is typically the arguments of a function,
+/// in which case the caller needs to check if the arguments’ parser is exhausted.
+/// Return `Ok((A, B))`, or an `Err(..)` for a syntax error.
+pub fn parse_nth<'i>(input: &mut Parser<'i, '_>) -> Result<(i32, i32), BasicParseError<'i>> {
+    match *input.next()? {
+        Token::Number {
+            int_value: Some(b), ..
+        } => Ok((0, b)),
+        Token::Dimension {
+            int_value: Some(a),
+            ref unit,
+            ..
+        } => {
+            match_ignore_ascii_case! {
+                unit,
+                "n" => parse_b(input, a),
+                "n-" => parse_signless_b(input, a, -1),
+                _ => match parse_n_dash_digits(unit) {
+                    Ok(b) => Ok((a, b)),
+                    Err(()) => {
+                        let unit = unit.clone();
+                        Err(input.new_basic_unexpected_token_error(Token::Ident(unit)))
+                    }
+                }
+            }
+        }
+        Token::Ident(ref value) => {
+            match_ignore_ascii_case! { value,
+                "even" => Ok((2, 0)),
+                "odd" => Ok((2, 1)),
+                "n" => parse_b(input, 1),
+                "-n" => parse_b(input, -1),
+                "n-" => parse_signless_b(input, 1, -1),
+                "-n-" => parse_signless_b(input, -1, -1),
+                _ => {
+                    let (slice, a) = if let Some(stripped) = value.strip_prefix('-') {
+                        (stripped, -1)
+                    } else {
+                        (&**value, 1)
+                    };
+                    match parse_n_dash_digits(slice) {
+                        Ok(b) => Ok((a, b)),
+                        Err(()) => {
+                            let value = value.clone();
+                            Err(input.new_basic_unexpected_token_error(Token::Ident(value)))
+                        }
+                    }
+                }
+
+--- src/parser.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+use crate::cow_rc_str::CowRcStr;
+use crate::tokenizer::{SourceLocation, SourcePosition, Token, Tokenizer};
+use smallvec::SmallVec;
+use std::fmt;
+use std::ops::BitOr;
+use std::ops::Range;
+
+/// A capture of the internal state of a `Parser` (including the position within the input),
+/// obtained from the `Parser::position` method.
+///
+/// Can be used with the `Parser::reset` method to restore that state.
+/// Should only be used with the `Parser` instance it came from.
+#[derive(Debug, Clone)]
+pub struct ParserState {
+    pub(crate) position: usize,
+    pub(crate) current_line_start_position: usize,
+    pub(crate) current_line_number: u32,
+    pub(crate) at_start_of: Option<BlockType>,
+}
+
+impl ParserState {
+    /// The position from the start of the input, counted in UTF-8 bytes.
+    #[inline]
+    pub fn position(&self) -> SourcePosition {
+        SourcePosition(self.position)
+    }
+
+    /// The line number and column number
+    #[inline]
+    pub fn source_location(&self) -> SourceLocation {
+        SourceLocation {
+            line: self.current_line_number,
+            column: (self.position - self.current_line_start_position + 1) as u32,
+        }
+    }
+}
+
+/// When parsing until a given token, sometimes the caller knows that parsing is going to restart
+/// at some earlier point, and consuming until we find a top level delimiter is just wasted work.
+///
+/// In that case, callers can pass ParseUntilErrorBehavior::Stop to avoid doing all that wasted
+/// work.
+///
+/// This is important for things like CSS nesting, where something like:
+///
+///   foo:is(..) {
+///     ...
+///   }
+///
+/// Would need to scan the whole {} block to find a semicolon, only for parsing getting restarted
+/// as a qualified rule later.
+
+--- src/rules_and_declarations.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+// https://drafts.csswg.org/css-syntax/#parsing
+
+use super::{BasicParseError, BasicParseErrorKind, Delimiter, ParseError, Parser, Token};
+use crate::cow_rc_str::CowRcStr;
+use crate::parser::{parse_nested_block, parse_until_after, ParseUntilErrorBehavior, ParserState};
+
+/// Parse `!important`.
+///
+/// Typical usage is `input.try_parse(parse_important).is_ok()`
+/// at the end of a `DeclarationParser::parse_value` implementation.
+pub fn parse_important<'i>(input: &mut Parser<'i, '_>) -> Result<(), BasicParseError<'i>> {
+    input.expect_delim('!')?;
+    input.expect_ident_matching("important")
+}
+
+/// A trait to provide various parsing of declaration values.
+///
+/// For example, there could be different implementations for property declarations in style rules
+/// and for descriptors in `@font-face` rules.
+pub trait DeclarationParser<'i> {
+    /// The finished representation of a declaration.
+    type Declaration;
+
+    /// The error type that is included in the ParseError value that can be returned.
+    type Error: 'i;
+
+    /// Parse the value of a declaration with the given `name`.
+    ///
+    /// Return the finished representation for the declaration
+    /// as returned by `RuleBodyParser::next`,
+    /// or an `Err(..)` to ignore the entire declaration as invalid.
+    ///
+    /// Declaration name matching should be case-insensitive in the ASCII range.
+    /// This can be done with `std::ascii::Ascii::eq_ignore_ascii_case`,
+    /// or with the `match_ignore_ascii_case!` macro.
+    ///
+    /// The given `input` is a "delimited" parser
+    /// that ends wherever the declaration value should end.
+    /// (In declaration lists, before the next semicolon or end of the current block.)
+    ///
+    /// If `!important` can be used in a given context,
+    /// `input.try_parse(parse_important).is_ok()` should be used at the end
+    /// of the implementation of this method and the result should be part of the return value.
+    fn parse_value<'t>(
+        &mut self,
+        name: CowRcStr<'i>,
+        input: &mut Parser<'i, 't>,
+        _declaration_start: &ParserState,
+    ) -> Result<Self::Declaration, ParseError<'i, Self::Error>> {
+        Err(input.new_error(BasicParseErrorKind::UnexpectedToken(Token::Ident(name))))
+    }
+
+--- src/serializer.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+use std::fmt::{self, Write};
+use std::str;
+
+#[cfg(feature = "fast_match_byte")]
+pub use crate::match_byte;
+
+use super::Token;
+
+/// Trait for things the can serialize themselves in CSS syntax.
+pub trait ToCss {
+    /// Serialize `self` in CSS syntax, writing to `dest`.
+    fn to_css<W>(&self, dest: &mut W) -> fmt::Result
+    where
+        W: fmt::Write;
+
+    /// Serialize `self` in CSS syntax and return a string.
+    ///
+    /// (This is a convenience wrapper for `to_css` and probably should not be overridden.)
+    #[inline]
+    fn to_css_string(&self) -> String {
+        let mut s = String::new();
+        self.to_css(&mut s).unwrap();
+        s
+    }
+}
+
+#[inline]
+fn write_numeric<W>(value: f32, int_value: Option<i32>, has_sign: bool, dest: &mut W) -> fmt::Result
+where
+    W: fmt::Write,
+{
+    if value == 0.0 && value.is_sign_negative() {
+        // Negative zero. Work around #20596.
+        return dest.write_str("-0");
+    }
+    // NOTE: `value.value >= 0` is true for negative 0 but we've dealt with it above.
+    if has_sign && value >= 0.0 {
+        dest.write_str("+")?;
+    }
+
+    if let Some(v) = int_value {
+        return write!(dest, "{}", v);
+    }
+
+    let notation = dtoa_short::write(dest, value)?;
+    if value.fract() == 0. && !notation.decimal_point && !notation.scientific {
+        dest.write_str(".0")?;
+    }
+    Ok(())
+}
+
+
+--- src/size_of_tests.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+use crate::cow_rc_str::CowRcStr;
+use crate::tokenizer::Token;
+
+macro_rules! size_of_test {
+    ($testname: ident, $t: ty, $expected_min_size: expr, $expected_max_size: expr) => {
+        #[test]
+        fn $testname() {
+            let new = ::std::mem::size_of::<$t>();
+            if new < $expected_min_size {
+                panic!(
+                    "Your changes have decreased the stack size of {} from {} to {}. \
+                     Good work! Please update the expected size in {}.",
+                    stringify!($t),
+                    $expected_min_size,
+                    new,
+                    file!()
+                )
+            } else if new > $expected_max_size {
+                panic!(
+                    "Your changes have increased the stack size of {} from {} to {}. \
+                     Please consider choosing a design which avoids this increase. \
+                     If you feel that the increase is necessary, update the size in {}.",
+                    stringify!($t),
+                    $expected_max_size,
+                    new,
+                    file!()
+                )
+            }
+        }
+    };
+    ($testname: ident, $t: ty, $expected_size: expr) => {
+        size_of_test!($testname, $t, $expected_size, $expected_size);
+    };
+}
+
+// Some of these assume 64-bit
+size_of_test!(token, Token, 32);
+size_of_test!(std_cow_str, std::borrow::Cow<'static, str>, 24, 32);
+size_of_test!(cow_rc_str, CowRcStr, 16);
+
+size_of_test!(tokenizer, crate::tokenizer::Tokenizer, 96);
+size_of_test!(parser_input, crate::parser::ParserInput, 160);
+size_of_test!(parser, crate::parser::Parser, 16);
+size_of_test!(source_position, crate::SourcePosition, 8);
+size_of_test!(parser_state, crate::ParserState, 24);
+
+size_of_test!(basic_parse_error, crate::BasicParseError, 40, 48);
+size_of_test!(parse_error_lower_bound, crate::ParseError<()>, 40, 48);
+
+
+--- src/tests.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#[cfg(feature = "bench")]
+extern crate test;
+
+use serde_json::{json, Map, Value};
+
+#[cfg(feature = "bench")]
+use crate::parser::ArbitrarySubstitutionFunctions;
+
+#[cfg(feature = "bench")]
+use self::test::Bencher;
+
+use super::{
+    parse_important, parse_nth, parse_one_declaration, parse_one_rule, stylesheet_encoding,
+    AtRuleParser, BasicParseError, BasicParseErrorKind, CowRcStr, DeclarationParser, Delimiter,
+    EncodingSupport, ParseError, ParseErrorKind, Parser, ParserInput, ParserState,
+    QualifiedRuleParser, RuleBodyItemParser, RuleBodyParser, SourceLocation, StyleSheetParser,
+    ToCss, Token, TokenSerializationType, UnicodeRange,
+};
+
+macro_rules! JArray {
+    ($($e: expr,)*) => { JArray![ $( $e ),* ] };
+    ($($e: expr),*) => { Value::Array(vec!( $( $e.to_json() ),* )) }
+}
+
+fn almost_equals(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(a), Value::Number(b)) => {
+            let a = a.as_f64().unwrap();
+            let b = b.as_f64().unwrap();
+            (a - b).abs() <= a.abs() * 1e-6
+        }
+
+        (&Value::Bool(a), &Value::Bool(b)) => a == b,
+        (Value::String(a), Value::String(b)) => a == b,
+        (Value::Array(a), Value::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b.iter()).all(|(a, b)| almost_equals(a, b))
+        }
+        (&Value::Object(_), &Value::Object(_)) => panic!("Not implemented"),
+        (&Value::Null, &Value::Null) => true,
+        _ => false,
+    }
+}
+
+fn normalize(json: &mut Value) {
+    match *json {
+        Value::Array(ref mut list) => {
+            for item in list.iter_mut() {
+                normalize(item)
+            }
+        }
+        Value::String(ref mut s) => {
+
+--- src/tokenizer.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+// https://drafts.csswg.org/css-syntax/#tokenization
+
+use self::Token::*;
+use crate::cow_rc_str::CowRcStr;
+use crate::parser::{ArbitrarySubstitutionFunctions, ParserState};
+use std::char;
+use std::ops::Range;
+
+#[cfg(feature = "fast_match_byte")]
+pub use crate::match_byte;
+
+/// One of the pieces the CSS input is broken into.
+///
+/// Some components use `Cow` in order to borrow from the original input string
+/// and avoid allocating/copying when possible.
+#[derive(PartialEq, Debug, Clone)]
+pub enum Token<'a> {
+    /// A [`<ident-token>`](https://drafts.csswg.org/css-syntax/#ident-token-diagram)
+    Ident(CowRcStr<'a>),
+
+    /// A [`<at-keyword-token>`](https://drafts.csswg.org/css-syntax/#at-keyword-token-diagram)
+    ///
+    /// The value does not include the `@` marker.
+    AtKeyword(CowRcStr<'a>),
+
+    /// A [`<hash-token>`](https://drafts.csswg.org/css-syntax/#hash-token-diagram) with the type flag set to "unrestricted"
+    ///
+    /// The value does not include the `#` marker.
+    Hash(CowRcStr<'a>),
+
+    /// A [`<hash-token>`](https://drafts.csswg.org/css-syntax/#hash-token-diagram) with the type flag set to "id"
+    ///
+    /// The value does not include the `#` marker.
+    IDHash(CowRcStr<'a>), // Hash that is a valid ID selector.
+
+    /// A [`<string-token>`](https://drafts.csswg.org/css-syntax/#string-token-diagram)
+    ///
+    /// The value does not include the quotes.
+    QuotedString(CowRcStr<'a>),
+
+    /// A [`<url-token>`](https://drafts.csswg.org/css-syntax/#url-token-diagram)
+    ///
+    /// The value does not include the `url(` `)` markers.  Note that `url( <string-token> )` is represented by a
+    /// `Function` token.
+    UnquotedUrl(CowRcStr<'a>),
+
+    /// A `<delim-token>`
+    Delim(char),
+
+    /// A [`<number-token>`](https://drafts.csswg.org/css-syntax/#number-token-diagram)
+    Number {
+
+--- src/unicode_range.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+//! https://drafts.csswg.org/css-syntax/#urange
+
+use crate::tokenizer::Token;
+use crate::{BasicParseError, Parser, ToCss};
+use std::char;
+use std::fmt;
+
+/// One contiguous range of code points.
+///
+/// Can not be empty. Can represent a single code point when start == end.
+#[derive(PartialEq, Eq, Clone, Hash)]
+#[repr(C)]
+pub struct UnicodeRange {
+    /// Inclusive start of the range. In [0, end].
+    pub start: u32,
+
+    /// Inclusive end of the range. In [0, 0x10FFFF].
+    pub end: u32,
+}
+
+impl UnicodeRange {
+    /// https://drafts.csswg.org/css-syntax/#urange-syntax
+    pub fn parse<'i>(input: &mut Parser<'i, '_>) -> Result<Self, BasicParseError<'i>> {
+        // <urange> =
+        //   u '+' <ident-token> '?'* |
+        //   u <dimension-token> '?'* |
+        //   u <number-token> '?'* |
+        //   u <number-token> <dimension-token> |
+        //   u <number-token> <number-token> |
+        //   u '+' '?'+
+
+        input.expect_ident_matching("u")?;
+        let after_u = input.position();
+        parse_tokens(input)?;
+
+        // This deviates from the spec in case there are CSS comments
+        // between tokens in the middle of one <unicode-range>,
+        // but oh well…
+        let concatenated_tokens = input.slice_from(after_u);
+
+        let range = match parse_concatenated(concatenated_tokens.as_bytes()) {
+            Ok(range) => range,
+            Err(()) => {
+                return Err(input
+                    .new_basic_unexpected_token_error(Token::Ident(concatenated_tokens.into())))
+            }
+        };
+        if range.end > char::MAX as u32 || range.start > range.end {
+            Err(input.new_basic_unexpected_token_error(Token::Ident(concatenated_tokens.into())))
+        } else {
+            Ok(range)

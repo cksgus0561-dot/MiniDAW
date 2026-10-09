@@ -1,0 +1,86 @@
+[package]
+name = "minidaw"
+version = "0.1.0"
+description = "개인용 데스크톱 DAW"
+edition = "2021"
+license = "GPL-3.0-only"
+default-run = "minidaw"
+
+[lib]
+name = "minidaw_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+cc = "1"
+
+[features]
+default = []
+asio = ["cpal/asio", "dep:asio-sys"]
+dev-tools = []
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+symphonia = { version = "0.5.5", default-features = false, features = ["wav", "pcm", "mp3", "flac"] }
+cpal = "0.16.0"
+rtrb = "0.3.2"
+rustfft = "6.4.1"
+rubato = { version = "=5.0.1", default-features = false, features = ["fft_resampler"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+uuid = { version = "1.27", features = ["v4"] }
+sha2 = "0.10.9"
+tauri-plugin-dialog = "2"
+midly = { version = "0.5.3", default-features = false, features = ["std"] }
+midir = "0.10.3"
+crossbeam-queue = "0.3.12"
+
+[target.'cfg(windows)'.dependencies]
+asio-sys = { version = "0.2", optional = true }
+
+# Tauri discovers src/bin automatically. Explicit feature gates prevent these
+# developer-only probes/benchmarks from entering a Windows installer.
+[[bin]]
+name = "audio_probe"
+path = "src/bin/audio_probe.rs"
+required-features = ["dev-tools"]
+[[bin]]
+name = "backend_probe"
+path = "src/bin/backend_probe.rs"
+required-features = ["dev-tools"]
+[[bin]]
+name = "declick_audit"
+path = "src/bin/declick_audit.rs"
+required-features = ["dev-tools"]
+[[bin]]
+name = "editing_audit"
+path = "src/bin/editing_audit.rs"
+required-features = ["dev-tools"]
+[[bin]]
+name = "fidelity_audit"
+path = "src/bin/fidelity_audit.rs"
+required-features = ["dev-tools"]
+[[bin]]
+name = "fidelity_probe"
+path = "src/bin/fidelity_probe.rs"
+required-features = ["dev-tools"]
+[[bin]]
+name = "pitch_audit"
+path = "src/bin/pitch_audit.rs"
+required-features = ["dev-tools"]
+[[bin]]
+name = "src_bench"
+path = "src/bin/src_bench.rs"
+required-features = ["dev-tools"]
+[[bin]]
+name = "src_pipeline_audit"
+path = "src/bin/src_pipeline_audit.rs"
+required-features = ["dev-tools"]
+[[bin]]
+name = "stretch_audit"
+path = "src/bin/stretch_audit.rs"
+required-features = ["dev-tools"]
+[[bin]]
+name = "synth_audit"
+path = "src/bin/synth_audit.rs"
+required-features = ["dev-tools"]

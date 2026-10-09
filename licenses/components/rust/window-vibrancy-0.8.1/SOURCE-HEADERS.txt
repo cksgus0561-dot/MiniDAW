@@ -1,0 +1,284 @@
+--- examples/tao.rs ---
+// Copyright 2019-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+fn main() {
+    #[cfg(target_os = "windows")]
+    use tao::platform::windows::{WindowBuilderExtWindows, WindowExtWindows};
+    use tao::{
+        event::{ElementState, Event, MouseButton, WindowEvent},
+        event_loop::{ControlFlow, EventLoop},
+        window::WindowBuilder,
+    };
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    use window_vibrancy::*;
+
+    let event_loop = EventLoop::new();
+
+    #[allow(unused_mut)]
+    let mut builder = WindowBuilder::new()
+        .with_decorations(false)
+        .with_transparent(true);
+    #[cfg(target_os = "windows")]
+    {
+        builder = builder.with_undecorated_shadow(false);
+    }
+    let window = builder.build(&event_loop).unwrap();
+
+    #[cfg(target_os = "windows")]
+    apply_acrylic(&window, None)
+        .expect("Unsupported platform! 'apply_blur' is only supported on Windows");
+
+    #[cfg(target_os = "macos")]
+    {
+        let options = LiquidGlassOptions::new(NSGlassEffectViewStyle::Clear)
+            .radius(26.0)
+            .interactive(true);
+
+        apply_liquid_glass(&window, options)
+            .expect("Unsupported platform! 'apply_liquid_glass' is only supported on macOS 26+");
+    }
+
+    #[cfg(target_os = "windows")]
+    window.set_undecorated_shadow(true);
+    window.set_title("A fantastic window!");
+
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::Wait;
+
+        match event {
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => *control_flow = ControlFlow::Exit,
+            Event::WindowEvent {
+                event:
+
+--- examples/winit.rs ---
+// Copyright 2019-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use winit::{
+    application::ApplicationHandler,
+    event::{ElementState, MouseButton, WindowEvent},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    window::{Window, WindowAttributes},
+};
+
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+use window_vibrancy::*;
+#[cfg(target_os = "windows")]
+use winit::platform::windows::{WindowAttributesExtWindows, WindowExtWindows};
+
+#[derive(Default)]
+struct App {
+    window: Option<Window>,
+}
+
+impl ApplicationHandler for App {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        #[allow(unused_mut)]
+        let mut window_attrs = WindowAttributes::default()
+            .with_decorations(false)
+            .with_transparent(true);
+        #[cfg(target_os = "windows")]
+        {
+            window_attrs = window_attrs
+                .with_undecorated_shadow(false)
+                .with_inner_size(winit::dpi::PhysicalSize::new(0, 0));
+        }
+        let window = event_loop.create_window(window_attrs).unwrap();
+
+        #[cfg(target_os = "windows")]
+        apply_acrylic(&window, None)
+            .expect("Unsupported platform! 'apply_blur' is only supported on Windows");
+
+        #[cfg(target_os = "macos")]
+        {
+            let options = LiquidGlassOptions::new(NSGlassEffectViewStyle::Clear)
+                .radius(26.0)
+                .interactive(true);
+
+            apply_liquid_glass(&window, options).expect(
+                "Unsupported platform! 'apply_liquid_glass' is only supported on macOS 26+",
+            );
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            window.set_undecorated_shadow(true);
+            let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(800, 600));
+        }
+
+--- src/lib.rs ---
+// Copyright 2019-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! Make your windows vibrant.
+//!
+//! ## Platform-specific
+//!
+//! - **Linux**: Unsupported, Blur and any vibrancy effects are controlled by the compositor installed on the end-user system.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use window_vibrancy::{apply_vibrancy, apply_blur, NSVisualEffectMaterial};
+//!
+//! # let window: &dyn raw_window_handle::HasWindowHandle = unsafe { std::mem::zeroed() };
+//! #[cfg(target_os = "macos")]
+//! apply_vibrancy(&window, NSVisualEffectMaterial::AppearanceBased, None, None).expect("Unsupported platform! 'apply_vibrancy' is only supported on macOS");
+//!
+//! #[cfg(target_os = "windows")]
+//! apply_blur(&window, Some((18, 18, 18, 125))).expect("Unsupported platform! 'apply_blur' is only supported on Windows");
+//! ```
+
+#![allow(clippy::deprecated_semver)]
+
+#[cfg(target_os = "windows")]
+use windows_sys::core::HRESULT;
+
+mod macos;
+mod windows;
+
+pub use macos::{NSGlassEffectViewStyle, NSVisualEffectMaterial, NSVisualEffectState};
+
+#[cfg(target_os = "macos")]
+pub use macos::{LiquidGlassOptions, NSGlassEffectViewTagged, NSVisualEffectViewTagged};
+
+/// a tuple of RGBA colors. Each value has minimum of 0 and maximum of 255.
+pub type Color = (u8, u8, u8, u8);
+
+/// Applies blur effect to window. Works only on Windows 7, Windows 10 v1809 or newer.
+///
+/// ## WARNING:
+///
+/// This method has poor performance on Windows 11 build 22621,
+/// the window will lag when resizing or dragging.
+/// It is an issue in the undocumented api used for this method
+/// and microsoft needs to fix it (they probably won't).
+///
+/// ## Platform-specific
+///
+/// - **Windows**: *`color`* is ignored on Windows 7 and has no effect.
+/// - **Linux / macOS**: Unsupported.
+pub fn apply_blur(
+    window: impl raw_window_handle::HasWindowHandle,
+    #[allow(unused)] color: Option<Color>,
+
+--- src/macos/mod.rs ---
+// Copyright 2019-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+// The use of NSVisualEffectView comes from https://github.com/joboet/winit/tree/macos_blurred_background
+// with a bit of rewrite by @youngsing to make it more like cocoa::appkit style.
+/// <https://developer.apple.com/documentation/appkit/nsvisualeffectview/material>
+#[repr(u64)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum NSVisualEffectMaterial {
+    #[deprecated(
+        since = "macOS 10.14",
+        note = "A default material appropriate for the view's effectiveAppearance.  You should instead choose an appropriate semantic material."
+    )]
+    AppearanceBased = 0,
+    #[deprecated(since = "macOS 10.14", note = "Use a semantic material instead.")]
+    Light = 1,
+    #[deprecated(since = "macOS 10.14", note = "Use a semantic material instead.")]
+    Dark = 2,
+    #[deprecated(since = "macOS 10.14", note = "Use a semantic material instead.")]
+    MediumLight = 8,
+    #[deprecated(since = "macOS 10.14", note = "Use a semantic material instead.")]
+    UltraDark = 9,
+
+    /// macOS 10.10+
+    Titlebar = 3,
+    /// macOS 10.10+
+    Selection = 4,
+
+    /// macOS 10.11+
+    Menu = 5,
+    /// macOS 10.11+
+    Popover = 6,
+    /// macOS 10.11+
+    Sidebar = 7,
+
+    /// macOS 10.14+
+    HeaderView = 10,
+    /// macOS 10.14+
+    Sheet = 11,
+    /// macOS 10.14+
+    WindowBackground = 12,
+    /// macOS 10.14+
+    HudWindow = 13,
+    /// macOS 10.14+
+    FullScreenUI = 15,
+    /// macOS 10.14+
+    Tooltip = 17,
+    /// macOS 10.14+
+    ContentBackground = 18,
+    /// macOS 10.14+
+    UnderWindowBackground = 21,
+    /// macOS 10.14+
+    UnderPageBackground = 22,
+}
+
+--- src/windows.rs ---
+// Copyright 2019-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+#![cfg(target_os = "windows")]
+#![allow(non_snake_case)]
+#![allow(non_camel_case_types)]
+#![allow(clippy::upper_case_acronyms)]
+
+use std::ffi::c_void;
+use windows_sys::core::BOOL;
+pub use windows_sys::Win32::{Foundation::*, Graphics::Dwm::*, System::LibraryLoader::*};
+
+use crate::{Color, Error};
+
+pub fn apply_blur(hwnd: HWND, color: Option<Color>) -> Result<(), Error> {
+    if is_win7() {
+        let bb = DWM_BLURBEHIND {
+            dwFlags: DWM_BB_ENABLE,
+            fEnable: true.into(),
+            hRgnBlur: std::ptr::null_mut(),
+            fTransitionOnMaximized: 0,
+        };
+        unsafe {
+            let _ = DwmEnableBlurBehindWindow(hwnd, &bb);
+        }
+    } else if is_swca_supported() {
+        unsafe {
+            SetWindowCompositionAttribute(hwnd, ACCENT_STATE::ACCENT_ENABLE_BLURBEHIND, color);
+        }
+    } else {
+        return Err(Error::UnsupportedPlatformVersion(
+      "\"apply_blur()\" is only available on Windows 7, Windows 10 v1809 or newer and Windows 11.",
+    ));
+    }
+    Ok(())
+}
+
+pub fn clear_blur(hwnd: HWND) -> Result<(), Error> {
+    if is_win7() {
+        let bb = DWM_BLURBEHIND {
+            dwFlags: DWM_BB_ENABLE,
+            fEnable: false.into(),
+            hRgnBlur: std::ptr::null_mut(),
+            fTransitionOnMaximized: 0,
+        };
+        unsafe {
+            let _ = DwmEnableBlurBehindWindow(hwnd, &bb);
+        }
+    } else if is_swca_supported() {
+        unsafe {
+            SetWindowCompositionAttribute(hwnd, ACCENT_STATE::ACCENT_DISABLED, None);
+        }
+    } else {
+        return Err(Error::UnsupportedPlatformVersion(

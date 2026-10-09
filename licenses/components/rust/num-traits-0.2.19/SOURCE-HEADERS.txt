@@ -1,0 +1,56 @@
+--- src/lib.rs ---
+// Copyright 2013-2014 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! Numeric traits for generic mathematics
+//!
+//! ## Compatibility
+//!
+//! The `num-traits` crate is tested for rustc 1.60 and greater.
+
+#![doc(html_root_url = "https://docs.rs/num-traits/0.2")]
+#![deny(unconditional_recursion)]
+#![no_std]
+
+// Need to explicitly bring the crate in for inherent float methods
+#[cfg(feature = "std")]
+extern crate std;
+
+use core::fmt;
+use core::num::Wrapping;
+use core::ops::{Add, Div, Mul, Rem, Sub};
+use core::ops::{AddAssign, DivAssign, MulAssign, RemAssign, SubAssign};
+
+pub use crate::bounds::Bounded;
+#[cfg(any(feature = "std", feature = "libm"))]
+pub use crate::float::Float;
+pub use crate::float::FloatConst;
+// pub use real::{FloatCore, Real}; // NOTE: Don't do this, it breaks `use num_traits::*;`.
+pub use crate::cast::{cast, AsPrimitive, FromPrimitive, NumCast, ToPrimitive};
+pub use crate::identities::{one, zero, ConstOne, ConstZero, One, Zero};
+pub use crate::int::PrimInt;
+pub use crate::ops::bytes::{FromBytes, ToBytes};
+pub use crate::ops::checked::{
+    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedShl, CheckedShr, CheckedSub,
+};
+pub use crate::ops::euclid::{CheckedEuclid, Euclid};
+pub use crate::ops::inv::Inv;
+pub use crate::ops::mul_add::{MulAdd, MulAddAssign};
+pub use crate::ops::saturating::{Saturating, SaturatingAdd, SaturatingMul, SaturatingSub};
+pub use crate::ops::wrapping::{
+    WrappingAdd, WrappingMul, WrappingNeg, WrappingShl, WrappingShr, WrappingSub,
+};
+pub use crate::pow::{checked_pow, pow, Pow};
+pub use crate::sign::{abs, abs_sub, signum, Signed, Unsigned};
+
+#[macro_use]
+mod macros;
+
+pub mod bounds;

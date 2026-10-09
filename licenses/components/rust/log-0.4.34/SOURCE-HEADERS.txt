@@ -1,0 +1,113 @@
+--- src/lib.rs ---
+// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! A lightweight logging facade.
+//!
+//! The `log` crate provides a single logging API that abstracts over the
+//! actual logging implementation. Libraries can use the logging API provided
+//! by this crate, and the consumer of those libraries can choose the logging
+//! implementation that is most suitable for its use case.
+//!
+//! If no logging implementation is selected, the facade falls back to a "noop"
+//! implementation that ignores all log messages. The overhead in this case
+//! is very small - just an integer load, comparison and jump.
+//!
+//! A log request consists of a _target_, a _level_, and a _body_. A target is a
+//! string which defaults to the module path of the location of the log request,
+//! though that default may be overridden. Logger implementations typically use
+//! the target to filter requests based on some user configuration.
+//!
+//! # Usage
+//!
+//! The basic use of the log crate is through the five logging macros: [`error!`],
+//! [`warn!`], [`info!`], [`debug!`] and [`trace!`]
+//! where `error!` represents the highest-priority log messages
+//! and `trace!` the lowest. The log messages are filtered by configuring
+//! the log level to exclude messages with a lower priority.
+//! Each of these macros accept format strings similarly to [`println!`].
+//!
+//!
+//! [`error!`]: ./macro.error.html
+//! [`warn!`]: ./macro.warn.html
+//! [`info!`]: ./macro.info.html
+//! [`debug!`]: ./macro.debug.html
+//! [`trace!`]: ./macro.trace.html
+//! [`println!`]: https://doc.rust-lang.org/stable/std/macro.println.html
+//!
+//! Avoid writing expressions with side-effects in log statements. They may not be evaluated.
+//!
+//! ## In libraries
+//!
+//! Libraries should link only to the `log` crate, and use the provided
+//! macros to log whatever information will be useful to downstream consumers.
+//!
+//! ### Examples
+//!
+//! ```
+//! # #[derive(Debug)] pub struct Yak(String);
+//! # impl Yak { fn shave(&mut self, _: u32) {} }
+
+--- src/macros.rs ---
+// Copyright 2014-2015 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+/// The standard logging macro.
+///
+/// This macro will generically log with the specified `Level` and `format!`
+/// based argument list.
+///
+/// ```
+/// use log::{log, Level};
+///
+/// let data = (42, "Forty-two");
+/// let private_data = "private";
+///
+/// log!(Level::Error, "Received errors: {}, {}", data.0, data.1);
+/// ```
+///
+/// Optionally, you can specify a `target` argument to attach a specific target
+/// to the log record. By default, the target is the module path of the caller.
+///
+/// ```
+/// use log::{log, Level};
+///
+/// let data = (42, "Forty-two");
+/// let private_data = "private";
+///
+/// log!(
+///     target: "app_events",
+///     Level::Error,
+///     "Received errors: {}, {}",
+///     data.0, data.1
+/// );
+/// ```
+///
+/// And optionally, you can specify a `logger` argument to use a specific logger
+/// instead of the default global logger.
+///
+/// ```
+/// # struct MyLogger {}
+/// # impl Log for MyLogger {
+/// #     fn enabled(&self, _metadata: &log::Metadata) -> bool {
+/// #         false
+/// #     }
+/// #     fn log(&self, _record: &log::Record) {}
+/// #     fn flush(&self) {}
+/// # }
+/// use log::{log, Level, Log};
+///

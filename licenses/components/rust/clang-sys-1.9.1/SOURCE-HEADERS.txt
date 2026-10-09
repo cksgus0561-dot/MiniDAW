@@ -1,0 +1,451 @@
+--- build/common.rs ---
+// SPDX-License-Identifier: Apache-2.0
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::env;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use glob::{MatchOptions, Pattern};
+
+//================================================
+// Commands
+//================================================
+
+thread_local! {
+    /// The errors encountered by the build script while executing commands.
+    static COMMAND_ERRORS: RefCell<HashMap<String, Vec<String>>> = RefCell::default();
+}
+
+/// Adds an error encountered by the build script while executing a command.
+fn add_command_error(name: &str, path: &str, arguments: &[&str], message: String) {
+    COMMAND_ERRORS.with(|e| {
+        e.borrow_mut().entry(name.into()).or_default().push(format!(
+            "couldn't execute `{} {}` (path={}) ({})",
+            name,
+            arguments.join(" "),
+            path,
+            message,
+        ))
+    });
+}
+
+/// A struct that prints the errors encountered by the build script while
+/// executing commands when dropped (unless explictly discarded).
+///
+/// This is handy because we only want to print these errors when the build
+/// script fails to link to an instance of `libclang`. For example, if
+/// `llvm-config` couldn't be executed but an instance of `libclang` was found
+/// anyway we don't want to pollute the build output with irrelevant errors.
+#[derive(Default)]
+pub struct CommandErrorPrinter {
+    discard: bool,
+}
+
+impl CommandErrorPrinter {
+    pub fn discard(mut self) {
+        self.discard = true;
+    }
+}
+
+impl Drop for CommandErrorPrinter {
+    fn drop(&mut self) {
+        if self.discard {
+            return;
+        }
+
+--- build/dynamic.rs ---
+// SPDX-License-Identifier: Apache-2.0
+
+use std::env;
+use std::fs::File;
+use std::io::{self, Error, ErrorKind, Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+
+use super::common;
+
+//================================================
+// Validation
+//================================================
+
+/// Extracts the ELF class from the ELF header in a shared library.
+fn parse_elf_header(path: &Path) -> io::Result<u8> {
+    let mut file = File::open(path)?;
+    let mut buffer = [0; 5];
+    file.read_exact(&mut buffer)?;
+    if buffer[..4] == [127, 69, 76, 70] {
+        Ok(buffer[4])
+    } else {
+        Err(Error::new(ErrorKind::InvalidData, "invalid ELF header"))
+    }
+}
+
+/// Extracts the magic number and machine type from the PE header in a shared library.
+fn parse_pe_header(path: &Path) -> io::Result<(u16, u16)> {
+    let mut file = File::open(path)?;
+
+    // Extract the header offset.
+    let mut buffer = [0; 4];
+    let start = SeekFrom::Start(0x3C);
+    file.seek(start)?;
+    file.read_exact(&mut buffer)?;
+    let offset = i32::from_le_bytes(buffer);
+
+    // Check the validity of the header.
+    file.seek(SeekFrom::Start(offset as u64))?;
+    file.read_exact(&mut buffer)?;
+    if buffer != [80, 69, 0, 0] {
+        return Err(Error::new(ErrorKind::InvalidData, "invalid PE header"));
+    }
+
+    // Extract the magic number.
+    let mut buffer = [0; 2];
+    file.seek(SeekFrom::Current(20))?;
+    file.read_exact(&mut buffer)?;
+    let magic_number = u16::from_le_bytes(buffer);
+
+    // Extract the machine type.
+    let mut buffer = [0; 2];
+    file.seek(SeekFrom::Current(-22))?;
+    file.read_exact(&mut buffer)?;
+    let machine_type = u16::from_le_bytes(buffer);
+
+
+--- build/macros.rs ---
+// SPDX-License-Identifier: Apache-2.0
+
+macro_rules! test {
+    () => {
+        cfg!(test) && ::std::env::var("_CLANG_SYS_TEST").is_ok()
+    };
+}
+
+macro_rules! target_os {
+    ($os:expr) => {
+        if cfg!(test) && ::std::env::var("_CLANG_SYS_TEST").is_ok() {
+            let var = ::std::env::var("_CLANG_SYS_TEST_OS");
+            var.map_or(false, |v| v == $os)
+        } else {
+            cfg!(target_os = $os)
+        }
+    };
+}
+
+macro_rules! target_arch {
+    ($arch:expr) => {
+        if cfg!(test) && ::std::env::var("_CLANG_SYS_TEST").is_ok() {
+            let var = ::std::env::var("_CLANG_SYS_TEST_ARCH");
+            var.map_or(false, |v| v == $arch)
+        } else {
+            cfg!(target_arch = $arch)
+        }
+    };
+}
+
+macro_rules! target_pointer_width {
+    ($pointer_width:expr) => {
+        if cfg!(test) && ::std::env::var("_CLANG_SYS_TEST").is_ok() {
+            let var = ::std::env::var("_CLANG_SYS_TEST_POINTER_WIDTH");
+            var.map_or(false, |v| v == $pointer_width)
+        } else {
+            cfg!(target_pointer_width = $pointer_width)
+        }
+    };
+}
+
+macro_rules! target_env {
+    ($env:expr) => {
+        if cfg!(test) && ::std::env::var("_CLANG_SYS_TEST").is_ok() {
+            let var = ::std::env::var("_CLANG_SYS_TEST_ENV");
+            var.map_or(false, |v| v == $env)
+        } else {
+            cfg!(target_env = $env)
+        }
+    };
+}
+
+
+--- build/static.rs ---
+// SPDX-License-Identifier: Apache-2.0
+
+use std::path::{Path, PathBuf};
+
+use glob::Pattern;
+
+use super::common;
+
+//================================================
+// Searching
+//================================================
+
+/// Clang static libraries required to link to `libclang` 3.5 and later.
+const CLANG_LIBRARIES: &[&str] = &[
+    "clang",
+    "clangAST",
+    "clangAnalysis",
+    "clangBasic",
+    "clangDriver",
+    "clangEdit",
+    "clangFrontend",
+    "clangIndex",
+    "clangLex",
+    "clangParse",
+    "clangRewrite",
+    "clangSema",
+    "clangSerialization",
+];
+
+/// Gets the name of an LLVM or Clang static library from a path.
+fn get_library_name(path: &Path) -> Option<String> {
+    path.file_stem().map(|p| {
+        let string = p.to_string_lossy();
+        if let Some(name) = string.strip_prefix("lib") {
+            name.to_owned()
+        } else {
+            string.to_string()
+        }
+    })
+}
+
+/// Gets the LLVM static libraries required to link to `libclang`.
+fn get_llvm_libraries() -> Vec<String> {
+    common::run_llvm_config(&["--libs", "--link-static"])
+        .unwrap()
+        .split_whitespace()
+        .filter_map(|p| {
+            // Depending on the version of `llvm-config` in use, listed
+            // libraries may be in one of two forms, a full path to the library
+            // or simply prefixed with `-l`.
+            if let Some(path) = p.strip_prefix("-l") {
+                Some(path.into())
+            } else {
+                get_library_name(Path::new(p))
+            }
+
+--- build.rs ---
+// SPDX-License-Identifier: Apache-2.0
+
+//! Finds `libclang` static or shared libraries and links to them.
+//!
+//! # Environment Variables
+//!
+//! This build script can make use of several environment variables to help it
+//! find the required static or shared libraries.
+//!
+//! * `LLVM_CONFIG_PATH` - provides a path to an `llvm-config` executable
+//! * `LIBCLANG_PATH` - provides a path to a directory containing a `libclang`
+//!    shared library or a path to a specific `libclang` shared library
+//! * `LIBCLANG_STATIC_PATH` - provides a path to a directory containing LLVM
+//!    and Clang static libraries
+
+#![allow(unused_attributes)]
+
+use std::path::Path;
+
+#[macro_use]
+#[path = "build/macros.rs"]
+pub mod macros;
+
+#[path = "build/common.rs"]
+pub mod common;
+#[path = "build/dynamic.rs"]
+pub mod dynamic;
+#[path = "build/static.rs"]
+pub mod r#static;
+
+/// Copies the code used to find and link to `libclang` shared libraries into
+/// the build output directory so that it may be used when linking at runtime.
+#[cfg(feature = "runtime")]
+fn main() {
+    if cfg!(feature = "static") {
+        panic!("`runtime` and `static` features can't be combined");
+    }
+}
+
+/// Finds and links to the required libraries dynamically or statically.
+#[cfg(not(feature = "runtime"))]
+fn main() {
+    if cfg!(feature = "static") {
+        r#static::link();
+    } else {
+        dynamic::link();
+    }
+
+    if let Some(output) = common::run_llvm_config(&["--includedir"]) {
+        let directory = Path::new(output.trim_end());
+        println!("cargo:include={}", directory.display());
+    }
+}
+
+
+--- src/lib.rs ---
+// SPDX-License-Identifier: Apache-2.0
+
+//! Rust bindings for `libclang`.
+//!
+//! ## [Documentation](https://docs.rs/clang-sys)
+//!
+//! Note that the documentation on https://docs.rs for this crate assumes usage
+//! of the `runtime` Cargo feature as well as the Cargo feature for the latest
+//! supported version of `libclang` (e.g., `clang_11_0`), neither of which are
+//! enabled by default.
+//!
+//! Due to the usage of the `runtime` Cargo feature, this documentation will
+//! contain some additional types and functions to manage a dynamically loaded
+//! `libclang` instance at runtime.
+//!
+//! Due to the usage of the Cargo feature for the latest supported version of
+//! `libclang`, this documentation will contain constants and functions that are
+//! not available in the oldest supported version of `libclang` (3.5). All of
+//! these types and functions have a documentation comment which specifies the
+//! minimum `libclang` version required to use the item.
+
+#![allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
+#![cfg_attr(feature = "cargo-clippy", allow(clippy::unreadable_literal))]
+
+pub mod support;
+
+#[macro_use]
+mod link;
+
+use std::mem;
+
+use libc::*;
+
+pub type CXClientData = *mut c_void;
+pub type CXCursorVisitor = extern "C" fn(CXCursor, CXCursor, CXClientData) -> CXChildVisitResult;
+#[cfg(feature = "clang_3_7")]
+pub type CXFieldVisitor = extern "C" fn(CXCursor, CXClientData) -> CXVisitorResult;
+pub type CXInclusionVisitor = extern "C" fn(CXFile, *mut CXSourceLocation, c_uint, CXClientData);
+
+//================================================
+// Macros
+//================================================
+
+/// Defines a C enum as a series of constants.
+macro_rules! cenum {
+    (#[repr($ty:ty)] $(#[$meta:meta])* enum $name:ident {
+        $($(#[$vmeta:meta])* const $variant:ident = $value:expr), +,
+    }) => (
+        pub type $name = $ty;
+
+        $($(#[$vmeta])* pub const $variant: $name = $value;)+
+    );
+    (#[repr($ty:ty)] $(#[$meta:meta])* enum $name:ident {
+        $($(#[$vmeta:meta])* const $variant:ident = $value:expr); +;
+    }) => (
+
+--- src/link.rs ---
+// SPDX-License-Identifier: Apache-2.0
+
+//================================================
+// Macros
+//================================================
+
+#[cfg(feature = "runtime")]
+macro_rules! link {
+    (
+        @LOAD:
+        $(#[doc=$doc:expr])*
+        #[cfg($cfg:meta)]
+        fn $name:ident($($pname:ident: $pty:ty), *) $(-> $ret:ty)*
+    ) => (
+        $(#[doc=$doc])*
+        #[cfg($cfg)]
+        pub fn $name(library: &mut super::SharedLibrary) {
+            let symbol = unsafe { library.library.get(stringify!($name).as_bytes()) }.ok();
+            library.functions.$name = match symbol {
+                Some(s) => *s,
+                None => None,
+            };
+        }
+
+        #[cfg(not($cfg))]
+        pub fn $name(_: &mut super::SharedLibrary) {}
+    );
+
+    (
+        @LOAD:
+        fn $name:ident($($pname:ident: $pty:ty), *) $(-> $ret:ty)*
+    ) => (
+        link!(@LOAD: #[cfg(feature = "runtime")] fn $name($($pname: $pty), *) $(-> $ret)*);
+    );
+
+    (
+        $(
+            $(#[doc=$doc:expr] #[cfg($cfg:meta)])*
+            pub fn $name:ident($($pname:ident: $pty:ty),* $(,)?) $(-> $ret:ty)*;
+        )+
+    ) => (
+        use std::cell::{RefCell};
+        use std::fmt;
+        use std::sync::{Arc};
+        use std::path::{Path, PathBuf};
+
+        /// The (minimum) version of a `libclang` shared library.
+        #[allow(missing_docs)]
+        #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        pub enum Version {
+            V3_5 = 35,
+            V3_6 = 36,
+            V3_7 = 37,
+            V3_8 = 38,
+            V3_9 = 39,
+
+--- src/support.rs ---
+// SPDX-License-Identifier: Apache-2.0
+
+//! Provides helper functionality.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::{env, io};
+
+use glob::{self, Pattern};
+
+use libc::c_int;
+
+use super::CXVersion;
+
+//================================================
+// Structs
+//================================================
+
+/// A `clang` executable.
+#[derive(Clone, Debug)]
+pub struct Clang {
+    /// The path to this `clang` executable.
+    pub path: PathBuf,
+    /// The version of this `clang` executable if it could be parsed.
+    pub version: Option<CXVersion>,
+    /// The directories searched by this `clang` executable for C headers if
+    /// they could be parsed.
+    pub c_search_paths: Option<Vec<PathBuf>>,
+    /// The directories searched by this `clang` executable for C++ headers if
+    /// they could be parsed.
+    pub cpp_search_paths: Option<Vec<PathBuf>>,
+}
+
+impl Clang {
+    fn new(path: impl AsRef<Path>, args: &[String]) -> Self {
+        Self {
+            path: path.as_ref().into(),
+            version: parse_version(path.as_ref()),
+            c_search_paths: parse_search_paths(path.as_ref(), "c", args),
+            cpp_search_paths: parse_search_paths(path.as_ref(), "c++", args),
+        }
+    }
+
+    /// Returns a `clang` executable if one can be found.
+    ///
+    /// If the `CLANG_PATH` environment variable is set, that is the instance of
+    /// `clang` used. Otherwise, a series of directories are searched. First, if
+    /// a path is supplied, that is the first directory searched. Then, the
+    /// directory returned by `llvm-config --bindir` is searched. On macOS
+    /// systems, `xcodebuild -find clang` will next be queried. Last, the
+    /// directories in the system's `PATH` are searched.
+    ///
+    /// ## Cross-compilation
+    ///
+    /// If target arguments are provided (e.g., `--target` followed by a target

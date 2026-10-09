@@ -1,0 +1,31 @@
+{
+  "name": "minidaw",
+  "private": true,
+  "version": "0.1.0",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "check": "tsc --noEmit",
+    "build": "npm run check && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "test:ui": "node tests/ui-smoke.mjs",
+    "licenses:check": "node scripts/licenses.mjs check",
+    "licenses:update": "node scripts/licenses.mjs candidate",
+    "package:windows": "pwsh -NoProfile -File scripts/package-windows.ps1"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "playwright-core": "^1.63.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.0.0"
+  }
+}

@@ -1,0 +1,330 @@
+--- build.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+// creates a cfg alias if `has_feature` is true.
+// `alias` must be a snake case string.
+fn alias(alias: &str, has_feature: bool) {
+  println!("cargo:rustc-check-cfg=cfg({alias})");
+  if has_feature {
+    println!("cargo:rustc-cfg={alias}");
+  }
+}
+
+fn main() {
+  let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
+  let mobile = target_os == "ios" || target_os == "android";
+  alias("desktop", !mobile);
+  alias("mobile", mobile);
+}
+
+
+--- src/dpi.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+pub use dpi::*;
+use serde::Serialize;
+
+/// A rectangular region.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct Rect {
+  /// Rect position.
+  pub position: dpi::Position,
+  /// Rect size.
+  pub size: dpi::Size,
+}
+
+impl Default for Rect {
+  fn default() -> Self {
+    Self {
+      position: Position::Logical((0, 0).into()),
+      size: Size::Logical((0, 0).into()),
+    }
+  }
+}
+
+/// A rectangular region in physical pixels.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct PhysicalRect<P: dpi::Pixel, S: dpi::Pixel> {
+  /// Rect position.
+  pub position: dpi::PhysicalPosition<P>,
+  /// Rect size.
+  pub size: dpi::PhysicalSize<S>,
+}
+
+impl<P: dpi::Pixel, S: dpi::Pixel> Default for PhysicalRect<P, S> {
+  fn default() -> Self {
+    Self {
+      position: (0, 0).into(),
+      size: (0, 0).into(),
+    }
+  }
+}
+
+/// A rectangular region in logical pixels.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct LogicalRect<P: dpi::Pixel, S: dpi::Pixel> {
+  /// Rect position.
+  pub position: dpi::LogicalPosition<P>,
+  /// Rect size.
+  pub size: dpi::LogicalSize<S>,
+}
+
+impl<P: dpi::Pixel, S: dpi::Pixel> Default for LogicalRect<P, S> {
+  fn default() -> Self {
+    Self {
+
+--- src/lib.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! Internal runtime between Tauri and the underlying webview runtime.
+//!
+//! None of the exposed API of this crate is stable, and it may break semver
+//! compatibility in the future. The major version only signifies the intended Tauri version.
+
+#![doc(
+  html_logo_url = "https://github.com/tauri-apps/tauri/raw/dev/.github/icon.png",
+  html_favicon_url = "https://github.com/tauri-apps/tauri/raw/dev/.github/icon.png"
+)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
+use raw_window_handle::DisplayHandle;
+use serde::Deserialize;
+use std::{borrow::Cow, fmt::Debug, sync::mpsc::Sender};
+use tauri_utils::Theme;
+use tauri_utils::config::Color;
+use url::Url;
+use webview::{DetachedWebview, PendingWebview};
+
+/// UI scaling utilities.
+pub mod dpi;
+/// Types useful for interacting with a user's monitors.
+pub mod monitor;
+pub mod webview;
+mod webview_permissions;
+pub mod window;
+
+use dpi::{PhysicalPosition, PhysicalSize, Position, Rect, Size};
+use monitor::Monitor;
+use window::{
+  CursorIcon, DetachedWindow, PendingWindow, RawWindow, WebviewEvent, WindowEvent,
+  WindowSizeConstraints,
+};
+use window::{WindowBuilder, WindowId};
+
+use http::{
+  header::{InvalidHeaderName, InvalidHeaderValue},
+  method::InvalidMethod,
+  status::InvalidStatusCode,
+};
+
+/// Cookie extraction
+pub use cookie::Cookie;
+
+pub type WindowEventId = u32;
+pub type WebviewEventId = u32;
+
+/// Progress bar status.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ProgressBarStatus {
+
+--- src/monitor.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::dpi::{PhysicalPosition, PhysicalRect, PhysicalSize};
+
+/// Monitor descriptor.
+#[derive(Debug, Clone)]
+pub struct Monitor {
+  /// A human-readable name of the monitor.
+  /// `None` if the monitor doesn't exist anymore.
+  pub name: Option<String>,
+  /// The monitor's resolution.
+  pub size: PhysicalSize<u32>,
+  /// The top-left corner position of the monitor relative to the larger full screen area.
+  pub position: PhysicalPosition<i32>,
+  /// The monitor's work_area.
+  pub work_area: PhysicalRect<i32, u32>,
+  /// Returns the scale factor that can be used to map logical pixels to physical pixels, and vice versa.
+  pub scale_factor: f64,
+}
+
+
+--- src/webview_permissions.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+/// Permission types that can be requested by the webview.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum PermissionKind {
+  /// Microphone access permission.
+  Microphone,
+  /// Camera access permission.
+  Camera,
+  /// Geolocation access permission.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **Windows**: Supported via `COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION`.
+  /// - **Linux**: Supported via `GeolocationPermissionRequest`.
+  /// - **Android**: Supported via `WebChromeClient.onGeolocationPermissionsShowPrompt`.
+  /// - **macOS / iOS**: Not yet supported by platform backends.
+  Geolocation,
+  /// Notifications permission.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **Windows**: Supported via `COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS`.
+  /// - **Linux**: Supported via `NotificationPermissionRequest`.
+  /// - **macOS / Android / iOS**: Not yet supported by platform backends.
+  Notifications,
+  /// Clipboard read permission.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **Windows**: Supported via `COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ`.
+  /// - **macOS / Linux / Android / iOS**: Not yet supported by platform backends.
+  ClipboardRead,
+  /// Display capture permission (for getDisplayMedia).
+  DisplayCapture,
+  /// Midi access permission.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **Windows**: Supported via `COREWEBVIEW2_PERMISSION_KIND_MIDI_SYSTEM_EXCLUSIVE_MESSAGES`.
+  /// - **Android**: Supported via `android.webkit.resource.MIDI_SYSEX`.
+  /// - **macOS / Linux / iOS**: Not yet supported by platform backends.
+  Midi,
+  /// Sensors (accelerometer, gyroscope, etc.) access permission.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **Windows**: Supported via `COREWEBVIEW2_PERMISSION_KIND_OTHER_SENSORS`.
+  /// - **macOS / Linux / Android / iOS**: Not yet supported by platform backends.
+  Sensors,
+  /// Media key system access permission.
+  ///
+
+--- src/webview.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! A layer between raw [`Runtime`] webviews and Tauri.
+//!
+pub use crate::webview_permissions::{PermissionKind, PermissionResponse};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use crate::window::WindowId;
+use crate::{Rect, Runtime, UserEvent, window::is_label_valid};
+
+use http::Request;
+use tauri_utils::config::{
+  BackgroundThrottlingPolicy, Color, ScrollBarStyle as ConfigScrollBarStyle, WebviewUrl,
+  WindowConfig, WindowEffectsConfig,
+};
+use url::Url;
+
+use std::{
+  borrow::Cow,
+  collections::HashMap,
+  hash::{Hash, Hasher},
+  path::PathBuf,
+  sync::Arc,
+};
+
+type UriSchemeProtocolHandler = dyn Fn(&str, http::Request<Vec<u8>>, Box<dyn FnOnce(http::Response<Cow<'static, [u8]>>) + Send>)
+  + Send
+  + Sync
+  + 'static;
+
+type WebResourceRequestHandler =
+  dyn Fn(http::Request<Vec<u8>>, &mut http::Response<Cow<'static, [u8]>>) + Send + Sync;
+
+type NavigationHandler = dyn Fn(&Url) -> bool + Send;
+
+type NewWindowHandler = dyn Fn(Url, NewWindowFeatures) -> NewWindowResponse + Send;
+
+type OnPageLoadHandler = dyn Fn(Url, PageLoadEvent) + Send;
+
+type DocumentTitleChangedHandler = dyn Fn(String) + Send + 'static;
+
+type DownloadHandler = dyn Fn(DownloadEvent) -> bool + Send + Sync;
+
+type PermissionRequestHandler = dyn Fn(PermissionKind) -> PermissionResponse + Send + Sync;
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+type OnWebContentProcessTerminateHandler = dyn Fn() + Send;
+
+#[cfg(target_os = "ios")]
+type InputAccessoryViewBuilderFn = dyn Fn(&objc2_ui_kit::UIView) -> Option<objc2::rc::Retained<objc2_ui_kit::UIView>>
+  + Send
+  + Sync
+  + 'static;
+
+
+--- src/window.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! A layer between raw [`Runtime`] windows and Tauri.
+
+use crate::{
+  Icon, Runtime, UserEvent, WindowDispatch,
+  webview::{DetachedWebview, PendingWebview},
+};
+
+use dpi::PixelUnit;
+use serde::{Deserialize, Deserializer, Serialize};
+use tauri_utils::{
+  Theme,
+  config::{Color, WindowConfig},
+};
+#[cfg(windows)]
+use windows::Win32::Foundation::HWND;
+
+use std::{
+  hash::{Hash, Hasher},
+  marker::PhantomData,
+  path::PathBuf,
+  sync::mpsc::Sender,
+};
+
+/// An event from a window.
+#[derive(Debug, Clone)]
+pub enum WindowEvent {
+  /// The size of the window has changed. Contains the client area's new dimensions.
+  Resized(dpi::PhysicalSize<u32>),
+  /// The position of the window has changed. Contains the window's new position.
+  Moved(dpi::PhysicalPosition<i32>),
+  /// The window has been requested to close.
+  CloseRequested {
+    /// A signal sender. If a `true` value is emitted, the window won't be closed.
+    signal_tx: Sender<bool>,
+  },
+  /// The window has been destroyed.
+  Destroyed,
+  /// The window gained or lost focus.
+  ///
+  /// The parameter is true if the window has gained focus, and false if it has lost focus.
+  Focused(bool),
+  /// The window's scale factor has changed.
+  ///
+  /// The following user actions can cause DPI changes:
+  ///
+  /// - Changing the display's resolution.
+  /// - Changing the display's scale factor (e.g. in Control Panel on Windows).
+  /// - Moving the window to a display with a different scale factor.
+  ScaleFactorChanged {
+    /// The new scale factor.
+    scale_factor: f64,

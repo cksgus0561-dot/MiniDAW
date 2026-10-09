@@ -1,0 +1,56 @@
+--- src/load/peak_ewma.rs ---
+//! A `Load` implementation that measures load using the PeakEWMA response latency.
+
+#[cfg(feature = "discover")]
+use crate::discover::{Change, Discover};
+#[cfg(feature = "discover")]
+use futures_core::Stream;
+#[cfg(feature = "discover")]
+use pin_project_lite::pin_project;
+#[cfg(feature = "discover")]
+use std::{pin::Pin, task::ready};
+
+use super::completion::{CompleteOnResponse, TrackCompletion, TrackCompletionFuture};
+use super::Load;
+use std::task::{Context, Poll};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+use tokio::time::Instant;
+use tower_service::Service;
+use tracing::trace;
+
+/// Measures the load of the underlying service using Peak-EWMA load measurement.
+///
+/// [`PeakEwma`] implements [`Load`] with the [`Cost`] metric that estimates the amount of
+/// pending work to an endpoint. Work is calculated by multiplying the
+/// exponentially-weighted moving average (EWMA) of response latencies by the number of
+/// pending requests. The Peak-EWMA algorithm is designed to be especially sensitive to
+/// worst-case latencies. Over time, the peak latency value decays towards the moving
+/// average of latencies to the endpoint.
+///
+/// When no latency information has been measured for an endpoint, an arbitrary default
+/// RTT of 1 second is used to prevent the endpoint from being overloaded before a
+/// meaningful baseline can be established..
+///
+/// ## Note
+///
+/// This is derived from [Finagle][finagle], which is distributed under the Apache V2
+/// license. Copyright 2017, Twitter Inc.
+///
+/// [finagle]:
+/// https://github.com/twitter/finagle/blob/9cc08d15216497bb03a1cafda96b7266cfbbcff1/finagle-core/src/main/scala/com/twitter/finagle/loadbalancer/PeakEwma.scala
+#[derive(Debug)]
+pub struct PeakEwma<S, C = CompleteOnResponse> {
+    service: S,
+    decay_ns: f64,
+    rtt_estimate: Arc<Mutex<RttEstimate>>,
+    completion: C,
+}
+
+#[cfg(feature = "discover")]
+pin_project! {
+    /// Wraps a `D`-typed stream of discovered services with `PeakEwma`.
+    #[cfg_attr(docsrs, doc(cfg(feature = "discover")))]
+    #[derive(Debug)]

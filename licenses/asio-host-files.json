@@ -1,0 +1,61 @@
+{
+  "version": "2.3.4 (2025-10-15)",
+  "source": "https://download.steinberg.net/sdk_downloads/ASIO-SDK_2.3.4_2025-10-15.zip",
+  "files": [
+    {
+      "path": "LICENSE.txt",
+      "license": "GPL-3.0-only (elected)",
+      "sha256": "61e56814f24b32216884b2db0b4dcc317111a5ab354d54d19dd9fc13d71b1c7a"
+    },
+    {
+      "path": "common/LICENSE.txt",
+      "license": "GPL-3.0-only (elected)",
+      "sha256": "61e56814f24b32216884b2db0b4dcc317111a5ab354d54d19dd9fc13d71b1c7a"
+    },
+    {
+      "path": "common/asio.cpp",
+      "license": "GPL-3.0-only (elected)",
+      "sha256": "4ecee2bfaebd8b0777db96175d2b2ea8d0cd684dfaf9651480c44b0ebec0fd61"
+    },
+    {
+      "path": "common/asio.h",
+      "license": "GPL-3.0-only (elected)",
+      "sha256": "93d2f80d49b4ac9c963514e7c1307ab5111d8104246192233745beb058534ea1"
+    },
+    {
+      "path": "common/asiosys.h",
+      "license": "GPL-3.0-only (elected)",
+      "sha256": "f44a1ed0fd7c056ff047aeebc4c05a8c185f0585a24d8debc55c70107777dbef"
+    },
+    {
+      "path": "common/iasiodrv.h",
+      "license": "GPL-3.0-only (elected)",
+      "sha256": "86ad4788452c74823653cf57d4bd557c48bb6542d7e6eb7fff80102c705a066d"
+    },
+    {
+      "path": "host/asiodrivers.cpp",
+      "license": "BSD-3-Clause",
+      "sha256": "6f5c7529047c482998201df4b9c9e6bcdeee782ed764e6324d49b3bca4340601"
+    },
+    {
+      "path": "host/asiodrivers.h",
+      "license": "BSD-3-Clause",
+      "sha256": "23f78334ed9aff7f9db4b0d36b228595005c6f6a3ad842e9d0ad33edfb041a8f"
+    },
+    {
+      "path": "host/pc/asiolist.cpp",
+      "license": "BSD-3-Clause",
+      "sha256": "d3f7d83f561eaafed17393c3c95ba077f2ec109e2f7c762dcdf905f0e5c17f02"
+    },
+    {
+      "path": "host/pc/asiolist.h",
+      "license": "BSD-3-Clause",
+      "sha256": "daab5066bcb9ca79552541bc2981cf43cde7ac72bd4572286764097c9cc92010"
+    },
+    {
+      "path": "host/ginclude.h",
+      "license": "BSD-3-Clause",
+      "sha256": "96db001a91c469702afac88178f289bd50f78dd43ed12c174f898a44a7a56676"
+    }
+  ]
+}

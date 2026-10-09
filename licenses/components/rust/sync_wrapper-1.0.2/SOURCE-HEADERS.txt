@@ -1,0 +1,56 @@
+--- src/lib.rs ---
+/*
+ * Copyright 2020 Actyx AG
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+//! A mutual exclusion primitive that relies on static type information only
+//!
+//! This library is inspired by [this discussion](https://internals.rust-lang.org/t/what-shall-sync-mean-across-an-await/12020/2).
+#![doc(html_logo_url = "https://developer.actyx.com/img/logo.svg")]
+#![doc(html_favicon_url = "https://developer.actyx.com/img/favicon.ico")]
+#![no_std]
+
+use core::{
+    fmt::{self, Debug, Formatter},
+    pin::Pin,
+    future::Future,
+    task::{Context, Poll},
+};
+
+/// A mutual exclusion primitive that relies on static type information only
+///
+/// In some cases synchronization can be proven statically: whenever you hold an exclusive `&mut`
+/// reference, the Rust type system ensures that no other part of the program can hold another
+/// reference to the data. Therefore it is safe to access it even if the current thread obtained
+/// this reference via a channel. Whenever this is the case, the overhead of allocating and locking
+/// a [`Mutex`] can be avoided by using this static version.
+///
+/// One example where this is often applicable is [`Future`], which requires an exclusive reference
+/// for its [`poll`] method: While a given `Future` implementation may not be safe to access by
+/// multiple threads concurrently, the executor can only run the `Future` on one thread at any
+/// given time, making it [`Sync`] in practice as long as the implementation is `Send`. You can
+/// therefore use the static mutex to prove that your data structure is `Sync` even though it
+/// contains such a `Future`.
+///
+/// # Example
+///
+/// ```
+/// use sync_wrapper::SyncWrapper;
+/// use std::future::Future;
+///
+/// struct MyThing {
+///     future: SyncWrapper<Box<dyn Future<Output = String> + Send>>,
+/// }
+///
+/// impl MyThing {

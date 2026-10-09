@@ -1,0 +1,5232 @@
+--- examples/background_color.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use dpi::LogicalSize;
+use tao::{
+  event::{ElementState, Event, KeyEvent, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  keyboard::KeyCode,
+  window::WindowBuilder,
+};
+
+fn main() {
+  let event_loop = EventLoop::new();
+
+  let mut background_color = (100, 100, 100, 255);
+
+  let window = WindowBuilder::new()
+    .with_title("Hit space to change background color!")
+    .with_inner_size(LogicalSize::new(400.0, 300.0))
+    .with_background_color(background_color)
+    .build(&event_loop)
+    .unwrap();
+
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::WindowEvent { event, .. } => match event {
+        WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+        WindowEvent::KeyboardInput {
+          event:
+            KeyEvent {
+              physical_key: KeyCode::Space,
+              state: ElementState::Released,
+              ..
+            },
+          ..
+        } => {
+          background_color.1 = background_color.1.wrapping_add(20);
+          println!("Setting background color to: {background_color:?}");
+          window.set_background_color(Some(background_color));
+        }
+        _ => (),
+      },
+      _ => (),
+    }
+  });
+}
+
+
+--- examples/control_flow.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{thread, time};
+
+use tao::{
+  event::{ElementState, Event, KeyEvent, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  keyboard::Key,
+  window::WindowBuilder,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+  Wait,
+  WaitUntil,
+  Poll,
+}
+
+const WAIT_TIME: time::Duration = time::Duration::from_millis(100);
+const POLL_SLEEP_TIME: time::Duration = time::Duration::from_millis(100);
+
+#[allow(clippy::single_match)]
+fn main() {
+  env_logger::init();
+
+  println!("Press '1' to switch to Wait mode.");
+  println!("Press '2' to switch to WaitUntil mode.");
+  println!("Press '3' to switch to Poll mode.");
+  println!("Press 'R' to toggle request_redraw() calls.");
+  println!("Press 'Esc' to close the window.");
+
+  let event_loop = EventLoop::new();
+  let window = WindowBuilder::new()
+    .with_title("Press 1, 2, 3 to change control flow mode. Press R to toggle redraw requests.")
+    .build(&event_loop)
+    .unwrap();
+
+  let mut mode = Mode::Wait;
+  let mut request_redraw = false;
+  let mut wait_cancelled = false;
+  let mut close_requested = false;
+
+  event_loop.run(move |event, _, control_flow| {
+    use tao::event::StartCause;
+    println!("{event:?}");
+    match event {
+      Event::NewEvents(start_cause) => {
+        wait_cancelled = match start_cause {
+          StartCause::WaitCancelled { .. } => mode == Mode::WaitUntil,
+          _ => false,
+        }
+      }
+      Event::WindowEvent { event, .. } => match event {
+
+--- examples/cursor_grab.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use tao::{
+  event::{DeviceEvent, ElementState, Event, KeyEvent, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  keyboard::{Key, ModifiersState},
+  window::WindowBuilder,
+};
+
+#[allow(clippy::single_match)]
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+
+  let window = WindowBuilder::new()
+    .with_title("Super Cursor Grab'n'Hide Simulator 9000")
+    .build(&event_loop)
+    .unwrap();
+
+  let mut modifiers = ModifiersState::default();
+
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::WindowEvent { event, .. } => match event {
+        WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+        WindowEvent::KeyboardInput {
+          event:
+            KeyEvent {
+              logical_key: key,
+              state: ElementState::Released,
+              ..
+            },
+          ..
+        } => {
+          // WARNING: Consider using `key_without_modifers()` if available on your platform.
+          // See the `key_binding` example
+          match key {
+            Key::Escape => *control_flow = ControlFlow::Exit,
+            Key::Character(ch) => match ch.to_lowercase().as_str() {
+              "g" => window.set_cursor_grab(!modifiers.shift_key()).unwrap(),
+              "h" => window.set_cursor_visible(modifiers.shift_key()),
+              _ => (),
+            },
+            _ => (),
+          }
+        }
+        WindowEvent::ModifiersChanged(m) => modifiers = m,
+        _ => (),
+      },
+      Event::DeviceEvent { event, .. } => match event {
+        DeviceEvent::MouseMotion { delta, .. } => println!("mouse moved: {delta:?}"),
+
+--- examples/cursor.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use tao::{
+  event::{ElementState, Event, KeyEvent, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  window::{CursorIcon, WindowBuilder},
+};
+
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+
+  let window = WindowBuilder::new().build(&event_loop).unwrap();
+  window.set_title("A fantastic window!");
+
+  let mut cursor_idx = 0;
+
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::WindowEvent {
+        event:
+          WindowEvent::KeyboardInput {
+            event:
+              KeyEvent {
+                state: ElementState::Pressed,
+                ..
+              },
+            ..
+          },
+        ..
+      } => {
+        println!("Setting cursor to \"{:?}\"", CURSORS[cursor_idx]);
+        window.set_cursor_icon(CURSORS[cursor_idx]);
+        if cursor_idx < CURSORS.len() - 1 {
+          cursor_idx += 1;
+        } else {
+          cursor_idx = 0;
+        }
+      }
+      Event::WindowEvent {
+        event: WindowEvent::CloseRequested,
+        ..
+      } => *control_flow = ControlFlow::Exit,
+      _ => (),
+    }
+  });
+}
+
+const CURSORS: &[CursorIcon] = &[
+  CursorIcon::Default,
+  CursorIcon::Crosshair,
+
+--- examples/custom_events.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+#[allow(clippy::single_match)]
+fn main() {
+  env_logger::init();
+  use tao::{
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoopBuilder},
+    window::WindowBuilder,
+  };
+
+  #[derive(Debug, Clone, Copy)]
+  enum CustomEvent {
+    Timer,
+  }
+
+  let event_loop = EventLoopBuilder::<CustomEvent>::with_user_event().build();
+
+  let _window = WindowBuilder::new()
+    .with_title("A fantastic window!")
+    .build(&event_loop)
+    .unwrap();
+
+  // `EventLoopProxy` allows you to dispatch custom events to the main Tao event
+  // loop from any thread.
+  let event_loop_proxy = event_loop.create_proxy();
+
+  std::thread::spawn(move || {
+    // Wake up the `event_loop` once every second and dispatch a custom event
+    // from a different thread.
+    loop {
+      std::thread::sleep(std::time::Duration::from_secs(1));
+      event_loop_proxy.send_event(CustomEvent::Timer).ok();
+    }
+  });
+
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::UserEvent(event) => println!("user event: {event:?}"),
+      Event::WindowEvent {
+        event: WindowEvent::CloseRequested,
+        ..
+      } => *control_flow = ControlFlow::Exit,
+      _ => (),
+    }
+  });
+}
+
+
+--- examples/decorations.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use tao::{
+  dpi::LogicalSize,
+  event::{ElementState, Event, KeyEvent, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  keyboard::KeyCode,
+  window::WindowBuilder,
+};
+
+#[allow(clippy::single_match)]
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+
+  let mut decorations = true;
+
+  let window = WindowBuilder::new()
+    .with_title("Hit space to toggle decorations.")
+    .with_inner_size(LogicalSize::new(400.0, 200.0))
+    .with_decorations(decorations)
+    .build(&event_loop)
+    .unwrap();
+
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::WindowEvent { event, .. } => match event {
+        WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+        WindowEvent::KeyboardInput {
+          event:
+            KeyEvent {
+              physical_key: KeyCode::Space,
+              state: ElementState::Released,
+              ..
+            },
+          ..
+        } => {
+          decorations = !decorations;
+          println!("Decorations: {decorations}");
+          window.set_decorations(decorations);
+        }
+        _ => (),
+      },
+      _ => (),
+    };
+  });
+}
+
+
+--- examples/drag_window.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use tao::{
+  event::{ElementState, Event, KeyEvent, MouseButton, StartCause, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  keyboard::Key,
+  window::{Window, WindowBuilder, WindowId},
+};
+
+#[allow(clippy::single_match)]
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+
+  let window_1 = WindowBuilder::new().build(&event_loop).unwrap();
+  let window_2 = WindowBuilder::new().build(&event_loop).unwrap();
+
+  let mut switched = false;
+  let mut entered_id = window_2.id();
+
+  event_loop.run(move |event, _, control_flow| match event {
+    Event::NewEvents(StartCause::Init) => {
+      eprintln!("Switch which window is to be dragged by pressing \"x\".")
+    }
+    Event::WindowEvent {
+      event, window_id, ..
+    } => match event {
+      WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+      WindowEvent::MouseInput {
+        state: ElementState::Pressed,
+        button: MouseButton::Left,
+        ..
+      } => {
+        let window = if (window_id == window_1.id() && switched)
+          || (window_id == window_2.id() && !switched)
+        {
+          &window_2
+        } else {
+          &window_1
+        };
+
+        window.drag_window().unwrap()
+      }
+      WindowEvent::CursorEntered { .. } => {
+        entered_id = window_id;
+        name_windows(entered_id, switched, &window_1, &window_2)
+      }
+      WindowEvent::KeyboardInput {
+        event:
+          KeyEvent {
+            state: ElementState::Released,
+            logical_key: Key::Character("x"),
+            ..
+
+--- examples/fullscreen.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::io::{stdin, stdout, Write};
+
+use tao::{
+  event::{ElementState, Event, KeyEvent, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  keyboard::Key,
+  monitor::{MonitorHandle, VideoMode},
+  window::{Fullscreen, WindowBuilder},
+};
+#[allow(clippy::single_match)]
+#[allow(clippy::ok_expect)]
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+
+  print!("Please choose the fullscreen mode: (1) exclusive, (2) borderless, (3) borderless on current monitor: ");
+  stdout().flush().unwrap();
+
+  let mut num = String::new();
+  stdin().read_line(&mut num).unwrap();
+  let num = num.trim().parse().ok().expect("Please enter a number");
+
+  let fullscreen = Some(match num {
+    1 => Fullscreen::Exclusive(prompt_for_video_mode(&prompt_for_monitor(&event_loop))),
+    2 => Fullscreen::Borderless(Some(prompt_for_monitor(&event_loop))),
+    3 => Fullscreen::Borderless(None),
+    _ => panic!("Please enter a valid number"),
+  });
+
+  let mut decorations = true;
+
+  let window = WindowBuilder::new()
+    .with_title("Hello world!")
+    .with_fullscreen(fullscreen.clone())
+    .build(&event_loop)
+    .unwrap();
+
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::WindowEvent { event, .. } => match event {
+        WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+        WindowEvent::KeyboardInput {
+          event:
+            KeyEvent {
+              logical_key,
+              state: ElementState::Pressed,
+              ..
+            },
+          ..
+
+--- examples/handling_close.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use tao::{
+  event::{ElementState, Event, KeyEvent, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  keyboard::Key,
+  window::WindowBuilder,
+};
+
+#[allow(clippy::single_match)]
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+
+  let _window = WindowBuilder::new()
+    .with_title("Your faithful window")
+    .build(&event_loop)
+    .unwrap();
+
+  let mut close_requested = false;
+
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::WindowEvent { event, .. } => {
+        match event {
+          WindowEvent::CloseRequested => {
+            // `CloseRequested` is sent when the close button on the window is pressed (or
+            // through whatever other mechanisms the window manager provides for closing a
+            // window). If you don't handle this event, the close button won't actually do
+            // anything.
+
+            // A common thing to do here is prompt the user if they have unsaved work.
+            // Creating a proper dialog box for that is far beyond the scope of this
+            // example, so here we'll just respond to the Y and N keys.
+            println!("Are you ready to bid your window farewell? [Y/N]");
+            close_requested = true;
+
+            // In applications where you can safely close the window without further
+            // action from the user, this is generally where you'd handle cleanup before
+            // closing the window. How to close the window is detailed in the handler for
+            // the Y key.
+          }
+          WindowEvent::KeyboardInput {
+            event:
+              KeyEvent {
+                logical_key: Key::Character(char),
+                state: ElementState::Released,
+                ..
+              },
+            ..
+          } => {
+
+--- examples/min_max_size.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use tao::{
+  dpi::LogicalUnit,
+  event::{ElementState, Event, KeyEvent, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  keyboard::Key,
+  window::{WindowBuilder, WindowSizeConstraints},
+};
+
+#[allow(clippy::single_match)]
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+
+  let min_width = 400.0;
+  let max_width = 800.0;
+  let min_height = 200.0;
+  let max_height = 400.0;
+  let mut size_constraints = WindowSizeConstraints::default();
+
+  let window = WindowBuilder::new().build(&event_loop).unwrap();
+
+  eprintln!("constraint keys:");
+  eprintln!("  (E) Toggle the min width");
+  eprintln!("  (F) Toggle the max width");
+  eprintln!("  (P) Toggle the min height");
+  eprintln!("  (V) Toggle the max height");
+
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::WindowEvent {
+        event: WindowEvent::CloseRequested,
+        ..
+      } => *control_flow = ControlFlow::Exit,
+
+      Event::WindowEvent {
+        event:
+          WindowEvent::KeyboardInput {
+            event:
+              KeyEvent {
+                logical_key: Key::Character(key_str),
+                state: ElementState::Released,
+                ..
+              },
+            ..
+          },
+        ..
+      } => match key_str {
+        "e" => {
+          size_constraints.min_width = size_constraints
+
+--- examples/minimize.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+extern crate tao;
+
+use tao::{
+  event::{Event, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  keyboard::Key,
+  window::WindowBuilder,
+};
+
+#[allow(clippy::single_match)]
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+
+  let window = WindowBuilder::new()
+    .with_title("A fantastic window!")
+    .build(&event_loop)
+    .unwrap();
+
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::WindowEvent {
+        event: WindowEvent::CloseRequested,
+        ..
+      } => *control_flow = ControlFlow::Exit,
+
+      // Keyboard input event to handle minimize via a hotkey
+      Event::WindowEvent {
+        event: WindowEvent::KeyboardInput { event, .. },
+        window_id,
+        ..
+      } if window_id == window.id() && Key::Character("m") == event.logical_key => {
+        // Pressing the 'm' key will minimize the window
+        // WARNING: Consider using `key_without_modifers()` if available on your platform.
+        // See the `key_binding` example
+        window.set_minimized(true);
+      }
+      _ => (),
+    }
+  });
+}
+
+
+--- examples/monitor_list.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use tao::{event_loop::EventLoop, window::WindowBuilder};
+
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+  let window = WindowBuilder::new().build(&event_loop).unwrap();
+
+  dbg!(window.available_monitors().collect::<Vec<_>>());
+  dbg!(window.primary_monitor());
+}
+
+
+--- examples/mouse_wheel.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use tao::{
+  event::{DeviceEvent, Event, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  window::WindowBuilder,
+};
+
+#[allow(clippy::collapsible_match)]
+#[allow(clippy::single_match)]
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+
+  let window = WindowBuilder::new()
+    .with_title("Mouse Wheel events")
+    .build(&event_loop)
+    .unwrap();
+
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::WindowEvent { event, .. } => match event {
+        WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+        _ => (),
+      },
+      Event::DeviceEvent { event, .. } => match event {
+        DeviceEvent::MouseWheel { delta, .. } => match delta {
+          tao::event::MouseScrollDelta::LineDelta(x, y) => {
+            println!("mouse wheel Line Delta: ({x},{y})");
+            let pixels_per_line = 120.0;
+            let mut pos = window.outer_position().unwrap();
+            pos.x -= (x * pixels_per_line) as i32;
+            pos.y -= (y * pixels_per_line) as i32;
+            window.set_outer_position(pos)
+          }
+          tao::event::MouseScrollDelta::PixelDelta(p) => {
+            println!("mouse wheel Pixel Delta: ({},{})", p.x, p.y);
+            let mut pos = window.outer_position().unwrap();
+            pos.x -= p.x as i32;
+            pos.y -= p.y as i32;
+            window.set_outer_position(pos)
+          }
+          _ => (),
+        },
+        _ => (),
+      },
+      _ => (),
+    }
+  });
+}
+
+
+--- examples/multithreaded.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+#[allow(clippy::single_match)]
+#[allow(clippy::iter_nth)]
+fn main() {
+  use std::{collections::HashMap, sync::mpsc, thread, time::Duration};
+
+  use tao::{
+    dpi::{PhysicalPosition, PhysicalSize, Position, Size},
+    event::{ElementState, Event, KeyEvent, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    keyboard::{Key, ModifiersState},
+    window::{CursorIcon, Fullscreen, WindowBuilder},
+  };
+
+  const WINDOW_COUNT: usize = 3;
+  const WINDOW_SIZE: PhysicalSize<u32> = PhysicalSize::new(600, 400);
+
+  env_logger::init();
+  let event_loop = EventLoop::new();
+  let mut window_senders = HashMap::with_capacity(WINDOW_COUNT);
+  for _ in 0..WINDOW_COUNT {
+    let window = WindowBuilder::new()
+      .with_inner_size(WINDOW_SIZE)
+      .build(&event_loop)
+      .unwrap();
+
+    let mut video_modes: Vec<_> = window.current_monitor().unwrap().video_modes().collect();
+    let mut video_mode_id = 0usize;
+
+    let (tx, rx) = mpsc::channel();
+    window_senders.insert(window.id(), tx);
+    let mut modifiers = ModifiersState::default();
+    thread::spawn(move || {
+      while let Ok(event) = rx.recv() {
+        match event {
+          WindowEvent::Moved { .. } => {
+            // We need to update our chosen video mode if the window
+            // was moved to an another monitor, so that the window
+            // appears on this monitor instead when we go fullscreen
+            let previous_video_mode = video_modes.iter().nth(video_mode_id).cloned();
+            video_modes = window.current_monitor().unwrap().video_modes().collect();
+            video_mode_id = video_mode_id.min(video_modes.len());
+            let video_mode = video_modes.iter().nth(video_mode_id);
+
+            // Different monitors may support different video modes,
+            // and the index we chose previously may now point to a
+            // completely different video mode, so notify the user
+            if video_mode != previous_video_mode.as_ref() {
+              println!(
+                "Window moved to another monitor, picked video mode: {}",
+                video_modes.iter().nth(video_mode_id).unwrap()
+              );
+
+--- examples/multiwindow.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::collections::HashMap;
+
+use tao::{
+  event::{ElementState, Event, KeyEvent, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  window::Window,
+};
+
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+
+  let mut windows = HashMap::new();
+  for _ in 0..3 {
+    let window = Window::new(&event_loop).unwrap();
+    windows.insert(window.id(), window);
+  }
+
+  event_loop.run(move |event, event_loop, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    if let Event::WindowEvent {
+      event, window_id, ..
+    } = event
+    {
+      match event {
+        WindowEvent::CloseRequested => {
+          println!("Window {window_id:?} has received the signal to close");
+
+          // This drops the window, causing it to close.
+          windows.remove(&window_id);
+
+          if windows.is_empty() {
+            *control_flow = ControlFlow::Exit;
+          }
+        }
+        WindowEvent::KeyboardInput {
+          event: KeyEvent {
+            state: ElementState::Pressed,
+            ..
+          },
+          ..
+        } => {
+          let window = Window::new(event_loop).unwrap();
+          windows.insert(window.id(), window);
+        }
+        _ => (),
+      }
+    }
+  })
+}
+
+--- examples/overlay.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use tao::{
+  event::{ElementState, Event, KeyEvent, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  keyboard::{Key, ModifiersState},
+  window::WindowBuilder,
+};
+
+#[cfg(any(
+  target_os = "linux",
+  target_os = "dragonfly",
+  target_os = "freebsd",
+  target_os = "netbsd",
+  target_os = "openbsd"
+))]
+use tao::platform::unix::WindowExtUnix;
+
+#[cfg(target_os = "macos")]
+use tao::platform::macos::WindowExtMacOS;
+
+#[cfg(target_os = "ios")]
+use tao::platform::ios::WindowExtIOS;
+
+#[cfg(windows)]
+use tao::{
+  dpi::PhysicalSize, platform::windows::IconExtWindows, platform::windows::WindowExtWindows,
+  window::Icon,
+};
+
+#[allow(clippy::single_match)]
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+
+  let window = WindowBuilder::new().build(&event_loop).unwrap();
+
+  let mut modifiers = ModifiersState::default();
+
+  eprintln!("Key mappings:");
+  #[cfg(windows)]
+  eprintln!("  [any key]: Show the Overlay Icon");
+  #[cfg(not(windows))]
+  eprintln!("  [1-5]: Show a Badge count");
+  eprintln!("  Ctrl+1: Clear");
+
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::WindowEvent {
+        event: WindowEvent::CloseRequested,
+        ..
+
+--- examples/parentwindow.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+fn main() {
+  use std::collections::HashMap;
+  #[cfg(target_os = "macos")]
+  use tao::platform::macos::{WindowBuilderExtMacOS, WindowExtMacOS};
+  #[cfg(target_os = "linux")]
+  use tao::platform::unix::{WindowBuilderExtUnix, WindowExtUnix};
+  #[cfg(target_os = "windows")]
+  use tao::platform::windows::{WindowBuilderExtWindows, WindowExtWindows};
+  use tao::{
+    dpi::LogicalSize,
+    event::{Event, StartCause, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowBuilder,
+  };
+  env_logger::init();
+  let event_loop = EventLoop::new();
+  let mut windows = HashMap::new();
+  let main_window = WindowBuilder::new().build(&event_loop).unwrap();
+
+  #[cfg(target_os = "macos")]
+  let parent_window = main_window.ns_window();
+  #[cfg(target_os = "windows")]
+  let parent_window = main_window.hwnd();
+  #[cfg(target_os = "linux")]
+  let parent_window = main_window.gtk_window();
+
+  let child_window_builder = WindowBuilder::new().with_inner_size(LogicalSize::new(200, 200));
+
+  #[cfg(any(target_os = "windows", target_os = "macos"))]
+  let child_window_builder = child_window_builder.with_parent_window(parent_window);
+
+  #[cfg(target_os = "linux")]
+  let child_window_builder = child_window_builder.with_transient_for(parent_window);
+
+  let child_window = child_window_builder.build(&event_loop).unwrap();
+
+  windows.insert(child_window.id(), child_window);
+  windows.insert(main_window.id(), main_window);
+
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::NewEvents(StartCause::Init) => println!("TAO application started!"),
+      Event::WindowEvent {
+        event: WindowEvent::CloseRequested,
+        window_id,
+        ..
+      } => {
+        println!("Window {window_id:?} has received the signal to close");
+
+--- examples/progress_bar.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use tao::{
+  event::{ElementState, Event, KeyEvent, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  keyboard::{Key, ModifiersState},
+  window::{ProgressBarState, ProgressState, WindowBuilder},
+};
+
+#[allow(clippy::single_match)]
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+
+  let window = WindowBuilder::new().build(&event_loop).unwrap();
+
+  let mut modifiers = ModifiersState::default();
+
+  eprintln!("Key mappings:");
+  eprintln!("  [1-5]: Set progress to [0%, 25%, 50%, 75%, 100%]");
+  eprintln!("  Ctrl+1: Set state to None");
+  eprintln!("  Ctrl+2: Set state to Normal");
+  eprintln!("  Ctrl+3: Set state to Indeterminate");
+  eprintln!("  Ctrl+4: Set state to Paused");
+  eprintln!("  Ctrl+5: Set state to Error");
+
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::WindowEvent {
+        event: WindowEvent::CloseRequested,
+        ..
+      } => *control_flow = ControlFlow::Exit,
+      Event::WindowEvent { event, .. } => match event {
+        WindowEvent::ModifiersChanged(new_state) => {
+          modifiers = new_state;
+        }
+        WindowEvent::KeyboardInput {
+          event:
+            KeyEvent {
+              logical_key: Key::Character(key_str),
+              state: ElementState::Released,
+              ..
+            },
+          ..
+        } => {
+          if modifiers.is_empty() {
+            let mut progress: u64 = 0;
+            match key_str {
+              "1" => progress = 0,
+              "2" => progress = 25,
+              "3" => progress = 50,
+
+--- examples/reopen_event.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use tao::{
+  event::{Event, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  window::Window,
+};
+
+#[allow(clippy::single_match)]
+fn main() {
+  let event_loop = EventLoop::new();
+
+  let mut window = Some(Window::new(&event_loop).unwrap());
+
+  event_loop.run(move |event, event_loop, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::WindowEvent {
+        event: WindowEvent::CloseRequested,
+        ..
+      } => {
+        // drop the window
+        window = None;
+      }
+      Event::Reopen {
+        has_visible_windows,
+        ..
+      } => {
+        println!("on reopen, has visible windows: {has_visible_windows}");
+        if !has_visible_windows {
+          window = Some(Window::new(event_loop).unwrap())
+        }
+      }
+      Event::MainEventsCleared => {
+        if let Some(w) = &window {
+          w.request_redraw();
+        }
+      }
+      _ => (),
+    }
+  });
+}
+
+
+--- examples/request_redraw_threaded.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{thread, time};
+
+use tao::{
+  event::{Event, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  window::WindowBuilder,
+};
+
+#[allow(clippy::single_match)]
+#[allow(clippy::collapsible_match)]
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+
+  let window = WindowBuilder::new()
+    .with_title("A fantastic window!")
+    .build(&event_loop)
+    .unwrap();
+
+  thread::spawn(move || loop {
+    thread::sleep(time::Duration::from_secs(1));
+    window.request_redraw();
+  });
+
+  event_loop.run(move |event, _, control_flow| {
+    println!("{event:?}");
+
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::WindowEvent { event, .. } => match event {
+        WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+        _ => (),
+      },
+      Event::RedrawRequested(_) => {
+        println!("\nredrawing!\n");
+      }
+      _ => (),
+    }
+  });
+}
+
+
+--- examples/request_redraw.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use tao::{
+  event::{ElementState, Event, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  window::WindowBuilder,
+};
+
+#[allow(clippy::single_match)]
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+
+  let window = WindowBuilder::new()
+    .with_title("A fantastic window!")
+    .build(&event_loop)
+    .unwrap();
+
+  event_loop.run(move |event, _, control_flow| {
+    println!("{event:?}");
+
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::WindowEvent { event, .. } => match event {
+        WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+        WindowEvent::MouseInput {
+          state: ElementState::Released,
+          ..
+        } => {
+          window.request_redraw();
+        }
+        _ => (),
+      },
+      Event::RedrawRequested(_) => {
+        println!("\nredrawing!\n");
+      }
+      _ => (),
+    }
+  });
+}
+
+
+--- examples/resizable.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use tao::{
+  dpi::LogicalSize,
+  event::{ElementState, Event, KeyEvent, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  keyboard::KeyCode,
+  window::WindowBuilder,
+};
+
+#[allow(clippy::single_match)]
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+
+  let mut resizable = false;
+
+  let window = WindowBuilder::new()
+    .with_title("Hit space to toggle resizability.")
+    .with_inner_size(LogicalSize::new(400.0, 200.0))
+    .with_resizable(resizable)
+    .build(&event_loop)
+    .unwrap();
+
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::WindowEvent { event, .. } => match event {
+        WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+        WindowEvent::KeyboardInput {
+          event:
+            KeyEvent {
+              physical_key: KeyCode::Space,
+              state: ElementState::Released,
+              ..
+            },
+          ..
+        } => {
+          resizable = !resizable;
+          println!("Resizable: {resizable}");
+          window.set_resizable(resizable);
+        }
+        _ => (),
+      },
+      _ => (),
+    };
+  });
+}
+
+
+--- examples/set_ime_position.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use tao::{
+  dpi::PhysicalPosition,
+  event::{ElementState, Event, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  window::WindowBuilder,
+};
+
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+
+  let window = WindowBuilder::new().build(&event_loop).unwrap();
+  window.set_title("A fantastic window!");
+
+  println!("Ime position will system default");
+  println!("Click to set ime position to cursor's");
+
+  let mut cursor_position = PhysicalPosition::new(0.0, 0.0);
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::WindowEvent {
+        event: WindowEvent::CursorMoved { position, .. },
+        ..
+      } => {
+        cursor_position = position;
+      }
+      Event::WindowEvent {
+        event:
+          WindowEvent::MouseInput {
+            state: ElementState::Released,
+            ..
+          },
+        ..
+      } => {
+        println!(
+          "Setting ime position to {}, {}",
+          cursor_position.x, cursor_position.y
+        );
+        window.set_ime_position(cursor_position);
+      }
+      Event::WindowEvent {
+        event: WindowEvent::CloseRequested,
+        ..
+      } => {
+        *control_flow = ControlFlow::Exit;
+      }
+      _ => (),
+    }
+  });
+
+--- examples/theme.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use tao::{event::KeyEvent, keyboard::KeyCode};
+
+fn main() {
+  use tao::{
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::{Theme, WindowBuilder},
+  };
+
+  env_logger::init();
+  let event_loop = EventLoop::new();
+
+  let window = WindowBuilder::new()
+    .with_title("A fantastic window!")
+    // .with_theme(Some(tao::window::Theme::Light))
+    .build(&event_loop)
+    .unwrap();
+
+  println!("Initial theme: {:?}", window.theme());
+  println!("Press D for Dark Mode");
+  println!("Press L for Light Mode");
+  println!("Press A for Auto Mode");
+
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    if let Event::WindowEvent { event, .. } = event {
+      match event {
+        WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+        WindowEvent::KeyboardInput {
+          event: KeyEvent { physical_key, .. },
+          ..
+        } => match physical_key {
+          KeyCode::KeyD => window.set_theme(Some(Theme::Dark)),
+          KeyCode::KeyL => window.set_theme(Some(Theme::Light)),
+          KeyCode::KeyA => window.set_theme(None),
+          _ => {}
+        },
+        WindowEvent::ThemeChanged(theme) => {
+          println!("Theme is changed: {theme:?}")
+        }
+        _ => (),
+      }
+    }
+  });
+}
+
+
+--- examples/timer.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::time::{Duration, Instant};
+
+use tao::{
+  event::{Event, StartCause, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  window::WindowBuilder,
+};
+
+#[allow(clippy::single_match)]
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+
+  let _window = WindowBuilder::new()
+    .with_title("A fantastic window!")
+    .build(&event_loop)
+    .unwrap();
+
+  let timer_length = Duration::new(1, 0);
+
+  event_loop.run(move |event, _, control_flow| {
+    println!("{event:?}");
+
+    match event {
+      Event::NewEvents(StartCause::Init) => {
+        *control_flow = ControlFlow::WaitUntil(Instant::now() + timer_length)
+      }
+      Event::NewEvents(StartCause::ResumeTimeReached { .. }) => {
+        *control_flow = ControlFlow::WaitUntil(Instant::now() + timer_length);
+        println!("\nTimer\n");
+      }
+      Event::WindowEvent {
+        event: WindowEvent::CloseRequested,
+        ..
+      } => *control_flow = ControlFlow::Exit,
+      _ => (),
+    }
+  });
+}
+
+
+--- examples/transparent.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+#[cfg(windows)]
+use std::{num::NonZeroU32, rc::Rc};
+
+use tao::{
+  event::{Event, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  window::WindowBuilder,
+};
+
+#[allow(clippy::single_match)]
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+
+  let window = WindowBuilder::new()
+    .with_decorations(false)
+    .with_transparent(true)
+    .build(&event_loop)
+    .unwrap();
+
+  #[cfg(windows)]
+  let (window, _context, mut surface) = {
+    let window = Rc::new(window);
+    let context = softbuffer::Context::new(window.clone()).unwrap();
+    let surface = softbuffer::Surface::new(&context, window.clone()).unwrap();
+    (window, context, surface)
+  };
+
+  window.set_title("A fantastic window!");
+
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+    println!("{event:?}");
+
+    match event {
+      Event::WindowEvent {
+        event: WindowEvent::CloseRequested,
+        ..
+      } => *control_flow = ControlFlow::Exit,
+
+      #[cfg(windows)]
+      Event::RedrawRequested(_) => {
+        let (width, height) = {
+          let size = window.inner_size();
+          (size.width, size.height)
+        };
+        surface
+          .resize(
+            NonZeroU32::new(width).unwrap(),
+            NonZeroU32::new(height).unwrap(),
+          )
+
+--- examples/video_modes.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use tao::event_loop::EventLoop;
+
+#[allow(clippy::single_match)]
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+  let monitor = match event_loop.primary_monitor() {
+    Some(monitor) => monitor,
+    None => {
+      println!("No primary monitor detected.");
+      return;
+    }
+  };
+
+  println!("Listing available video modes:");
+
+  for mode in monitor.video_modes() {
+    println!("{mode}");
+  }
+}
+
+
+--- examples/window_debug.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+// This example is used by developers to test various window functions.
+
+use tao::{
+  dpi::{LogicalSize, PhysicalSize},
+  event::{DeviceEvent, ElementState, Event, KeyEvent, RawKeyEvent, WindowEvent},
+  event_loop::{ControlFlow, DeviceEventFilter, EventLoop},
+  keyboard::{Key, KeyCode},
+  window::{Fullscreen, WindowBuilder},
+};
+
+#[allow(clippy::single_match)]
+#[allow(clippy::collapsible_match)]
+fn main() {
+  env_logger::init();
+  let event_loop = EventLoop::new();
+  event_loop.set_device_event_filter(DeviceEventFilter::Never);
+
+  let window = WindowBuilder::new()
+    .with_title("A fantastic window!")
+    .with_inner_size(LogicalSize::new(100.0, 100.0))
+    .build(&event_loop)
+    .unwrap();
+
+  eprintln!("debugging keys:");
+  eprintln!("  (E) Enter exclusive fullscreen");
+  eprintln!("  (F) Toggle borderless fullscreen");
+  eprintln!("  (P) Toggle borderless fullscreen on system's preferred monitor");
+  eprintln!("  (V) Toggle visibility");
+  eprintln!("  (T) Toggle always on top");
+  eprintln!("  (B) Toggle always on bottom");
+  eprintln!("  (C) Toggle content protection");
+  eprintln!("  (R) Toggle resizable");
+  eprintln!("  (M) Toggle minimized");
+  eprintln!("  (X) Toggle maximized");
+  eprintln!("  (Q) Quit event loop");
+  eprintln!("  (Shift + M) Toggle minimizable");
+  eprintln!("  (Shift + X) Toggle maximizable");
+  eprintln!("  (Shift + Q) Toggle closable");
+
+  let mut always_on_bottom = false;
+  let mut always_on_top = false;
+  let mut visible = true;
+  let mut content_protection = false;
+  let mut resizable = false;
+
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      // This used to use the virtual key, but the new API
+      // only provides the `physical_key` (`Code`).
+
+--- examples/window_icon.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+extern crate image;
+use std::path::Path;
+
+use tao::{
+  event::Event,
+  event_loop::{ControlFlow, EventLoop},
+  window::{Icon, WindowBuilder},
+};
+
+#[allow(clippy::single_match)]
+fn main() {
+  env_logger::init();
+
+  // You'll have to choose an icon size at your own discretion. On Linux, the icon should be
+  // provided in whatever size it was naturally drawn; that is, don’t scale the image before passing
+  // it to Tao. But on Windows, you will have to account for screen scaling. Here we use 32px,
+  // since it seems to work well enough in most cases. Be careful about going too high, or
+  // you'll be bitten by the low-quality downscaling built into the WM.
+  let path = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/icon.png");
+
+  let icon = load_icon(Path::new(path));
+
+  let event_loop = EventLoop::new();
+
+  let window = WindowBuilder::new()
+    .with_title("An iconic window!")
+    // At present, this only does anything on Windows and Linux, so if you want to save load
+    // time, you can put icon loading behind a function that returns `None` on other platforms.
+    .with_window_icon(Some(icon))
+    .build(&event_loop)
+    .unwrap();
+
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    if let Event::WindowEvent { event, .. } = event {
+      use tao::event::WindowEvent::*;
+      match event {
+        CloseRequested => *control_flow = ControlFlow::Exit,
+        DroppedFile(path) => {
+          window.set_window_icon(Some(load_icon(&path)));
+        }
+        _ => (),
+      }
+    }
+  });
+}
+
+fn load_icon(path: &Path) -> Icon {
+  let (icon_rgba, icon_width, icon_height) = {
+    // alternatively, you can embed the icon in the binary through `include_bytes!` macro and use `image::load_from_memory`
+
+--- examples/window_run_return.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+// Limit this example to only compatible platforms.
+#[cfg(not(target_os = "ios"))]
+#[allow(clippy::single_match)]
+fn main() {
+  use std::{thread::sleep, time::Duration};
+
+  use tao::{
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    platform::run_return::EventLoopExtRunReturn,
+    window::WindowBuilder,
+  };
+  let mut event_loop = EventLoop::new();
+
+  env_logger::init();
+  let _window = WindowBuilder::new()
+    .with_title("A fantastic window!")
+    .build(&event_loop)
+    .unwrap();
+
+  let mut quit = false;
+
+  while !quit {
+    event_loop.run_return(|event, _, control_flow| {
+      *control_flow = ControlFlow::Wait;
+
+      if let Event::WindowEvent { event, .. } = &event {
+        // Print only Window events to reduce noise
+        println!("{event:?}");
+      }
+
+      match event {
+        Event::WindowEvent {
+          event: WindowEvent::CloseRequested,
+          ..
+        } => {
+          quit = true;
+        }
+        Event::MainEventsCleared => {
+          *control_flow = ControlFlow::Exit;
+        }
+        _ => (),
+      }
+    });
+
+    // Sleep for 1/60 second to simulate rendering
+    println!("rendering");
+    sleep(Duration::from_millis(16));
+  }
+}
+
+
+--- examples/window.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use tao::{
+  event::{Event, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  window::WindowBuilder,
+};
+
+#[allow(clippy::single_match)]
+fn main() {
+  let event_loop = EventLoop::new();
+
+  let mut window = Some(
+    WindowBuilder::new()
+      .with_title("A fantastic window!")
+      .with_inner_size(tao::dpi::LogicalSize::new(300.0, 300.0))
+      .with_min_inner_size(tao::dpi::LogicalSize::new(200.0, 200.0))
+      .build(&event_loop)
+      .unwrap(),
+  );
+
+  event_loop.run(move |event, _, control_flow| {
+    *control_flow = ControlFlow::Wait;
+    println!("{event:?}");
+
+    match event {
+      Event::WindowEvent {
+        event: WindowEvent::CloseRequested,
+        window_id: _,
+        ..
+      } => {
+        // drop the window to fire the `Destroyed` event
+        window = None;
+      }
+      Event::WindowEvent {
+        event: WindowEvent::Destroyed,
+        window_id: _,
+        ..
+      } => {
+        *control_flow = ControlFlow::Exit;
+      }
+      Event::MainEventsCleared => {
+        if let Some(w) = &window {
+          w.request_redraw();
+        }
+      }
+      _ => (),
+    }
+  });
+}
+
+
+--- src/error.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+//! The `Error` struct and associated types.
+use std::{error, fmt};
+
+use crate::platform_impl;
+
+/// An error whose cause it outside Tao's control.
+#[non_exhaustive]
+#[derive(Debug)]
+pub enum ExternalError {
+  /// The operation is not supported by the backend.
+  NotSupported(NotSupportedError),
+  /// The OS cannot perform the operation.
+  Os(OsError),
+}
+
+/// The error type for when the requested operation is not supported by the backend.
+#[derive(Clone)]
+pub struct NotSupportedError {
+  _marker: (),
+}
+
+/// The error type for when the OS cannot perform the requested operation.
+#[derive(Debug)]
+pub struct OsError {
+  line: u32,
+  file: &'static str,
+  error: platform_impl::OsError,
+}
+
+impl NotSupportedError {
+  #[inline]
+  #[allow(dead_code)]
+  pub(crate) fn new() -> NotSupportedError {
+    NotSupportedError { _marker: () }
+  }
+}
+
+impl OsError {
+  #[allow(dead_code)]
+  pub(crate) fn new(line: u32, file: &'static str, error: platform_impl::OsError) -> OsError {
+    OsError { line, file, error }
+  }
+}
+
+#[allow(unused_macros)]
+macro_rules! os_error {
+  ($error:expr) => {{
+    crate::error::OsError::new(line!(), file!(), $error)
+  }};
+}
+
+
+--- src/event_loop.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+//! The `EventLoop` struct and assorted supporting types, including `ControlFlow`.
+//!
+//! If you want to send custom events to the event loop, use [`EventLoop::create_proxy()`][create_proxy]
+//! to acquire an [`EventLoopProxy`][event_loop_proxy] and call its [`send_event`][send_event] method.
+//!
+//! See the root-level documentation for information on how to create and use an event loop to
+//! handle events.
+//!
+//! [create_proxy]: crate::event_loop::EventLoop::create_proxy
+//! [event_loop_proxy]: crate::event_loop::EventLoopProxy
+//! [send_event]: crate::event_loop::EventLoopProxy::send_event
+use std::{error, fmt, marker::PhantomData, ops::Deref, time::Instant};
+
+use crate::{
+  dpi::PhysicalPosition,
+  error::ExternalError,
+  event::Event,
+  monitor::MonitorHandle,
+  platform_impl,
+  window::{ProgressBarState, Theme},
+};
+
+/// Provides a way to retrieve events from the system and from the windows that were registered to
+/// the events loop.
+///
+/// An `EventLoop` can be seen more or less as a "context". Calling `EventLoop::new()`
+/// initializes everything that will be required to create windows.
+///
+/// To wake up an `EventLoop` from a another thread, see the `EventLoopProxy` docs.
+///
+/// Note that the `EventLoop` cannot be shared across threads (due to platform-dependant logic
+/// forbidding it), as such it is neither `Send` nor `Sync`. If you need cross-thread access, the
+/// `Window` created from this `EventLoop` _can_ be sent to an other thread, and the
+/// `EventLoopProxy` allows you to wake up an `EventLoop` from another thread.
+///
+pub struct EventLoop<T: 'static> {
+  pub(crate) event_loop: platform_impl::EventLoop<T>,
+  pub(crate) _marker: ::std::marker::PhantomData<*mut ()>, // Not Send nor Sync
+}
+
+/// Target that associates windows with an `EventLoop`.
+///
+/// This type exists to allow you to create new windows while Tao executes
+/// your callback. `EventLoop` will coerce into this type (`impl<T> Deref for
+/// EventLoop<T>`), so functions that take this as a parameter can also take
+/// `&EventLoop`.
+#[derive(Clone)]
+pub struct EventLoopWindowTarget<T: 'static> {
+  pub(crate) p: platform_impl::EventLoopWindowTarget<T>,
+  pub(crate) _marker: ::std::marker::PhantomData<*mut ()>, // Not Send nor Sync
+}
+
+--- src/event.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+//! The `Event` enum and assorted supporting types.
+//!
+//! These are sent to the closure given to [`EventLoop::run(...)`][event_loop_run], where they get
+//! processed and used to modify the program state. For more details, see the root-level documentation.
+//!
+//! Some of these events represent different "parts" of a traditional event-handling loop. You could
+//! approximate the basic ordering loop of [`EventLoop::run(...)`][event_loop_run] like this:
+//!
+//! ```rust,ignore
+//! let mut control_flow = ControlFlow::Poll;
+//! let mut start_cause = StartCause::Init;
+//!
+//! while control_flow != ControlFlow::Exit {
+//!     event_handler(NewEvents(start_cause), ..., &mut control_flow);
+//!
+//!     for e in (window events, user events, device events) {
+//!         event_handler(e, ..., &mut control_flow);
+//!     }
+//!     event_handler(MainEventsCleared, ..., &mut control_flow);
+//!
+//!     for w in (redraw windows) {
+//!         event_handler(RedrawRequested(w), ..., &mut control_flow);
+//!     }
+//!     event_handler(RedrawEventsCleared, ..., &mut control_flow);
+//!
+//!     start_cause = wait_if_necessary(control_flow);
+//! }
+//!
+//! event_handler(LoopDestroyed, ..., &mut control_flow);
+//! ```
+//!
+//! This leaves out timing details like `ControlFlow::WaitUntil` but hopefully
+//! describes what happens in what order.
+//!
+//! [event_loop_run]: crate::event_loop::EventLoop::run
+use std::{path::PathBuf, time::Instant};
+
+use crate::{
+  dpi::{PhysicalPosition, PhysicalSize},
+  keyboard::{self, ModifiersState},
+  platform_impl,
+  window::{Theme, WindowId},
+};
+
+/// Describes a generic event.
+///
+/// See the module-level docs for more information on the event loop manages each event.
+#[non_exhaustive]
+#[derive(Debug, PartialEq)]
+pub enum Event<'a, T: 'static> {
+  /// Emitted when new events arrive from the OS to be processed.
+
+--- src/icon.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use crate::platform_impl::PlatformIcon;
+use std::{error::Error, fmt, io, mem};
+
+#[repr(C)]
+#[derive(Debug)]
+pub(crate) struct Pixel {
+  pub(crate) r: u8,
+  pub(crate) g: u8,
+  pub(crate) b: u8,
+  pub(crate) a: u8,
+}
+
+pub(crate) const PIXEL_SIZE: usize = mem::size_of::<Pixel>();
+
+#[non_exhaustive]
+#[derive(Debug)]
+/// An error produced when using `Icon::from_rgba` with invalid arguments.
+pub enum BadIcon {
+  /// Produced when the length of the `rgba` argument isn't divisible by 4, thus `rgba` can't be
+  /// safely interpreted as 32bpp RGBA pixels.
+  #[non_exhaustive]
+  ByteCountNotDivisibleBy4 { byte_count: usize },
+  /// Produced when the number of pixels (`rgba.len() / 4`) isn't equal to `width * height`.
+  /// At least one of your arguments is incorrect.
+  #[non_exhaustive]
+  DimensionsVsPixelCount {
+    width: u32,
+    height: u32,
+    width_x_height: usize,
+    pixel_count: usize,
+  },
+  /// Produced when the provided icon width or height is equal to zero.
+  #[non_exhaustive]
+  DimensionsZero { width: u32, height: u32 },
+  /// Produced when the provided icon width or height is equal to zero.
+  #[non_exhaustive]
+  DimensionsMultiplyOverflow { width: u32, height: u32 },
+  /// Produced when underlying OS functionality failed to create the icon
+  OsError(io::Error),
+}
+
+impl fmt::Display for BadIcon {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+            BadIcon::ByteCountNotDivisibleBy4 { byte_count } => write!(f,
+                "The length of the `rgba` argument ({byte_count:?}) isn't divisible by 4, making it impossible to interpret as 32bpp RGBA pixels.",
+            ),
+            BadIcon::DimensionsVsPixelCount {
+                width,
+                height,
+                width_x_height,
+
+--- src/keyboard.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+//! **UNSTABLE** -- Types related to the keyboard.
+
+// This file contains a substantial portion of the UI Events Specification by the W3C. In
+// particular, the variant names within `Key` and `KeyCode` and their documentation are modified
+// versions of contents of the aforementioned specification.
+//
+// The original documents are:
+//
+// ### For `Key`
+// UI Events KeyboardEvent key Values
+// https://www.w3.org/TR/2017/CR-uievents-key-20170601/
+// Copyright © 2017 W3C® (MIT, ERCIM, Keio, Beihang).
+//
+// ### For `KeyCode`
+// UI Events KeyboardEvent code Values
+// https://www.w3.org/TR/2017/CR-uievents-code-20170601/
+// Copyright © 2017 W3C® (MIT, ERCIM, Keio, Beihang).
+//
+// These documents were used under the terms of the following license. This W3C license as well as
+// the W3C short notice apply to the `Key` and `KeyCode` enums and their variants and the
+// documentation attached to their variants.
+
+// --------- BEGGINING OF W3C LICENSE --------------------------------------------------------------
+//
+// License
+//
+// By obtaining and/or copying this work, you (the licensee) agree that you have read, understood,
+// and will comply with the following terms and conditions.
+//
+// Permission to copy, modify, and distribute this work, with or without modification, for any
+// purpose and without fee or royalty is hereby granted, provided that you include the following on
+// ALL copies of the work or portions thereof, including modifications:
+//
+// - The full text of this NOTICE in a location viewable to users of the redistributed or derivative
+//   work.
+// - Any pre-existing intellectual property disclaimers, notices, or terms and conditions. If none
+//   exist, the W3C Software and Document Short Notice should be included.
+// - Notice of any changes or modifications, through a copyright statement on the new code or
+//   document such as "This software or document includes material copied from or derived from
+//   [title and URI of the W3C document]. Copyright © [YEAR] W3C® (MIT, ERCIM, Keio, Beihang)."
+//
+// Disclaimers
+//
+// THIS WORK IS PROVIDED "AS IS," AND COPYRIGHT HOLDERS MAKE NO REPRESENTATIONS OR WARRANTIES,
+// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO, WARRANTIES OF MERCHANTABILITY OR FITNESS FOR
+// ANY PARTICULAR PURPOSE OR THAT THE USE OF THE SOFTWARE OR DOCUMENT WILL NOT INFRINGE ANY THIRD
+// PARTY PATENTS, COPYRIGHTS, TRADEMARKS OR OTHER RIGHTS.
+//
+// COPYRIGHT HOLDERS WILL NOT BE LIABLE FOR ANY DIRECT, INDIRECT, SPECIAL OR CONSEQUENTIAL DAMAGES
+// ARISING OUT OF ANY USE OF THE SOFTWARE OR DOCUMENT.
+//
+
+--- src/lib.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+//! Tao is a cross-platform application window creation and event loop management library.
+//!
+//! # Building windows
+//!
+//! Before you can build a [`Window`], you first need to build an [`EventLoop`]. This is done with the
+//! [`EventLoop::new()`] function.
+//!
+//! ```no_run
+//! use tao::event_loop::EventLoop;
+//! let event_loop = EventLoop::new();
+//! ```
+//!
+//! Once this is done there are two ways to create a [`Window`]:
+//!
+//!  - Calling [`Window::new(&event_loop)`][window_new].
+//!  - Calling [`let builder = WindowBuilder::new()`][window_builder_new] then [`builder.build(&event_loop)`][window_builder_build].
+//!
+//! The first method is the simplest, and will give you default values for everything. The second
+//! method allows you to customize the way your [`Window`] will look and behave by modifying the
+//! fields of the [`WindowBuilder`] object before you create the [`Window`].
+//!
+//! # Event handling
+//!
+//! Once a [`Window`] has been created, it will generate different *events*. A [`Window`] object can
+//! generate [`WindowEvent`]s when certain input events occur, such as a cursor moving over the
+//! window or a key getting pressed while the window is focused. Devices can generate
+//! [`DeviceEvent`]s, which contain unfiltered event data that isn't specific to a certain window.
+//! Some user activity, like mouse movement, can generate both a [`WindowEvent`] *and* a
+//! [`DeviceEvent`]. You can also create and handle your own custom [`UserEvent`]s, if desired.
+//!
+//! You can retrieve events by calling [`EventLoop::run`][event_loop_run]. This function will
+//! dispatch events for every [`Window`] that was created with that particular [`EventLoop`], and
+//! will run until the `control_flow` argument given to the closure is set to
+//! [`ControlFlow`]`::`[`ExitWithCode`] (which [`ControlFlow`]`::`[`Exit`] aliases to), at which
+//! point [`Event`]`::`[`LoopDestroyed`] is emitted and the entire program terminates.
+//!
+//! Tao no longer uses a `EventLoop::poll_events() -> impl Iterator<Event>`-based event loop
+//! model, since that can't be implemented properly on some platforms (e.g web, iOS) and works poorly on
+//! most other platforms. However, this model can be re-implemented to an extent with
+//! [`EventLoopExtRunReturn::run_return`]. See that method's documentation for more reasons about why
+//! it's discouraged, beyond compatibility reasons.
+//!
+//!
+//! ```no_run
+//! use tao::{
+//!     event::{Event, WindowEvent},
+//!     event_loop::{ControlFlow, EventLoop},
+//!     window::WindowBuilder,
+//! };
+//!
+//! let event_loop = EventLoop::new();
+
+--- src/monitor.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+//! Types useful for interacting with a user's monitors.
+//!
+//! If you want to get basic information about a monitor, you can use the [`MonitorHandle`][monitor_handle]
+//! type. This is retrieved from one of the following methods, which return an iterator of
+//! [`MonitorHandle`][monitor_handle]:
+//! - [`EventLoopWindowTarget::available_monitors`][loop_get]
+//! - [`Window::available_monitors`][window_get].
+//!
+//! [monitor_handle]: crate::monitor::MonitorHandle
+//! [loop_get]: crate::event_loop::EventLoopWindowTarget::available_monitors
+//! [window_get]: crate::window::Window::available_monitors
+use crate::{
+  dpi::{PhysicalPosition, PhysicalSize},
+  platform_impl,
+};
+
+/// Describes a fullscreen video mode of a monitor.
+///
+/// Can be acquired with:
+/// - [`MonitorHandle::video_modes`][monitor_get].
+///
+/// [monitor_get]: crate::monitor::MonitorHandle::video_modes
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct VideoMode {
+  pub(crate) video_mode: platform_impl::VideoMode,
+}
+
+impl std::fmt::Debug for VideoMode {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    self.video_mode.fmt(f)
+  }
+}
+
+impl PartialOrd for VideoMode {
+  fn partial_cmp(&self, other: &VideoMode) -> Option<std::cmp::Ordering> {
+    Some(self.cmp(other))
+  }
+}
+
+impl Ord for VideoMode {
+  fn cmp(&self, other: &VideoMode) -> std::cmp::Ordering {
+    // TODO: we can impl `Ord` for `PhysicalSize` once we switch from `f32`
+    // to `u32` there
+    let size: (u32, u32) = self.size().into();
+    let other_size: (u32, u32) = other.size().into();
+    self.monitor().cmp(&other.monitor()).then(
+      size
+        .cmp(&other_size)
+        .then(
+          self
+            .refresh_rate()
+
+--- src/platform/android.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+#![cfg(target_os = "android")]
+
+pub mod prelude {
+  pub use crate::platform_impl::ndk_glue::*;
+  pub use tao_macros::{android_fn, generate_package_name};
+}
+use crate::{
+  event_loop::{EventLoop, EventLoopWindowTarget},
+  platform_impl::ndk_glue::Rect,
+  window::{Window, WindowBuilder},
+};
+use ndk::configuration::Configuration;
+
+/// Additional methods on `EventLoop` that are specific to Android.
+pub trait EventLoopExtAndroid {}
+
+impl<T> EventLoopExtAndroid for EventLoop<T> {}
+
+/// Additional methods on `EventLoopWindowTarget` that are specific to Android.
+pub trait EventLoopWindowTargetExtAndroid {}
+
+/// Additional methods on `Window` that are specific to Android.
+pub trait WindowExtAndroid {
+  fn content_rect(&self) -> Rect;
+
+  fn config(&self) -> Configuration;
+
+  fn activity_name(&self) -> String;
+}
+
+impl WindowExtAndroid for Window {
+  fn content_rect(&self) -> Rect {
+    self.window.content_rect()
+  }
+
+  fn config(&self) -> Configuration {
+    self.window.config()
+  }
+
+  fn activity_name(&self) -> String {
+    self.window.activity_name().to_string()
+  }
+}
+
+impl<T> EventLoopWindowTargetExtAndroid for EventLoopWindowTarget<T> {}
+
+/// Additional methods on `WindowBuilder` that are specific to Android.
+pub trait WindowBuilderExtAndroid {
+  /// The name of the activity class to create.
+  fn with_activity_name(self, activity_name: String) -> Self;
+
+
+--- src/platform/ios.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+#![cfg(target_os = "ios")]
+
+use std::os::raw::c_void;
+
+use crate::{
+  event_loop::{EventLoop, EventLoopWindowTarget},
+  monitor::{MonitorHandle, VideoMode},
+  platform_impl::set_badge_count,
+  window::{Window, WindowBuilder},
+};
+
+/// Additional methods on [`EventLoop`] that are specific to iOS.
+pub trait EventLoopExtIOS {
+  /// Returns the [`Idiom`] (phone/tablet/tv/etc) for the current device.
+  fn idiom(&self) -> Idiom;
+}
+
+impl<T: 'static> EventLoopExtIOS for EventLoop<T> {
+  fn idiom(&self) -> Idiom {
+    self.event_loop.idiom()
+  }
+}
+
+/// Additional methods on [`Window`] that are specific to iOS.
+pub trait WindowExtIOS {
+  /// Returns a pointer to the [`UIWindow`] that is used by this window.
+  ///
+  /// The pointer will become invalid when the [`Window`] is destroyed.
+  ///
+  /// [`UIWindow`]: https://developer.apple.com/documentation/uikit/uiwindow?language=objc
+  fn ui_window(&self) -> *mut c_void;
+
+  /// Returns a pointer to the [`UIViewController`] that is used by this window.
+  ///
+  /// The pointer will become invalid when the [`Window`] is destroyed.
+  ///
+  /// [`UIViewController`]: https://developer.apple.com/documentation/uikit/uiviewcontroller?language=objc
+  fn ui_view_controller(&self) -> *mut c_void;
+
+  /// Returns a pointer to the [`UIView`] that is used by this window.
+  ///
+  /// The pointer will become invalid when the [`Window`] is destroyed.
+  ///
+  /// [`UIView`]: https://developer.apple.com/documentation/uikit/uiview?language=objc
+  fn ui_view(&self) -> *mut c_void;
+
+  /// Sets the [`contentScaleFactor`] of the underlying [`UIWindow`] to `scale_factor`.
+  ///
+  /// The default value is device dependent, and it's recommended GLES or Metal applications set
+  /// this to [`MonitorHandle::scale_factor()`].
+  ///
+
+--- src/platform/linux.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+#![cfg(target_os = "linux")]
+
+
+--- src/platform/macos.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+#![cfg(target_os = "macos")]
+
+use std::os::raw::c_void;
+
+use objc2_foundation::NSObject;
+
+use crate::{
+  dpi::{LogicalSize, Position},
+  event_loop::{EventLoop, EventLoopWindowTarget},
+  monitor::MonitorHandle,
+  platform_impl::{get_aux_state_mut, set_badge_label, set_dock_visibility, Parent},
+  window::{Window, WindowBuilder},
+};
+
+/// Additional methods on `Window` that are specific to MacOS.
+pub trait WindowExtMacOS {
+  /// Returns a pointer to the cocoa `NSWindow` that is used by this window.
+  ///
+  /// The pointer will become invalid when the `Window` is destroyed.
+  fn ns_window(&self) -> *mut c_void;
+
+  /// Returns a pointer to the cocoa `NSView` that is used by this window.
+  ///
+  /// The pointer will become invalid when the `Window` is destroyed.
+  fn ns_view(&self) -> *mut c_void;
+
+  /// Returns whether or not the window is in simple fullscreen mode.
+  fn simple_fullscreen(&self) -> bool;
+
+  /// Toggles a fullscreen mode that doesn't require a new macOS space.
+  /// Returns a boolean indicating whether the transition was successful (this
+  /// won't work if the window was already in the native fullscreen).
+  ///
+  /// This is how fullscreen used to work on macOS in versions before Lion.
+  /// And allows the user to have a fullscreen window without using another
+  /// space or taking control over the entire monitor.
+  fn set_simple_fullscreen(&self, fullscreen: bool) -> bool;
+
+  /// Returns whether or not the window has shadow.
+  fn has_shadow(&self) -> bool;
+
+  /// Sets whether or not the window has shadow.
+  fn set_has_shadow(&self, has_shadow: bool);
+
+  /// Set the window traffic light position relative to the upper left corner
+  fn set_traffic_light_inset<P: Into<Position>>(&self, position: P);
+  /// Put the window in a state which indicates a file save is required.
+  ///
+  /// <https://developer.apple.com/documentation/appkit/nswindow/1419311-isdocumentedited>
+  fn set_is_document_edited(&self, edited: bool);
+
+
+--- src/platform/mod.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+//! Contains traits with platform-specific methods in them.
+//!
+//! Contains the follow OS-specific modules:
+//!
+//!  - `android`
+//!  - `ios`
+//!  - `macos`
+//!  - `unix`
+//!  - `linux`
+//!  - `windows`
+//!
+//! And the following platform-specific module:
+//!
+//! - `run_return` (available on `windows`, `unix`, `macos`, and `android`)
+//!
+//! However only the module corresponding to the platform you're compiling to will be available.
+
+pub mod android;
+pub mod ios;
+pub mod linux;
+pub mod macos;
+pub mod run_return;
+pub mod unix;
+pub mod windows;
+
+
+--- src/platform/run_return.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+#![cfg(not(target_os = "ios"))]
+
+use crate::{
+  event::Event,
+  event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget},
+};
+
+/// Additional methods on `EventLoop` to return control flow to the caller.
+pub trait EventLoopExtRunReturn {
+  /// A type provided by the user that can be passed through `Event::UserEvent`.
+  type UserEvent;
+
+  /// Initializes the `tao` event loop.
+  ///
+  /// Unlike `run`, this function accepts non-`'static` (i.e. non-`move`) closures and returns
+  /// control flow to the caller when `control_flow` is set to `ControlFlow::Exit`.
+  ///
+  /// # Caveats
+  /// Despite its appearance at first glance, this is *not* a perfect replacement for
+  /// `poll_events`. For example, this function will not return on Windows or macOS while a
+  /// window is getting resized, resulting in all application logic outside of the
+  /// `event_handler` closure not running until the resize operation ends. Other OS operations
+  /// may also result in such freezes. This behavior is caused by fundamental limitations in the
+  /// underlying OS APIs, which cannot be hidden by `tao` without severe stability repercussions.
+  ///
+  /// You are strongly encouraged to use `run`, unless the use of this is absolutely necessary.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **Unix-alikes** (**X11** or **Wayland**): This function returns `1` upon disconnection from
+  ///   the display server.
+  fn run_return<F>(&mut self, event_handler: F) -> i32
+  where
+    F: FnMut(Event<'_, Self::UserEvent>, &EventLoopWindowTarget<Self::UserEvent>, &mut ControlFlow);
+}
+
+impl<T> EventLoopExtRunReturn for EventLoop<T> {
+  type UserEvent = T;
+
+  fn run_return<F>(&mut self, event_handler: F) -> i32
+  where
+    F: FnMut(Event<'_, Self::UserEvent>, &EventLoopWindowTarget<Self::UserEvent>, &mut ControlFlow),
+  {
+    self.event_loop.run_return(event_handler)
+  }
+}
+
+
+--- src/platform/unix.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+#![cfg(any(
+  target_os = "linux",
+  target_os = "dragonfly",
+  target_os = "freebsd",
+  target_os = "netbsd",
+  target_os = "openbsd"
+))]
+
+#[cfg(feature = "x11")]
+use std::{os::raw::c_int, sync::Arc};
+
+// XConnection utilities
+#[doc(hidden)]
+#[cfg(feature = "x11")]
+pub use crate::platform_impl::x11;
+
+#[cfg(feature = "x11")]
+use crate::platform_impl::x11::xdisplay::XError;
+pub use crate::platform_impl::EventLoop as UnixEventLoop;
+use crate::{
+  error::{ExternalError, OsError},
+  event_loop::{EventLoopBuilder, EventLoopWindowTarget},
+  monitor::MonitorHandle,
+  platform_impl::{Parent, Window as UnixWindow},
+  window::{Window, WindowBuilder},
+};
+
+#[cfg(feature = "x11")]
+use self::x11::xdisplay::XConnection;
+
+/// Additional methods on `EventLoop` that are specific to Unix.
+pub trait EventLoopBuilderExtUnix {
+  /// Whether to allow the event loop to be created off of the main thread.
+  ///
+  /// By default, the window is only allowed to be created on the main
+  /// thread, to make platform compatibility easier.
+  ///
+  /// # `Window` caveats
+  ///
+  /// Note that any `Window` created on the new thread will be destroyed when the thread
+  /// terminates. Attempting to use a `Window` after its parent thread terminates has
+  /// unspecified, although explicitly not undefined, behavior.
+  fn with_any_thread(&mut self, any_thread: bool) -> &mut Self;
+
+  /// Set the gtk application id.
+  ///
+  /// If no application ID is given then some features (most notably application uniqueness) will be disabled.
+  fn with_app_id<S: Into<String>>(&mut self, id: S) -> &mut Self;
+}
+
+impl<T> EventLoopBuilderExtUnix for EventLoopBuilder<T> {
+
+--- src/platform/windows.rs ---
+// Copyright 2014-2021 The tao contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+#![cfg(target_os = "windows")]
+
+use std::path::Path;
+
+use crate::{
+  dpi::PhysicalSize,
+  error::ExternalError,
+  event::DeviceId,
+  event_loop::EventLoopBuilder,
+  monitor::MonitorHandle,
+  platform_impl::{Parent, WinIcon},
+  window::{BadIcon, Icon, Theme, Window, WindowBuilder},
+};
+use windows::Win32::UI::Input::KeyboardAndMouse::*;
+
+pub type HWND = isize;
+pub type HMENU = isize;
+
+/// Additional methods on `EventLoop` that are specific to Windows.
+pub trait EventLoopBuilderExtWindows {
+  /// Whether to allow the event loop to be created off of the main thread.
+  ///
+  /// By default, the window is only allowed to be created on the main
+  /// thread, to make platform compatibility easier.
+  ///
+  /// # `Window` caveats
+  ///
+  /// Note that any `Window` created on the new thread will be destroyed when the thread
+  /// terminates. Attempting to use a `Window` after its parent thread terminates has
+  /// unspecified, although explicitly not undefined, behavior.
+  fn with_any_thread(&mut self, any_thread: bool) -> &mut Self;
+
+  /// Whether to enable process-wide DPI awareness.
+  ///
+  /// By default, `tao` will attempt to enable process-wide DPI awareness. If
+  /// that's undesirable, you can disable it with this function.
+  ///
+  /// # Example
+  ///
+  /// Disable process-wide DPI awareness.
+  ///
+  /// ```
+  /// use tao::event_loop::EventLoopBuilder;
+  /// #[cfg(target_os = "windows")]
+  /// use tao::platform::windows::EventLoopBuilderExtWindows;
+  ///
+  /// let mut builder = EventLoopBuilder::new();
+  /// #[cfg(target_os = "windows")]
+  /// builder.with_dpi_aware(false);
+  /// # if false { // We can't test this part
+  /// let event_loop = builder.build();
+
+--- src/platform_impl/android/mod.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use crate::{
+  dpi::{PhysicalPosition, PhysicalSize, Position, Size},
+  error, event,
+  event_loop::{self, ControlFlow},
+  keyboard::{KeyCode, NativeKeyCode},
+  monitor,
+  window::{self, ResizeDirection, Theme, WindowSizeConstraints},
+};
+use crossbeam_channel::{Receiver, Sender};
+use ndk::{
+  configuration::Configuration,
+  looper::{ForeignLooper, Poll, ThreadLooper},
+};
+use std::{
+  collections::{HashSet, VecDeque},
+  error::Error,
+  fmt,
+  sync::{LazyLock, RwLock},
+  time::{Duration, Instant},
+};
+
+#[derive(Debug)]
+pub struct JniCallError {
+  source: jni::errors::Error,
+  java_exception: Option<String>,
+}
+
+impl JniCallError {
+  fn new(source: jni::errors::Error, java_exception: Option<String>) -> Self {
+    Self {
+      source,
+      java_exception,
+    }
+  }
+}
+
+impl From<jni::errors::Error> for JniCallError {
+  fn from(source: jni::errors::Error) -> Self {
+    Self::new(source, None)
+  }
+}
+
+impl fmt::Display for JniCallError {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match &self.java_exception {
+      Some(java_exception) => write!(f, "{}: {java_exception}", self.source),
+      None => self.source.fmt(f),
+    }
+  }
+}
+
+
+--- src/platform_impl/android/ndk_glue.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use crate::window::WindowId;
+use crossbeam_channel::Sender;
+pub use jni::{
+  self,
+  errors::Result as JniResult,
+  objects::{GlobalRef, JClass, JMap, JObject, JString},
+  sys::jobject,
+  JNIEnv,
+};
+use log::Level;
+pub use ndk;
+use ndk::{
+  input_queue::InputQueue,
+  looper::{FdEvent, ForeignLooper, ThreadLooper},
+};
+use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
+use std::{
+  collections::{BTreeMap, HashSet},
+  ffi::{c_void, CStr, CString},
+  fs::File,
+  io::{BufRead, BufReader},
+  os::unix::prelude::*,
+  sync::{Arc, Condvar, LazyLock, Mutex, OnceLock, RwLock, RwLockReadGuard},
+  thread,
+  time::Duration,
+};
+
+/// Android pacakge name that could be used to reference classes
+/// in the android project.
+pub static PACKAGE: OnceLock<&str> = OnceLock::new();
+
+/// Character set for encoding text content in data URLs.
+/// Encodes all control characters and special characters that might cause issues in URLs.
+const DATA_URL_ENCODING_SET: &AsciiSet = &CONTROLS
+  .add(b' ')
+  .add(b'"')
+  .add(b'#')
+  .add(b'%')
+  .add(b'&')
+  .add(b'<')
+  .add(b'>')
+  .add(b'?')
+  .add(b'[')
+  .add(b'\\')
+  .add(b']')
+  .add(b'^')
+  .add(b'`')
+  .add(b'{')
+  .add(b'|')
+  .add(b'}');
+
+
+--- src/platform_impl/ios/app_state.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+#![deny(unused_results)]
+
+use std::{
+  cell::{RefCell, RefMut},
+  collections::HashSet,
+  mem,
+  os::raw::c_void,
+  ptr,
+  time::Instant,
+};
+
+use objc2::{rc::Retained, runtime::AnyObject, MainThreadMarker, Message};
+use objc2_ui_kit::{UIApplication, UIScene, UISceneConnectionOptions, UIWindowScene};
+
+use crate::{
+  dpi::LogicalSize,
+  event::{Event, StartCause, WindowEvent},
+  event_loop::ControlFlow,
+  platform_impl::platform::{
+    event_loop::{EventHandler, EventProxy, EventWrapper},
+    ffi::{
+      id, kCFRunLoopCommonModes, CFAbsoluteTimeGetCurrent, CFRelease, CFRunLoopAddTimer,
+      CFRunLoopGetMain, CFRunLoopRef, CFRunLoopTimerCreate, CFRunLoopTimerInvalidate,
+      CFRunLoopTimerRef, CFRunLoopTimerSetNextFireDate, CGRect, CGSize, NSInteger,
+      NSOperatingSystemVersion, NSUInteger,
+    },
+    scene::scene_lifecycle_enabled,
+  },
+  window::WindowId as RootWindowId,
+};
+
+macro_rules! bug {
+    ($($msg:tt)*) => {
+        panic!("tao iOS bug, file an issue: {}", format!($($msg)*))
+    };
+}
+
+macro_rules! bug_assert {
+    ($test:expr, $($msg:tt)*) => {
+        assert!($test, "tao iOS bug, file an issue: {}", format!($($msg)*))
+    };
+}
+
+enum UserCallbackTransitionResult<'a> {
+  Success {
+    event_handler: Box<dyn EventHandler>,
+    active_control_flow: ControlFlow,
+    processing_redraws: bool,
+  },
+  ReentrancyPrevented {
+    queued_events: &'a mut Vec<EventWrapper>,
+
+--- src/platform_impl/ios/event_loop.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{
+  collections::VecDeque,
+  ffi::c_void,
+  fmt::{self, Debug},
+  marker::PhantomData,
+  mem, ptr,
+};
+
+use crossbeam_channel::{self as channel, Receiver, Sender};
+
+use crate::{
+  dpi::{LogicalSize, PhysicalPosition},
+  error::ExternalError,
+  event::Event,
+  event_loop::{ControlFlow, EventLoopClosed, EventLoopWindowTarget as RootEventLoopWindowTarget},
+  monitor::MonitorHandle as RootMonitorHandle,
+  platform::ios::Idiom,
+};
+
+use crate::platform_impl::platform::{
+  app_state,
+  ffi::{
+    id, kCFRunLoopAfterWaiting, kCFRunLoopBeforeWaiting, kCFRunLoopCommonModes,
+    kCFRunLoopDefaultMode, kCFRunLoopEntry, kCFRunLoopExit, nil, CFIndex, CFRelease,
+    CFRunLoopActivity, CFRunLoopAddObserver, CFRunLoopAddSource, CFRunLoopGetMain,
+    CFRunLoopObserverCreate, CFRunLoopObserverRef, CFRunLoopSourceContext, CFRunLoopSourceCreate,
+    CFRunLoopSourceInvalidate, CFRunLoopSourceRef, CFRunLoopSourceSignal, CFRunLoopWakeUp,
+    NSStringRust, UIApplicationMain, UIUserInterfaceIdiom,
+  },
+  monitor, set_badge_count, view, MonitorHandle,
+};
+
+#[non_exhaustive]
+#[derive(Debug)]
+pub enum EventWrapper {
+  StaticEvent(Event<'static, Never>),
+  EventProxy(EventProxy),
+}
+
+#[non_exhaustive]
+#[derive(Debug, PartialEq)]
+pub enum EventProxy {
+  DpiChangedProxy {
+    window_id: id,
+    suggested_size: LogicalSize<f64>,
+    scale_factor: f64,
+  },
+}
+
+#[derive(Clone)]
+pub struct EventLoopWindowTarget<T: 'static> {
+
+--- src/platform_impl/ios/ffi.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+#![allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
+
+use std::{convert::TryInto, ffi::CString, ops::BitOr, os::raw::*};
+
+use objc2::{
+  encode::{Encode, Encoding},
+  runtime::{AnyObject, Bool},
+};
+
+use crate::{
+  dpi::LogicalSize,
+  platform::ios::{Idiom, ScreenEdge, ValidOrientations},
+};
+
+pub type id = *mut AnyObject;
+pub const nil: id = 0 as id;
+
+#[allow(non_camel_case_types)]
+pub type BOOL = Bool;
+#[allow(deprecated)]
+pub const YES: Bool = Bool::YES;
+#[allow(deprecated)]
+pub const NO: Bool = Bool::NO;
+
+#[cfg(target_pointer_width = "32")]
+pub type CGFloat = f32;
+#[cfg(target_pointer_width = "64")]
+pub type CGFloat = f64;
+
+pub type NSInteger = isize;
+pub type NSUInteger = usize;
+
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct NSOperatingSystemVersion {
+  pub major: NSInteger,
+  pub minor: NSInteger,
+  pub patch: NSInteger,
+}
+
+unsafe impl Encode for NSOperatingSystemVersion {
+  const ENCODING: Encoding = Encoding::Struct(
+    "?",
+    &[
+      NSInteger::ENCODING,
+      NSInteger::ENCODING,
+      NSInteger::ENCODING,
+    ],
+  );
+}
+
+
+--- src/platform_impl/ios/keycode.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use crate::keyboard::{KeyCode, NativeKeyCode};
+
+pub fn keycode_to_scancode(_code: KeyCode) -> Option<u32> {
+  None
+}
+
+pub fn keycode_from_scancode(_scancode: u32) -> KeyCode {
+  KeyCode::Unidentified(NativeKeyCode::Unidentified)
+}
+
+
+--- src/platform_impl/ios/mod.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+//! iOS support
+//!
+//! # Building app
+//! To build ios app you will need rustc built for this targets:
+//!
+//!  - armv7-apple-ios
+//!  - armv7s-apple-ios
+//!  - i386-apple-ios
+//!  - aarch64-apple-ios
+//!  - x86_64-apple-ios
+//!
+//! Then
+//!
+//! ```
+//! cargo build --target=...
+//! ```
+//! The simplest way to integrate your app into xcode environment is to build it
+//! as a static library. Wrap your main function and export it.
+//!
+//! ```rust, ignore
+//! #[no_mangle]
+//! pub extern fn start_tao_app() {
+//!     start_inner()
+//! }
+//!
+//! fn start_inner() {
+//!    ...
+//! }
+//! ```
+//!
+//! Compile project and then drag resulting .a into Xcode project. Add tao.h to xcode.
+//!
+//! ```ignore
+//! void start_tao_app();
+//! ```
+//!
+//! Use start_tao_app inside your xcode's main function.
+//!
+//!
+//! # App lifecycle and events
+//!
+//! iOS environment is very different from other platforms and you must be very
+//! careful with it's events. Familiarize yourself with
+//! [app lifecycle](https://developer.apple.com/library/ios/documentation/UIKit/Reference/UIApplicationDelegate_Protocol/).
+//!
+//!
+//! This is how those event are represented in tao:
+//!
+//!  - sceneWillEnterForeground is WindowEvent::Resumed for each window in the scene
+//!  - sceneWillResignActive is WindowEvent::Suspended for each window in the scene
+//!  - applicationWillEnterForeground is WindowEvent::Resumed for each window in non-scene apps
+
+--- src/platform_impl/ios/monitor.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{
+  collections::{BTreeSet, VecDeque},
+  fmt,
+  ops::{Deref, DerefMut},
+};
+
+use crate::{
+  dpi::{PhysicalPosition, PhysicalSize},
+  monitor::{MonitorHandle as RootMonitorHandle, VideoMode as RootVideoMode},
+  platform_impl::platform::{
+    app_state,
+    ffi::{id, nil, CGFloat, CGRect, CGSize, NSInteger, NSUInteger},
+  },
+};
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct VideoMode {
+  pub(crate) size: (u32, u32),
+  pub(crate) bit_depth: u16,
+  pub(crate) refresh_rate: u16,
+  pub(crate) screen_mode: NativeDisplayMode,
+  pub(crate) monitor: MonitorHandle,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct NativeDisplayMode(pub id);
+
+unsafe impl Send for NativeDisplayMode {}
+
+impl Drop for NativeDisplayMode {
+  fn drop(&mut self) {
+    unsafe {
+      let () = msg_send![self.0, release];
+    }
+  }
+}
+
+impl Clone for NativeDisplayMode {
+  fn clone(&self) -> Self {
+    unsafe {
+      let _: id = msg_send![self.0, retain];
+    }
+    NativeDisplayMode(self.0)
+  }
+}
+
+impl Clone for VideoMode {
+  fn clone(&self) -> VideoMode {
+    VideoMode {
+      size: self.size,
+      bit_depth: self.bit_depth,
+
+--- src/platform_impl/ios/scene.rs ---
+// Copyright 2021-2025 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use objc2::{define_class, rc::Retained, MainThreadMarker, MainThreadOnly};
+use objc2_foundation::{
+  NSBundle, NSError, NSObject, NSObjectProtocol, NSSet, NSString, NSUserActivity,
+};
+use objc2_ui_kit::{
+  UIApplication, UIOpenURLContext, UIScene, UISceneConnectionOptions, UISceneDelegate,
+  UISceneSession, UISceneWindowingControlStyle, UIWindowScene, UIWindowSceneDelegate,
+};
+
+use crate::{
+  event::{Event, WindowEvent},
+  platform_impl::platform::{app_state, event_loop::EventWrapper},
+  window::WindowId as RootWindowId,
+};
+
+// true when the app enabled `UIApplicationSupportsMultipleScenes` in its Info.plist
+// and the device allows it to display multiple scenes
+// https://developer.apple.com/documentation/uikit/uiapplication/supportsmultiplescenes?language=objc
+pub unsafe fn app_supports_multiple_scenes() -> bool {
+  let mtm = MainThreadMarker::new().unwrap();
+  let application = UIApplication::sharedApplication(mtm);
+  application.supportsMultipleScenes()
+}
+
+// check whether the app adopted the scene lifecycle by declaring a
+// `UIApplicationSceneManifest` in its Info.plist
+//
+// such apps get their windows and their lifecycle callbacks from a `UISceneDelegate`
+// instead of the application delegate, so a `UIWindow` is only visible once it is
+// attached to a scene
+// https://developer.apple.com/documentation/bundleresources/information-property-list/uiapplicationscenemanifest
+pub unsafe fn scene_lifecycle_enabled() -> bool {
+  let bundle = NSBundle::mainBundle();
+  let Some(info) = bundle.infoDictionary() else {
+    return false;
+  };
+
+  let key = NSString::from_str("UIApplicationSceneManifest");
+  (*info).objectForKey(&key).is_some()
+}
+
+unsafe fn handle_scene_window_events(scene: &UIScene, event: impl Fn() -> WindowEvent<'static>) {
+  if let Some(window_scene) = scene.downcast_ref::<UIWindowScene>() {
+    let windows = window_scene.windows();
+
+    if windows.is_empty() {
+      log::debug!("scene has no windows; no window events were emitted");
+    }
+
+    for window in windows {
+      app_state::handle_nonuser_event(EventWrapper::StaticEvent(Event::WindowEvent {
+        window_id: RootWindowId(window.into()),
+
+--- src/platform_impl/ios/view.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{
+  collections::HashMap,
+  ffi::{c_char, CStr, CString},
+};
+
+use objc2::{
+  rc::Retained,
+  runtime::{AnyClass as Class, AnyObject as Object, ClassBuilder as ClassDecl, Sel},
+  ClassType, MainThreadMarker,
+};
+use objc2_ui_kit::{
+  UIApplication, UISceneActivationRequestOptions, UISceneConfiguration, UISceneSession,
+  UISceneSessionActivationRequest,
+};
+
+use crate::{
+  dpi::PhysicalPosition,
+  event::{DeviceId as RootDeviceId, Event, Force, Touch, TouchPhase, WindowEvent},
+  platform::ios::{operating_system_version, MonitorHandleExtIOS},
+  platform_impl::platform::{
+    app_state::{self, OSCapabilities},
+    event_loop::{self, EventProxy, EventWrapper},
+    ffi::{
+      id, nil, CGFloat, CGPoint, CGRect, UIForceTouchCapability, UIInterfaceOrientationMask,
+      UIRectEdge, UITouchPhase, UITouchType, BOOL, NO, YES,
+    },
+    scene::app_supports_multiple_scenes,
+    window::PlatformSpecificWindowBuilderAttributes,
+    DeviceId,
+  },
+  window::{Fullscreen, WindowAttributes, WindowId as RootWindowId},
+};
+
+macro_rules! add_property {
+    (
+        $decl:ident,
+        $name:ident: $t:ty,
+        $setter_name:ident: |$object:ident| $after_set:expr,
+        $getter_name:ident,
+    ) => {
+        add_property!(
+            $decl,
+            $name: $t,
+            $setter_name: true, |_, _|{}; |$object| $after_set,
+            $getter_name,
+        )
+    };
+    (
+        $decl:ident,
+        $name:ident: $t:ty,
+        $setter_name:ident: $capability:expr, $err:expr; |$object:ident| $after_set:expr,
+
+--- src/platform_impl/ios/window.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{
+  collections::VecDeque,
+  ops::{Deref, DerefMut},
+};
+
+use objc2::{
+  rc::Retained,
+  runtime::{AnyClass, AnyObject},
+  MainThreadMarker,
+};
+use objc2_ui_kit::{
+  UIApplication, UISceneActivationState, UISceneSessionActivationRequest, UIWindow,
+};
+
+use crate::{
+  dpi::{self, LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize, Position, Size},
+  error::{ExternalError, NotSupportedError, OsError as RootOsError},
+  event::{Event, WindowEvent},
+  icon::Icon,
+  monitor::MonitorHandle as RootMonitorHandle,
+  platform::ios::{operating_system_version, MonitorHandleExtIOS, ScreenEdge, ValidOrientations},
+  platform_impl::platform::{
+    app_state,
+    event_loop::{self, EventProxy, EventWrapper},
+    ffi::{
+      id, CGFloat, CGPoint, CGRect, CGSize, UIEdgeInsets, UIInterfaceOrientationMask, UIRectEdge,
+      UIScreenOverscanCompensation, NO, YES,
+    },
+    monitor, set_badge_count, view, EventLoopWindowTarget, MonitorHandle,
+  },
+  window::{
+    CursorIcon, Fullscreen, ResizeDirection, Theme, UserAttentionType, WindowAttributes,
+    WindowId as RootWindowId, WindowSizeConstraints,
+  },
+};
+
+pub struct Inner {
+  pub window: id,
+  pub view_controller: id,
+  pub view: id,
+  gl_or_metal_backed: bool,
+}
+
+impl Drop for Inner {
+  fn drop(&mut self) {
+    unsafe {
+      let window = self.window();
+      if let Some(scene) = window.windowScene() {
+        // our windows are tied to scenes - so when this is the last window of the scene,
+        // request the scene to be destroyed
+        if scene.windows().count() == 1 {
+
+--- src/platform_impl/linux/event_loop.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{
+  cell::{Cell, RefCell},
+  collections::{HashSet, VecDeque},
+  error::Error,
+  process,
+  rc::Rc,
+  sync::atomic::{AtomicBool, Ordering},
+  time::Instant,
+};
+
+use cairo::{RectangleInt, Region};
+use crossbeam_channel::SendError;
+use gdk::{Cursor, CursorType, EventKey, EventMask, ScrollDirection, WindowEdge, WindowState};
+use gio::Cancellable;
+use glib::{source::Priority, MainContext};
+use gtk::{
+  cairo, gdk, gio,
+  glib::{self},
+  prelude::*,
+  Settings,
+};
+
+#[cfg(feature = "x11")]
+use crate::platform_impl::platform::device;
+use crate::{
+  dpi::{LogicalPosition, LogicalSize, PhysicalPosition},
+  error::ExternalError,
+  event::{
+    ElementState, Event, MouseButton, MouseScrollDelta, StartCause, TouchPhase, WindowEvent,
+  },
+  event_loop::{ControlFlow, EventLoopClosed, EventLoopWindowTarget as RootELW},
+  keyboard::ModifiersState,
+  monitor::MonitorHandle as RootMonitorHandle,
+  platform_impl::platform::DEVICE_ID,
+  window::{
+    CursorIcon, Fullscreen, ProgressBarState, ResizeDirection, Theme, WindowId as RootWindowId,
+  },
+};
+
+use super::{
+  keyboard,
+  monitor::{self, MonitorHandle},
+  taskbar, util,
+  window::{WindowId, WindowRequest},
+};
+
+use taskbar::TaskbarIndicator;
+
+#[derive(Clone)]
+pub struct EventLoopWindowTarget<T> {
+  /// Gdk display
+
+--- src/platform_impl/linux/icon.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use gtk::gdk_pixbuf::{Colorspace, Pixbuf};
+
+use crate::window::BadIcon;
+
+/// An icon used for the window titlebar, taskbar, etc.
+#[derive(Debug, Clone)]
+pub struct PlatformIcon {
+  raw: Vec<u8>,
+  width: i32,
+  height: i32,
+  row_stride: i32,
+}
+
+impl From<PlatformIcon> for Pixbuf {
+  fn from(icon: PlatformIcon) -> Self {
+    Pixbuf::from_mut_slice(
+      icon.raw,
+      Colorspace::Rgb,
+      true,
+      8,
+      icon.width,
+      icon.height,
+      icon.row_stride,
+    )
+  }
+}
+
+impl PlatformIcon {
+  /// Creates an `Icon` from 32bpp RGBA data.
+  ///
+  /// The length of `rgba` must be divisible by 4, and `width * height` must equal
+  /// `rgba.len() / 4`. Otherwise, this will return a `BadIcon` error.
+  pub fn from_rgba(rgba: Vec<u8>, width: u32, height: u32) -> Result<Self, BadIcon> {
+    let row_stride =
+      Pixbuf::calculate_rowstride(Colorspace::Rgb, true, 8, width as i32, height as i32);
+    Ok(Self {
+      raw: rgba,
+      width: width as i32,
+      height: height as i32,
+      row_stride,
+    })
+  }
+}
+
+
+--- src/platform_impl/linux/keyboard.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use super::KeyEventExtra;
+use crate::{
+  event::{ElementState, KeyEvent},
+  keyboard::{Key, KeyCode, KeyLocation, ModifiersState, NativeKeyCode},
+};
+use gtk::{
+  gdk::{self, keys::constants::*, EventKey},
+  glib,
+};
+use std::{
+  collections::HashSet,
+  ffi::c_void,
+  os::raw::{c_int, c_uint},
+  ptr, slice,
+  sync::{LazyLock, Mutex},
+};
+
+pub type RawKey = gdk::keys::Key;
+
+static KEY_STRINGS: LazyLock<Mutex<HashSet<&'static str>>> =
+  LazyLock::new(|| Mutex::new(HashSet::new()));
+
+fn insert_or_get_key_str(string: String) -> &'static str {
+  let mut string_set = KEY_STRINGS.lock().unwrap();
+  if let Some(contained) = string_set.get(string.as_str()) {
+    return contained;
+  }
+  let static_str = Box::leak(string.into_boxed_str());
+  string_set.insert(static_str);
+  static_str
+}
+
+#[allow(clippy::just_underscores_and_digits, non_upper_case_globals)]
+pub(crate) fn raw_key_to_key(gdk_key: RawKey) -> Option<Key<'static>> {
+  match gdk_key {
+    Escape => Some(Key::Escape),
+    BackSpace => Some(Key::Backspace),
+    Tab | ISO_Left_Tab => Some(Key::Tab),
+    Return => Some(Key::Enter),
+    Control_L | Control_R => Some(Key::Control),
+    Alt_L | Alt_R => Some(Key::Alt),
+    Shift_L | Shift_R => Some(Key::Shift),
+    // TODO: investigate mapping. Map Meta_[LR]?
+    Super_L | Super_R => Some(Key::Super),
+    Caps_Lock => Some(Key::CapsLock),
+    F1 => Some(Key::F1),
+    F2 => Some(Key::F2),
+    F3 => Some(Key::F3),
+    F4 => Some(Key::F4),
+    F5 => Some(Key::F5),
+    F6 => Some(Key::F6),
+
+--- src/platform_impl/linux/keycode.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use crate::keyboard::{KeyCode, NativeKeyCode};
+
+pub fn keycode_to_scancode(code: KeyCode) -> Option<u32> {
+  // See `from_scancode` for more info
+  match code {
+    KeyCode::Backquote => Some(0x0031),
+    KeyCode::Backslash => Some(0x0033),
+    KeyCode::Backspace => Some(0x0016),
+    KeyCode::BracketLeft => Some(0x0022),
+    KeyCode::BracketRight => Some(0x001B),
+    KeyCode::Comma => Some(0x003B),
+    KeyCode::Digit0 => Some(0x0013),
+    KeyCode::Digit1 => Some(0x000A),
+    KeyCode::Digit2 => Some(0x000B),
+    KeyCode::Digit3 => Some(0x000C),
+    KeyCode::Digit4 => Some(0x000D),
+    KeyCode::Digit5 => Some(0x000E),
+    KeyCode::Digit6 => Some(0x000F),
+    KeyCode::Digit7 => Some(0x0010),
+    KeyCode::Digit8 => Some(0x0011),
+    KeyCode::Digit9 => Some(0x0012),
+    KeyCode::Equal => Some(0x0015),
+    KeyCode::IntlBackslash => Some(0x005E),
+    KeyCode::IntlRo => Some(0x0061),
+    KeyCode::IntlYen => Some(0x0084),
+    KeyCode::KeyA => Some(0x0026),
+    KeyCode::KeyB => Some(0x0038),
+    KeyCode::KeyC => Some(0x0036),
+    KeyCode::KeyD => Some(0x0028),
+    KeyCode::KeyE => Some(0x001A),
+    KeyCode::KeyF => Some(0x0029),
+    KeyCode::KeyG => Some(0x002A),
+    KeyCode::KeyH => Some(0x002B),
+    KeyCode::KeyI => Some(0x001F),
+    KeyCode::KeyJ => Some(0x002C),
+    KeyCode::KeyK => Some(0x002D),
+    KeyCode::KeyL => Some(0x002E),
+    KeyCode::KeyM => Some(0x002E),
+    KeyCode::KeyN => Some(0x0039),
+    KeyCode::KeyO => Some(0x0020),
+    KeyCode::KeyP => Some(0x0021),
+    KeyCode::KeyQ => Some(0x0018),
+    KeyCode::KeyR => Some(0x001B),
+    KeyCode::KeyS => Some(0x0027),
+    KeyCode::KeyT => Some(0x001C),
+    KeyCode::KeyU => Some(0x001E),
+    KeyCode::KeyV => Some(0x0037),
+    KeyCode::KeyW => Some(0x0019),
+    KeyCode::KeyX => Some(0x0035),
+    KeyCode::KeyY => Some(0x001D),
+    KeyCode::KeyZ => Some(0x0034),
+
+--- src/platform_impl/linux/mod.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+#[cfg(feature = "x11")]
+mod device;
+mod event_loop;
+mod icon;
+mod keyboard;
+mod keycode;
+mod monitor;
+#[cfg(feature = "dbus")]
+mod portal;
+mod util;
+mod window;
+
+pub mod taskbar;
+#[cfg(feature = "x11")]
+pub mod x11;
+
+pub use self::keycode::{keycode_from_scancode, keycode_to_scancode};
+pub(crate) use event_loop::PlatformSpecificEventLoopAttributes;
+pub use event_loop::{EventLoop, EventLoopProxy, EventLoopWindowTarget};
+pub use icon::PlatformIcon;
+pub use monitor::{MonitorHandle, VideoMode};
+pub use window::{Window, WindowId};
+
+use crate::{event::DeviceId as RootDeviceId, keyboard::Key};
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct KeyEventExtra {
+  pub text_with_all_modifiers: Option<&'static str>,
+  pub key_without_modifiers: Key<'static>,
+}
+
+#[non_exhaustive]
+#[derive(Clone, Default)]
+pub enum Parent {
+  #[default]
+  None,
+  ChildOf(gtk::Window),
+}
+
+#[derive(Clone)]
+pub struct PlatformSpecificWindowBuilderAttributes {
+  pub parent: Parent,
+  pub skip_taskbar: bool,
+  pub auto_transparent: bool,
+  pub double_buffered: bool,
+  pub app_paintable: bool,
+  pub rgba_visual: bool,
+  pub cursor_moved: bool,
+  pub default_vbox: bool,
+}
+
+
+--- src/platform_impl/linux/monitor.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use gtk::gdk::{self, prelude::MonitorExt, Display};
+
+use crate::{
+  dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize},
+  monitor::{MonitorHandle as RootMonitorHandle, VideoMode as RootVideoMode},
+};
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MonitorHandle {
+  pub(crate) monitor: gdk::Monitor,
+}
+
+impl MonitorHandle {
+  pub fn new(display: &gdk::Display, number: i32) -> Self {
+    let monitor = display.monitor(number).unwrap();
+    Self { monitor }
+  }
+
+  #[inline]
+  pub fn name(&self) -> Option<String> {
+    self.monitor.model().map(|s| s.as_str().to_string())
+  }
+
+  #[inline]
+  pub fn size(&self) -> PhysicalSize<u32> {
+    let rect = self.monitor.geometry();
+    LogicalSize {
+      width: rect.width() as u32,
+      height: rect.height() as u32,
+    }
+    .to_physical(self.scale_factor())
+  }
+
+  #[inline]
+  pub fn position(&self) -> PhysicalPosition<i32> {
+    let rect = self.monitor.geometry();
+    LogicalPosition {
+      x: rect.x(),
+      y: rect.y(),
+    }
+    .to_physical(self.scale_factor())
+  }
+
+  #[inline]
+  pub fn scale_factor(&self) -> f64 {
+    self.monitor.scale_factor() as f64
+  }
+
+  #[inline]
+  pub fn video_modes(&self) -> Box<dyn Iterator<Item = RootVideoMode>> {
+    Box::new(Vec::new().into_iter())
+
+--- src/platform_impl/linux/window.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{
+  cell::RefCell,
+  collections::VecDeque,
+  rc::Rc,
+  sync::{
+    atomic::{AtomicBool, AtomicI32, Ordering},
+    RwLock,
+  },
+};
+
+use gtk::{
+  gdk::WindowState,
+  glib::{self, translate::ToGlibPtr},
+  prelude::*,
+  CssProvider, EventBox, Settings,
+};
+
+use crate::{
+  dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize, Position, Size},
+  error::{ExternalError, NotSupportedError, OsError as RootOsError},
+  icon::Icon,
+  monitor::MonitorHandle as RootMonitorHandle,
+  window::{
+    CursorIcon, Fullscreen, ProgressBarState, ResizeDirection, Theme, UserAttentionType,
+    WindowAttributes, WindowSizeConstraints, RGBA,
+  },
+};
+
+use super::{
+  event_loop::EventLoopWindowTarget,
+  monitor::{self, MonitorHandle},
+  util, Parent, PlatformSpecificWindowBuilderAttributes,
+};
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct WindowId(pub(crate) u32);
+
+impl WindowId {
+  pub fn dummy() -> Self {
+    WindowId(u32::MAX)
+  }
+}
+
+pub struct Window {
+  /// Window id.
+  pub(crate) window_id: WindowId,
+  /// Gtk application window.
+  pub(crate) window: gtk::ApplicationWindow,
+  pub(crate) default_vbox: Option<gtk::Box>,
+  /// Window requests sender
+  pub(crate) window_requests_tx: glib::Sender<(WindowId, WindowRequest)>,
+
+--- src/platform_impl/linux/x11/ffi.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+pub use x11_dl::{
+  error::OpenError, keysym::*, xcursor::*, xinput::*, xinput2::*, xlib::*, xlib_xcb::*, xrandr::*,
+  xrender::*,
+};
+
+
+--- src/platform_impl/linux/x11/mod.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+pub mod ffi;
+pub mod xdisplay;
+
+pub use xdisplay::XConnection;
+
+
+--- src/platform_impl/linux/x11/xdisplay.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{collections::HashMap, error::Error, fmt, os::raw::c_int, ptr};
+
+use libc;
+use parking_lot::Mutex;
+
+use crate::window::CursorIcon;
+
+use super::ffi;
+
+/// A connection to an X server.
+pub struct XConnection {
+  pub xlib: ffi::Xlib,
+  /// Exposes XRandR functions from version < 1.5
+  pub xrandr: ffi::Xrandr_2_2_0,
+  /// Exposes XRandR functions from version = 1.5
+  pub xrandr_1_5: Option<ffi::Xrandr>,
+  pub xcursor: ffi::Xcursor,
+  pub xinput2: ffi::XInput2,
+  pub xlib_xcb: ffi::Xlib_xcb,
+  pub xrender: ffi::Xrender,
+  pub display: *mut ffi::Display,
+  pub x11_fd: c_int,
+  pub latest_error: Mutex<Option<XError>>,
+  pub cursor_cache: Mutex<HashMap<Option<CursorIcon>, ffi::Cursor>>,
+}
+
+unsafe impl Send for XConnection {}
+unsafe impl Sync for XConnection {}
+
+pub type XErrorHandler =
+  Option<unsafe extern "C" fn(*mut ffi::Display, *mut ffi::XErrorEvent) -> libc::c_int>;
+
+impl XConnection {
+  pub fn new(error_handler: XErrorHandler) -> Result<XConnection, XNotSupported> {
+    // opening the libraries
+    let xlib = ffi::Xlib::open()?;
+    let xcursor = ffi::Xcursor::open()?;
+    let xrandr = ffi::Xrandr_2_2_0::open()?;
+    let xrandr_1_5 = ffi::Xrandr::open().ok();
+    let xinput2 = ffi::XInput2::open()?;
+    let xlib_xcb = ffi::Xlib_xcb::open()?;
+    let xrender = ffi::Xrender::open()?;
+
+    unsafe { (xlib.XInitThreads)() };
+    unsafe { (xlib.XSetErrorHandler)(error_handler) };
+
+    // calling XOpenDisplay
+    let display = unsafe {
+      let display = (xlib.XOpenDisplay)(ptr::null());
+      if display.is_null() {
+        return Err(XNotSupported::XOpenDisplayFailed);
+
+--- src/platform_impl/macos/app_delegate.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use crate::{
+  platform::macos::ActivationPolicy,
+  platform_impl::platform::{
+    app_state::AppState,
+    ffi::{id, BOOL, YES},
+  },
+};
+
+use objc2::runtime::{
+  AnyClass as Class, AnyObject as Object, Bool, ClassBuilder as ClassDecl, Sel,
+};
+use objc2_foundation::{
+  NSArray, NSError, NSString, NSUserActivity, NSUserActivityTypeBrowsingWeb, NSURL,
+};
+use std::{
+  cell::{RefCell, RefMut},
+  ffi::{CStr, CString},
+  os::raw::c_void,
+  sync::{LazyLock, Mutex},
+  time::Instant,
+};
+
+const AUX_DELEGATE_STATE_NAME: &str = "auxState";
+
+pub struct AuxDelegateState {
+  /// We store this value in order to be able to defer setting the activation policy until
+  /// after the app has finished launching. If the activation policy is set earlier, the
+  /// menubar is initially unresponsive on macOS 10.15 for example.
+  pub activation_policy: ActivationPolicy,
+
+  /// Whether the application is visible in the dock.
+  pub dock_visibility: bool,
+  pub last_dock_show: Mutex<Option<Instant>>,
+
+  pub activate_ignoring_other_apps: bool,
+}
+
+pub struct AppDelegateClass(pub *const Class);
+unsafe impl Send for AppDelegateClass {}
+unsafe impl Sync for AppDelegateClass {}
+
+pub static APP_DELEGATE_CLASS: LazyLock<AppDelegateClass> = LazyLock::new(|| unsafe {
+  let superclass = class!(NSResponder);
+  let mut decl = ClassDecl::new(
+    CStr::from_bytes_with_nul(b"TaoAppDelegateParent\0").unwrap(),
+    superclass,
+  )
+  .unwrap();
+
+  decl.add_class_method(sel!(new), new as extern "C" fn(_, _) -> _);
+  decl.add_method(sel!(dealloc), dealloc as extern "C" fn(_, _));
+
+--- src/platform_impl/macos/app_state.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{
+  cell::{RefCell, RefMut},
+  collections::VecDeque,
+  fmt::{self, Debug},
+  hint::unreachable_unchecked,
+  mem,
+  rc::{Rc, Weak},
+  sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex, MutexGuard,
+  },
+  time::Instant,
+};
+
+use objc2::{msg_send, rc::Retained, runtime::AnyObject as Object};
+use objc2_app_kit::{NSApp, NSApplication, NSApplicationActivationPolicy, NSWindow};
+use objc2_foundation::{MainThreadMarker, NSAutoreleasePool, NSSize};
+use std::sync::LazyLock;
+
+use crate::{
+  dpi::LogicalSize,
+  event::{Event, StartCause, WindowEvent},
+  event_loop::{ControlFlow, EventLoopWindowTarget as RootWindowTarget},
+  platform::macos::ActivationPolicy,
+  platform_impl::{
+    get_aux_state_mut,
+    platform::{
+      event::{EventProxy, EventWrapper},
+      event_loop::{post_dummy_event, PanicInfo},
+      ffi::{id, nil},
+      observer::{CFRunLoopGetMain, CFRunLoopWakeUp, EventLoopWaker},
+      util::{self, Never},
+      window::get_window_id,
+    },
+  },
+  window::WindowId,
+};
+
+use super::set_dock_visibility;
+
+static HANDLER: LazyLock<Handler> = LazyLock::new(|| Default::default());
+
+impl<'a, Never> Event<'a, Never> {
+  fn userify<T: 'static>(self) -> Event<'a, T> {
+    self
+      .map_nonuser_event()
+      // `Never` can't be constructed, so the `UserEvent` variant can't
+      // be present here.
+      .unwrap_or_else(|_| unsafe { unreachable_unchecked() })
+  }
+}
+
+--- src/platform_impl/macos/app.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{collections::VecDeque, ffi::CStr};
+
+use objc2::runtime::{AnyClass as Class, ClassBuilder as ClassDecl, Sel};
+use objc2_app_kit::{self as appkit, NSApplication, NSEvent, NSEventType};
+use std::sync::LazyLock;
+
+use super::{app_state::AppState, event::EventWrapper, util, DEVICE_ID};
+use crate::event::{DeviceEvent, ElementState, Event};
+
+pub struct AppClass(pub *const Class);
+unsafe impl Send for AppClass {}
+unsafe impl Sync for AppClass {}
+
+pub static APP_CLASS: LazyLock<AppClass> = LazyLock::new(|| unsafe {
+  let superclass = class!(NSApplication);
+  let mut decl =
+    ClassDecl::new(CStr::from_bytes_with_nul(b"TaoApp\0").unwrap(), superclass).unwrap();
+
+  decl.add_method(sel!(sendEvent:), send_event as extern "C" fn(_, _, _));
+
+  AppClass(decl.register())
+});
+
+// Normally, holding Cmd + any key never sends us a `keyUp` event for that key.
+// Overriding `sendEvent:` like this fixes that. (https://stackoverflow.com/a/15294196)
+// Fun fact: Firefox still has this bug! (https://bugzilla.mozilla.org/show_bug.cgi?id=1299553)
+extern "C" fn send_event(this: &NSApplication, _sel: Sel, event: &NSEvent) {
+  unsafe {
+    // For posterity, there are some undocumented event types
+    // (https://github.com/servo/cocoa-rs/issues/155)
+    // but that doesn't really matter here.
+    let event_type = event.r#type();
+    let modifier_flags = event.modifierFlags();
+    if event_type == appkit::NSKeyUp
+      && util::has_flag(modifier_flags, appkit::NSEventModifierFlags::Command)
+    {
+      if let Some(key_window) = this.keyWindow() {
+        key_window.sendEvent(event);
+      } else {
+        log::debug!("skip sending CMD keyEvent - app has no keyWindow");
+      }
+    } else {
+      maybe_dispatch_device_event(event);
+      let superclass = util::superclass(this);
+      let _: () = msg_send![super(this, superclass), sendEvent: event];
+    }
+  }
+}
+
+unsafe fn maybe_dispatch_device_event(event: &NSEvent) {
+  let event_type = event.r#type();
+
+--- src/platform_impl/macos/event_loop.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{
+  any::Any,
+  cell::{Cell, RefCell},
+  collections::VecDeque,
+  marker::PhantomData,
+  mem,
+  os::raw::c_void,
+  panic::{catch_unwind, resume_unwind, RefUnwindSafe, UnwindSafe},
+  process, ptr,
+  rc::{Rc, Weak},
+};
+
+use crossbeam_channel::{self as channel, Receiver, Sender};
+use objc2::{msg_send, rc::Retained};
+use objc2_app_kit::{NSApp, NSApplication, NSEventModifierFlags, NSEventSubtype, NSEventType};
+use objc2_foundation::{MainThreadMarker, NSAutoreleasePool, NSInteger, NSPoint, NSTimeInterval};
+
+use crate::{
+  dpi::PhysicalPosition,
+  error::ExternalError,
+  event::Event,
+  event_loop::{ControlFlow, EventLoopClosed, EventLoopWindowTarget as RootWindowTarget},
+  monitor::MonitorHandle as RootMonitorHandle,
+  platform_impl::{
+    platform::{
+      app::APP_CLASS,
+      app_delegate::APP_DELEGATE_CLASS,
+      app_state::AppState,
+      ffi::{id, nil, YES},
+      monitor::{self, MonitorHandle},
+      observer::*,
+      util::{self, IdRef},
+    },
+    set_badge_label, set_progress_indicator,
+  },
+  window::{ProgressBarState, Theme},
+};
+
+use super::window::set_ns_theme;
+
+#[derive(Default)]
+pub struct PanicInfo {
+  inner: Cell<Option<Box<dyn Any + Send + 'static>>>,
+}
+
+// WARNING:
+// As long as this struct is used through its `impl`, it is UnwindSafe.
+// (If `get_mut` is called on `inner`, unwind safety may get broken.)
+impl UnwindSafe for PanicInfo {}
+impl RefUnwindSafe for PanicInfo {}
+impl PanicInfo {
+
+--- src/platform_impl/macos/event.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{collections::HashSet, ffi::c_void, os::raw::c_ushort, sync::Mutex};
+
+use objc2::{msg_send, rc::Retained};
+use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSWindow};
+use std::sync::LazyLock;
+
+use core_foundation::{base::CFRelease, data::CFDataGetBytePtr};
+use objc2_foundation::NSString;
+
+use crate::{
+  dpi::LogicalSize,
+  event::{ElementState, Event, KeyEvent},
+  keyboard::{Key, KeyCode, KeyLocation, ModifiersState, NativeKeyCode},
+  platform_impl::platform::{ffi, util::Never},
+};
+
+static KEY_STRINGS: LazyLock<Mutex<HashSet<&'static str>>> =
+  LazyLock::new(|| Mutex::new(HashSet::new()));
+
+fn insert_or_get_key_str(string: String) -> &'static str {
+  let mut string_set = KEY_STRINGS.lock().unwrap();
+  if let Some(contained) = string_set.get(string.as_str()) {
+    return contained;
+  }
+  let static_str = Box::leak(string.into_boxed_str());
+  string_set.insert(static_str);
+  static_str
+}
+
+#[non_exhaustive]
+#[derive(Debug)]
+pub enum EventWrapper {
+  StaticEvent(Event<'static, Never>),
+  EventProxy(EventProxy),
+}
+
+#[non_exhaustive]
+#[derive(Debug, PartialEq)]
+pub enum EventProxy {
+  #[non_exhaustive]
+  DpiChangedProxy {
+    ns_window: Retained<NSWindow>,
+    suggested_size: LogicalSize<f64>,
+    scale_factor: f64,
+  },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct KeyEventExtra {
+  pub text_with_all_modifiers: Option<&'static str>,
+  pub key_without_modifiers: Key<'static>,
+
+--- src/platform_impl/macos/ffi.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+// TODO: Upstream these
+
+#![allow(
+  dead_code,
+  non_snake_case,
+  non_upper_case_globals,
+  clippy::enum_variant_names
+)]
+
+use std::{ffi::c_void, ptr};
+
+use core_foundation::{
+  array::CFArrayRef, data::CFDataRef, dictionary::CFDictionaryRef, string::CFStringRef,
+  uuid::CFUUIDRef,
+};
+use core_graphics::{
+  base::CGError,
+  display::{boolean_t, CGDirectDisplayID, CGDisplayConfigRef},
+  geometry::{CGPoint, CGRect},
+};
+use objc2::{
+  encode::{Encode, Encoding},
+  runtime::{AnyObject, Bool},
+};
+use objc2_foundation::NSInteger;
+
+#[allow(non_camel_case_types)]
+pub type id = *mut AnyObject;
+pub const nil: id = ptr::null_mut();
+
+#[allow(non_camel_case_types)]
+pub type BOOL = Bool;
+#[allow(deprecated)]
+pub const YES: Bool = Bool::YES;
+#[allow(deprecated)]
+pub const NO: Bool = Bool::NO;
+
+pub const NSNotFound: NSInteger = NSInteger::MAX;
+
+pub const kCGBaseWindowLevelKey: NSInteger = 0;
+pub const kCGMinimumWindowLevelKey: NSInteger = 1;
+pub const kCGDesktopWindowLevelKey: NSInteger = 2;
+pub const kCGBackstopMenuLevelKey: NSInteger = 3;
+pub const kCGNormalWindowLevelKey: NSInteger = 4;
+pub const kCGFloatingWindowLevelKey: NSInteger = 5;
+pub const kCGTornOffMenuWindowLevelKey: NSInteger = 6;
+pub const kCGDockWindowLevelKey: NSInteger = 7;
+pub const kCGMainMenuWindowLevelKey: NSInteger = 8;
+pub const kCGStatusWindowLevelKey: NSInteger = 9;
+pub const kCGModalPanelWindowLevelKey: NSInteger = 10;
+pub const kCGPopUpMenuWindowLevelKey: NSInteger = 11;
+
+--- src/platform_impl/macos/icon.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use crate::icon::{BadIcon, RgbaIcon};
+
+#[derive(Debug, Clone)]
+pub struct PlatformIcon(RgbaIcon);
+
+impl PlatformIcon {
+  pub fn from_rgba(rgba: Vec<u8>, width: u32, height: u32) -> Result<Self, BadIcon> {
+    Ok(PlatformIcon(RgbaIcon::from_rgba(rgba, width, height)?))
+  }
+}
+
+
+--- src/platform_impl/macos/keycode.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use crate::keyboard::{KeyCode, NativeKeyCode};
+
+pub fn keycode_to_scancode(code: KeyCode) -> Option<u32> {
+  match code {
+    KeyCode::KeyA => Some(0x00),
+    KeyCode::KeyS => Some(0x01),
+    KeyCode::KeyD => Some(0x02),
+    KeyCode::KeyF => Some(0x03),
+    KeyCode::KeyH => Some(0x04),
+    KeyCode::KeyG => Some(0x05),
+    KeyCode::KeyZ => Some(0x06),
+    KeyCode::KeyX => Some(0x07),
+    KeyCode::KeyC => Some(0x08),
+    KeyCode::KeyV => Some(0x09),
+    KeyCode::KeyB => Some(0x0b),
+    KeyCode::KeyQ => Some(0x0c),
+    KeyCode::KeyW => Some(0x0d),
+    KeyCode::KeyE => Some(0x0e),
+    KeyCode::KeyR => Some(0x0f),
+    KeyCode::KeyY => Some(0x10),
+    KeyCode::KeyT => Some(0x11),
+    KeyCode::Digit1 => Some(0x12),
+    KeyCode::Digit2 => Some(0x13),
+    KeyCode::Digit3 => Some(0x14),
+    KeyCode::Digit4 => Some(0x15),
+    KeyCode::Digit6 => Some(0x16),
+    KeyCode::Digit5 => Some(0x17),
+    KeyCode::Equal => Some(0x18),
+    KeyCode::Digit9 => Some(0x19),
+    KeyCode::Digit7 => Some(0x1a),
+    KeyCode::Minus => Some(0x1b),
+    KeyCode::Digit8 => Some(0x1c),
+    KeyCode::Digit0 => Some(0x1d),
+    KeyCode::BracketRight => Some(0x1e),
+    KeyCode::KeyO => Some(0x1f),
+    KeyCode::KeyU => Some(0x20),
+    KeyCode::BracketLeft => Some(0x21),
+    KeyCode::KeyI => Some(0x22),
+    KeyCode::KeyP => Some(0x23),
+    KeyCode::Enter => Some(0x24),
+    KeyCode::KeyL => Some(0x25),
+    KeyCode::KeyJ => Some(0x26),
+    KeyCode::Quote => Some(0x27),
+    KeyCode::KeyK => Some(0x28),
+    KeyCode::Semicolon => Some(0x29),
+    KeyCode::Backslash => Some(0x2a),
+    KeyCode::Comma => Some(0x2b),
+    KeyCode::Slash => Some(0x2c),
+    KeyCode::KeyN => Some(0x2d),
+    KeyCode::KeyM => Some(0x2e),
+    KeyCode::Period => Some(0x2f),
+
+--- src/platform_impl/macos/mod.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+mod app;
+mod app_delegate;
+mod app_state;
+mod badge;
+mod dock;
+mod event;
+mod event_loop;
+mod ffi;
+mod icon;
+mod keycode;
+mod monitor;
+mod observer;
+mod progress_bar;
+mod util;
+mod view;
+mod window;
+mod window_delegate;
+
+use std::{fmt, ops::Deref, sync::Arc};
+
+pub(crate) use self::event_loop::PlatformSpecificEventLoopAttributes;
+pub use self::{
+  app_delegate::get_aux_state_mut,
+  event::KeyEventExtra,
+  event_loop::{EventLoop, EventLoopWindowTarget, Proxy as EventLoopProxy},
+  keycode::{keycode_from_scancode, keycode_to_scancode},
+  monitor::{MonitorHandle, VideoMode},
+  progress_bar::set_progress_indicator,
+  window::{Id as WindowId, Parent, PlatformSpecificWindowBuilderAttributes, UnownedWindow},
+};
+use crate::{
+  error::OsError as RootOsError, event::DeviceId as RootDeviceId, window::WindowAttributes,
+};
+pub(crate) use badge::set_badge_label;
+pub(crate) use dock::set_dock_visibility;
+pub(crate) use icon::PlatformIcon;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DeviceId;
+
+impl DeviceId {
+  pub unsafe fn dummy() -> Self {
+    DeviceId
+  }
+}
+
+// Constant device ID; to be removed when if backend is updated to report real device IDs.
+pub(crate) const DEVICE_ID: RootDeviceId = RootDeviceId(DeviceId);
+
+pub struct Window {
+  window: Arc<UnownedWindow>,
+
+--- src/platform_impl/macos/monitor.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{collections::VecDeque, fmt};
+
+use super::ffi::{self, id, nil, CGRectContainsPoint};
+use crate::{
+  dpi::{PhysicalPosition, PhysicalSize},
+  monitor::{MonitorHandle as RootMonitorHandle, VideoMode as RootVideoMode},
+};
+use core_foundation::{
+  array::{CFArrayGetCount, CFArrayGetValueAtIndex},
+  base::{CFRelease, TCFType},
+  string::CFString,
+};
+use core_graphics::{
+  display::{CGDirectDisplayID, CGDisplay, CGDisplayBounds},
+  geometry::CGPoint,
+};
+use objc2::{msg_send, rc::Retained};
+use objc2_app_kit::NSScreen;
+use objc2_foundation::{ns_string, MainThreadMarker, NSString, NSUInteger};
+
+#[derive(Clone)]
+pub struct VideoMode {
+  pub(crate) size: (u32, u32),
+  pub(crate) bit_depth: u16,
+  pub(crate) refresh_rate: u16,
+  pub(crate) monitor: MonitorHandle,
+  pub(crate) native_mode: NativeDisplayMode,
+}
+
+impl PartialEq for VideoMode {
+  fn eq(&self, other: &Self) -> bool {
+    self.size == other.size
+      && self.bit_depth == other.bit_depth
+      && self.refresh_rate == other.refresh_rate
+      && self.monitor == other.monitor
+  }
+}
+
+impl Eq for VideoMode {}
+
+impl std::hash::Hash for VideoMode {
+  fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    self.size.hash(state);
+    self.bit_depth.hash(state);
+    self.refresh_rate.hash(state);
+    self.monitor.hash(state);
+  }
+}
+
+impl std::fmt::Debug for VideoMode {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+
+--- src/platform_impl/macos/observer.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{
+  self,
+  os::raw::*,
+  panic::{AssertUnwindSafe, UnwindSafe},
+  ptr,
+  rc::Weak,
+  time::Instant,
+};
+
+use crate::platform_impl::platform::{
+  app_state::AppState,
+  event_loop::{stop_app_on_panic, PanicInfo},
+  ffi,
+};
+
+#[link(name = "CoreFoundation", kind = "framework")]
+extern "C" {
+  pub static kCFRunLoopCommonModes: CFRunLoopMode;
+
+  pub fn CFRunLoopGetMain() -> CFRunLoopRef;
+  pub fn CFRunLoopWakeUp(rl: CFRunLoopRef);
+
+  pub fn CFRunLoopObserverCreate(
+    allocator: CFAllocatorRef,
+    activities: CFOptionFlags,
+    repeats: ffi::Boolean,
+    order: CFIndex,
+    callout: CFRunLoopObserverCallBack,
+    context: *mut CFRunLoopObserverContext,
+  ) -> CFRunLoopObserverRef;
+  pub fn CFRunLoopAddObserver(
+    rl: CFRunLoopRef,
+    observer: CFRunLoopObserverRef,
+    mode: CFRunLoopMode,
+  );
+
+  pub fn CFRunLoopTimerCreate(
+    allocator: CFAllocatorRef,
+    fireDate: CFAbsoluteTime,
+    interval: CFTimeInterval,
+    flags: CFOptionFlags,
+    order: CFIndex,
+    callout: CFRunLoopTimerCallBack,
+    context: *mut CFRunLoopTimerContext,
+  ) -> CFRunLoopTimerRef;
+  pub fn CFRunLoopAddTimer(rl: CFRunLoopRef, timer: CFRunLoopTimerRef, mode: CFRunLoopMode);
+  pub fn CFRunLoopTimerSetNextFireDate(timer: CFRunLoopTimerRef, fireDate: CFAbsoluteTime);
+  pub fn CFRunLoopTimerInvalidate(time: CFRunLoopTimerRef);
+
+  pub fn CFRunLoopSourceCreate(
+    allocator: CFAllocatorRef,
+
+--- src/platform_impl/macos/util/async.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{
+  ops::Deref,
+  sync::{Mutex, Weak},
+};
+
+use core_graphics::base::CGFloat;
+use dispatch2::{DispatchQueue, DispatchQueueAttr};
+use objc2::{rc::autoreleasepool, Message};
+use objc2_app_kit::{NSScreen, NSView, NSWindow, NSWindowStyleMask};
+use objc2_foundation::{MainThreadMarker, NSPoint, NSSize, NSString};
+
+use crate::{
+  dpi::LogicalSize,
+  platform_impl::platform::{
+    ffi::{self, id, NO, YES},
+    view::reapply_traffic_light_inset,
+    window::SharedState,
+  },
+};
+
+pub fn is_main_thread() -> bool {
+  unsafe { msg_send!(class!(NSThread), isMainThread) }
+}
+
+// Unsafe wrapper type that allows us to dispatch things that aren't Send.
+// This should *only* be used to dispatch to the main queue.
+// While it is indeed not guaranteed that these types can safely be sent to
+// other threads, we know that they're safe to use on the main thread.
+struct MainThreadSafe<T>(T);
+
+unsafe impl<T> Send for MainThreadSafe<T> {}
+
+impl<T> Deref for MainThreadSafe<T> {
+  type Target = T;
+  fn deref(&self) -> &T {
+    &self.0
+  }
+}
+
+fn run_on_main<F: Send + FnOnce()>(f: F) {
+  if is_main_thread() {
+    f();
+  } else {
+    DispatchQueue::main().exec_sync(f);
+  }
+}
+
+unsafe fn set_style_mask(ns_window: &NSWindow, ns_view: &NSView, mask: NSWindowStyleMask) {
+  ns_window.setStyleMask(mask);
+  // If we don't do this, key handling will break
+  // (at least until the window is clicked again/etc.)
+
+--- src/platform_impl/macos/util/cursor.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use crate::platform_impl::platform::ffi::{id, nil, NO};
+use objc2::{
+  msg_send,
+  rc::Retained,
+  runtime::{AnyObject, Sel},
+  AllocAnyThread,
+};
+use objc2_app_kit::NSImage;
+use objc2_foundation::{ns_string, NSDictionary, NSPoint, NSString};
+use std::{
+  cell::RefCell,
+  ffi::{c_void, CString},
+  ptr::null_mut,
+};
+
+use crate::window::CursorIcon;
+
+#[derive(Default)]
+pub enum Cursor {
+  #[default]
+  Default,
+  Native(&'static str),
+  Undocumented(&'static str),
+  WebKit(&'static str),
+}
+
+impl From<CursorIcon> for Cursor {
+  fn from(cursor: CursorIcon) -> Self {
+    // See native cursors at https://developer.apple.com/documentation/appkit/nscursor?language=objc.
+    match cursor {
+      CursorIcon::Default => Cursor::Default,
+      CursorIcon::Arrow => Cursor::Native("arrowCursor"),
+      CursorIcon::Hand => Cursor::Native("pointingHandCursor"),
+      CursorIcon::Grab => Cursor::Native("openHandCursor"),
+      CursorIcon::Grabbing => Cursor::Native("closedHandCursor"),
+      CursorIcon::Text => Cursor::Native("IBeamCursor"),
+      CursorIcon::VerticalText => Cursor::Native("IBeamCursorForVerticalLayout"),
+      CursorIcon::Copy => Cursor::Native("dragCopyCursor"),
+      CursorIcon::Alias => Cursor::Native("dragLinkCursor"),
+      CursorIcon::NotAllowed | CursorIcon::NoDrop => Cursor::Native("operationNotAllowedCursor"),
+      CursorIcon::ContextMenu => Cursor::Native("contextualMenuCursor"),
+      CursorIcon::Crosshair => Cursor::Native("crosshairCursor"),
+      CursorIcon::EResize => Cursor::Native("resizeRightCursor"),
+      CursorIcon::NResize => Cursor::Native("resizeUpCursor"),
+      CursorIcon::WResize => Cursor::Native("resizeLeftCursor"),
+      CursorIcon::SResize => Cursor::Native("resizeDownCursor"),
+      CursorIcon::EwResize | CursorIcon::ColResize => Cursor::Native("resizeLeftRightCursor"),
+      CursorIcon::NsResize | CursorIcon::RowResize => Cursor::Native("resizeUpDownCursor"),
+
+      // Undocumented cursors: https://stackoverflow.com/a/46635398/5435443
+      CursorIcon::Help => Cursor::Undocumented("_helpCursor"),
+
+--- src/platform_impl/macos/util/mod.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+mod r#async;
+mod cursor;
+
+pub use self::{cursor::*, r#async::*};
+
+use std::ops::{BitAnd, Deref};
+
+use core_graphics::display::CGDisplay;
+use objc2::{
+  class,
+  runtime::{AnyClass as Class, AnyObject as Object, Sel},
+};
+use objc2_app_kit::{NSApp, NSView, NSWindow, NSWindowStyleMask};
+use objc2_foundation::{MainThreadMarker, NSAutoreleasePool, NSPoint, NSRange, NSRect, NSUInteger};
+
+use crate::{
+  dpi::{LogicalPosition, PhysicalPosition},
+  error::ExternalError,
+  platform_impl::platform::ffi::{self, id, nil, BOOL, YES},
+};
+
+// Replace with `!` once stable
+#[derive(Debug)]
+pub enum Never {}
+
+pub fn has_flag<T>(bitset: T, flag: T) -> bool
+where
+  T: Copy + PartialEq + BitAnd<T, Output = T>,
+{
+  bitset & flag == flag
+}
+
+pub const EMPTY_RANGE: NSRange = NSRange {
+  location: ffi::NSNotFound as NSUInteger,
+  length: 0,
+};
+
+#[derive(Debug, PartialEq)]
+pub struct IdRef(id);
+
+impl IdRef {
+  pub fn new(inner: id) -> IdRef {
+    IdRef(inner)
+  }
+
+  #[allow(dead_code)]
+  pub fn retain(inner: id) -> IdRef {
+    if inner != nil {
+      let _: id = unsafe { msg_send![inner, retain] };
+    }
+    IdRef(inner)
+
+--- src/platform_impl/macos/view.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+#![allow(unused_unsafe)]
+#![allow(deprecated)] // TODO: Use define_class!
+
+use std::{
+  boxed::Box,
+  collections::{HashSet, VecDeque},
+  ffi::CStr,
+  os::raw::*,
+  ptr,
+  sync::{Arc, Mutex, Weak},
+};
+
+use objc2::{
+  msg_send,
+  rc::Retained,
+  runtime::{
+    AnyClass as Class, AnyObject as Object, AnyProtocol as Protocol, ClassBuilder as ClassDecl, Sel,
+  },
+  AllocAnyThread,
+};
+use objc2_app_kit::{
+  NSApp, NSEvent, NSEventModifierFlags, NSEventPhase, NSView, NSWindow, NSWindowButton,
+};
+use objc2_foundation::{
+  ns_string, MainThreadMarker, NSAttributedString, NSInteger, NSMutableAttributedString, NSPoint,
+  NSRange, NSRect, NSSize, NSString, NSUInteger,
+};
+use std::sync::LazyLock;
+
+use crate::{
+  dpi::LogicalPosition,
+  event::{
+    DeviceEvent, ElementState, Event, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent,
+  },
+  keyboard::{KeyCode, ModifiersState},
+  platform_impl::platform::{
+    app_state::AppState,
+    event::{code_to_key, create_key_event, event_mods, get_scancode, EventWrapper},
+    ffi::*,
+    util::{self},
+    window::get_window_id,
+    DEVICE_ID,
+  },
+  window::WindowId,
+};
+
+pub struct CursorState {
+  pub visible: bool,
+  pub cursor: util::Cursor,
+}
+
+impl Default for CursorState {
+
+--- src/platform_impl/macos/window_delegate.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{
+  f64,
+  ffi::CStr,
+  os::raw::c_void,
+  sync::{Arc, Weak},
+};
+
+use objc2::{
+  msg_send,
+  rc::Retained,
+  runtime::{AnyClass as Class, AnyObject as Object, ClassBuilder as ClassDecl, Sel},
+};
+use objc2_app_kit::{
+  self as appkit, NSApplicationPresentationOptions, NSPasteboard, NSView, NSWindow,
+};
+use objc2_foundation::{ns_string, NSArray, NSAutoreleasePool, NSString, NSUInteger};
+use std::sync::LazyLock;
+
+use crate::{
+  dpi::{LogicalPosition, LogicalSize},
+  event::{Event, WindowEvent},
+  keyboard::ModifiersState,
+  platform_impl::platform::{
+    app_state::AppState,
+    event::{EventProxy, EventWrapper},
+    ffi::{id, nil, BOOL, NO, YES},
+    util::{self, IdRef},
+    view::{reapply_traffic_light_inset, ViewState},
+    window::{get_ns_theme, get_window_id, UnownedWindow},
+  },
+  window::{Fullscreen, WindowId},
+};
+
+pub struct WindowDelegateState {
+  ns_window: Retained<NSWindow>, // never changes
+  // We keep this ns_view because we still need its view state for some extern function
+  // like didResignKey
+  ns_view: Retained<NSView>, // never changes
+
+  window: Weak<UnownedWindow>,
+
+  // TODO: It's possible for delegate methods to be called asynchronously,
+  // causing data races / `RefCell` panics.
+
+  // This is set when WindowBuilder::with_fullscreen was set,
+  // see comments of `window_did_fail_to_enter_fullscreen`
+  initial_fullscreen: bool,
+
+  // During `windowDidResize`, we use this to only send Moved if the position changed.
+  previous_position: Option<(f64, f64)>,
+
+
+--- src/platform_impl/macos/window.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+#![allow(unused_unsafe)]
+
+use std::{
+  collections::VecDeque,
+  convert::TryInto,
+  f64,
+  ffi::CStr,
+  os::raw::c_void,
+  sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex, Weak,
+  },
+};
+
+use crate::{
+  dpi::{
+    LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize, Position, Size, Size::Logical,
+  },
+  error::{ExternalError, NotSupportedError, OsError as RootOsError},
+  icon::Icon,
+  monitor::{MonitorHandle as RootMonitorHandle, VideoMode as RootVideoMode},
+  platform::macos::WindowExtMacOS,
+  platform_impl::{
+    platform::{
+      app_state::AppState,
+      ffi,
+      monitor::{self, MonitorHandle, VideoMode},
+      util::{self, IdRef},
+      view::{self, new_view, CursorState},
+      window_delegate::new_delegate,
+      OsError,
+    },
+    set_badge_label, set_progress_indicator,
+  },
+  window::{
+    CursorIcon, Fullscreen, ProgressBarState, ResizeDirection, Theme, UserAttentionType,
+    WindowAttributes, WindowId as RootWindowId, WindowSizeConstraints,
+  },
+};
+use core_graphics::{
+  base::CGFloat,
+  display::{CGDisplay, CGDisplayMode},
+  geometry::CGPoint,
+};
+use objc2::{
+  msg_send,
+  rc::Retained,
+  runtime::{AnyClass as Class, AnyObject as Object, Bool, ClassBuilder as ClassDecl, Sel},
+};
+use objc2_app_kit::{
+  self as appkit, NSApp, NSApplicationPresentationOptions, NSBackingStoreType, NSColor, NSEvent,
+  NSEventModifierFlags, NSEventSubtype, NSEventType, NSRequestUserAttentionType, NSScreen, NSView,
+
+--- src/platform_impl/mod.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+#[cfg(target_os = "windows")]
+#[path = "windows/mod.rs"]
+mod platform;
+#[cfg(any(
+  target_os = "linux",
+  target_os = "dragonfly",
+  target_os = "freebsd",
+  target_os = "netbsd",
+  target_os = "openbsd"
+))]
+#[path = "linux/mod.rs"]
+mod platform;
+#[cfg(target_os = "macos")]
+#[path = "macos/mod.rs"]
+mod platform;
+#[cfg(target_os = "android")]
+#[path = "android/mod.rs"]
+mod platform;
+#[cfg(target_os = "ios")]
+#[path = "ios/mod.rs"]
+mod platform;
+
+pub use platform::*;
+
+#[cfg(all(
+  not(target_os = "ios"),
+  not(target_os = "windows"),
+  not(target_os = "linux"),
+  not(target_os = "macos"),
+  not(target_os = "android"),
+  not(target_os = "dragonfly"),
+  not(target_os = "freebsd"),
+  not(target_os = "netbsd"),
+  not(target_os = "openbsd"),
+))]
+compile_error!("The platform you're compiling for is not supported by tao");
+
+
+--- src/platform_impl/windows/dark_mode.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+#![allow(non_snake_case)]
+
+use std::sync::LazyLock;
+/// This is a simple implementation of support for Windows Dark Mode,
+/// which is inspired by the solution in https://github.com/ysc3839/win32-darkmode
+use windows::{
+  core::{s, w, BOOL, PCSTR, PSTR},
+  Win32::{
+    Foundation::{ERROR_SUCCESS, HANDLE, HMODULE, HWND, LPARAM, WPARAM},
+    Graphics::Dwm::{DwmSetWindowAttribute, DWMWINDOWATTRIBUTE},
+    System::{
+      LibraryLoader::*,
+      Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD},
+    },
+    UI::{Accessibility::*, Input::KeyboardAndMouse::GetActiveWindow, WindowsAndMessaging::*},
+  },
+};
+
+use std::ffi::c_void;
+
+use crate::window::Theme;
+
+use super::util;
+
+static HUXTHEME: LazyLock<isize> =
+  LazyLock::new(|| unsafe { LoadLibraryA(s!("uxtheme.dll")).unwrap_or_default().0 as _ });
+
+static DARK_MODE_SUPPORTED: LazyLock<bool> = LazyLock::new(|| {
+  // We won't try to do anything for windows versions < 17763
+  // (Windows 10 October 2018 update)
+  let v = *util::WIN_VERSION;
+  v.major == 10 && v.minor == 0 && v.build >= 17763
+});
+
+pub fn allow_dark_mode_for_app(is_dark_mode: bool) {
+  if *DARK_MODE_SUPPORTED {
+    const UXTHEME_ALLOWDARKMODEFORAPP_ORDINAL: u16 = 135;
+    type AllowDarkModeForApp = unsafe extern "system" fn(bool) -> bool;
+    static ALLOW_DARK_MODE_FOR_APP: LazyLock<Option<AllowDarkModeForApp>> =
+      LazyLock::new(|| unsafe {
+        if HMODULE(*HUXTHEME as _).is_invalid() {
+          return None;
+        }
+
+        GetProcAddress(
+          HMODULE(*HUXTHEME as _),
+          PCSTR::from_raw(UXTHEME_ALLOWDARKMODEFORAPP_ORDINAL as usize as *mut _),
+        )
+        .map(|handle| std::mem::transmute(handle))
+      });
+
+    #[repr(C)]
+
+--- src/platform_impl/windows/dpi.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+#![allow(non_snake_case, unused_unsafe)]
+
+use std::sync::Once;
+
+use windows::Win32::{
+  Foundation::HWND,
+  Graphics::Gdi::*,
+  UI::{HiDpi::*, WindowsAndMessaging::*},
+};
+
+use crate::platform_impl::platform::util::{
+  ENABLE_NON_CLIENT_DPI_SCALING, GET_DPI_FOR_MONITOR, GET_DPI_FOR_WINDOW, SET_PROCESS_DPI_AWARE,
+  SET_PROCESS_DPI_AWARENESS, SET_PROCESS_DPI_AWARENESS_CONTEXT,
+};
+
+pub fn become_dpi_aware() {
+  static ENABLE_DPI_AWARENESS: Once = Once::new();
+  ENABLE_DPI_AWARENESS.call_once(|| {
+    unsafe {
+      if let Some(SetProcessDpiAwarenessContext) = *SET_PROCESS_DPI_AWARENESS_CONTEXT {
+        // We are on Windows 10 Anniversary Update (1607) or later.
+        if !SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).as_bool() {
+          // V2 only works with Windows 10 Creators Update (1703). Try using the older
+          // V1 if we can't set V2.
+          let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE);
+        }
+      } else if let Some(SetProcessDpiAwareness) = *SET_PROCESS_DPI_AWARENESS {
+        // We are on Windows 8.1 or later.
+        let _ = SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
+      } else if let Some(SetProcessDPIAware) = *SET_PROCESS_DPI_AWARE {
+        // We are on Vista or later.
+        let _ = SetProcessDPIAware();
+      }
+    }
+  });
+}
+
+pub fn enable_non_client_dpi_scaling(hwnd: HWND) {
+  unsafe {
+    if let Some(EnableNonClientDpiScaling) = *ENABLE_NON_CLIENT_DPI_SCALING {
+      let _ = EnableNonClientDpiScaling(hwnd);
+    }
+  }
+}
+
+pub fn get_monitor_dpi(hmonitor: HMONITOR) -> Option<u32> {
+  unsafe {
+    if let Some(GetDpiForMonitor) = *GET_DPI_FOR_MONITOR {
+      // We are on Windows 8.1 or later.
+      let mut dpi_x = 0;
+      let mut dpi_y = 0;
+
+--- src/platform_impl/windows/drop_handler.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{cell::UnsafeCell, ffi::OsString, os::windows::ffi::OsStringExt, path::PathBuf, ptr};
+
+use windows::{
+  core::implement,
+  Win32::{
+    Foundation::{self as win32f, HWND, POINTL},
+    System::{
+      Com::{IDataObject, DVASPECT_CONTENT, FORMATETC, TYMED_HGLOBAL},
+      Ole::{
+        IDropTarget, IDropTarget_Impl, CF_HDROP, DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_NONE,
+      },
+      SystemServices::MODIFIERKEYS_FLAGS,
+    },
+    UI::Shell::{DragFinish, DragQueryFileW, HDROP},
+  },
+};
+
+use crate::platform_impl::platform::WindowId;
+
+use crate::{event::Event, window::WindowId as SuperWindowId};
+
+#[implement(IDropTarget)]
+pub struct FileDropHandler {
+  window: HWND,
+  send_event: Box<dyn Fn(Event<'static, ()>)>,
+  cursor_effect: UnsafeCell<DROPEFFECT>,
+  hovered_is_valid: UnsafeCell<bool>, /* If the currently hovered item is not valid there must not be any `HoveredFileCancelled` emitted */
+}
+
+impl FileDropHandler {
+  pub fn new(window: HWND, send_event: Box<dyn Fn(Event<'static, ()>)>) -> FileDropHandler {
+    Self {
+      window,
+      send_event,
+      cursor_effect: DROPEFFECT_NONE.into(),
+      hovered_is_valid: false.into(),
+    }
+  }
+
+  unsafe fn iterate_filenames<F>(
+    data_obj: windows_core::Ref<'_, IDataObject>,
+    callback: F,
+  ) -> Option<HDROP>
+  where
+    F: Fn(PathBuf),
+  {
+    let drop_format = FORMATETC {
+      cfFormat: CF_HDROP.0,
+      ptd: ptr::null_mut(),
+      dwAspect: DVASPECT_CONTENT.0,
+      lindex: -1,
+
+--- src/platform_impl/windows/event_loop/runner.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{
+  any::Any,
+  cell::{Cell, RefCell},
+  collections::{HashSet, VecDeque},
+  mem, panic,
+  rc::Rc,
+  time::Instant,
+};
+
+use windows::Win32::{
+  Foundation::HWND,
+  Graphics::Gdi::{RedrawWindow, RDW_INTERNALPAINT},
+};
+
+use crate::{
+  dpi::PhysicalSize,
+  event::{Event, StartCause, WindowEvent},
+  event_loop::ControlFlow,
+  platform_impl::platform::util,
+  window::WindowId,
+};
+
+pub(crate) type EventLoopRunnerShared<T> = Rc<EventLoopRunner<T>>;
+pub(crate) struct EventLoopRunner<T: 'static> {
+  // The event loop's win32 handles
+  thread_msg_target: HWND,
+  wait_thread_id: u32,
+
+  control_flow: Cell<ControlFlow>,
+  runner_state: Cell<RunnerState>,
+  last_events_cleared: Cell<Instant>,
+
+  event_handler: Cell<Option<Box<dyn FnMut(Event<'_, T>, &mut ControlFlow)>>>,
+  event_buffer: RefCell<VecDeque<BufferedEvent<T>>>,
+
+  owned_windows: Cell<HashSet<isize>>,
+
+  panic_error: Cell<Option<PanicError>>,
+}
+
+pub type PanicError = Box<dyn Any + Send + 'static>;
+
+/// See `move_state_to` function for details on how the state loop works.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum RunnerState {
+  /// The event loop has just been created, and an `Init` event must be sent.
+  Uninitialized,
+  /// The event loop is idling.
+  Idle,
+  /// The event loop is handling the OS's events and sending them to the user's callback.
+  /// `NewEvents` has been sent, and `MainEventsCleared` hasn't.
+
+--- src/platform_impl/windows/event_loop.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+#![allow(non_snake_case)]
+
+mod runner;
+
+use crossbeam_channel::{self as channel, Receiver, Sender};
+use parking_lot::Mutex;
+use std::{
+  cell::Cell,
+  collections::VecDeque,
+  ffi::c_void,
+  marker::PhantomData,
+  mem, panic,
+  rc::Rc,
+  sync::{Arc, LazyLock},
+  thread,
+  time::{Duration, Instant},
+};
+use windows::{
+  core::{s, w, BOOL, PCWSTR},
+  Win32::{
+    Foundation::{HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, TRUE, WAIT_TIMEOUT, WPARAM},
+    Graphics::Gdi::*,
+    System::{
+      Ole::{IDropTarget, RevokeDragDrop},
+      Threading::{GetCurrentThreadId, INFINITE},
+    },
+    UI::{
+      Controls::{self as win32c, HOVER_DEFAULT},
+      Input::{KeyboardAndMouse::*, Pointer::*, Touch::*, *},
+      Shell::{
+        SHAppBarMessage, ABE_BOTTOM, ABE_LEFT, ABE_RIGHT, ABE_TOP, ABM_GETAUTOHIDEBAR, APPBARDATA,
+      },
+      WindowsAndMessaging::{self as win32wm, *},
+    },
+  },
+};
+
+use crate::{
+  dpi::{PhysicalPosition, PhysicalSize, PixelUnit},
+  error::ExternalError,
+  event::{DeviceEvent, Event, Force, RawKeyEvent, Touch, TouchPhase, WindowEvent},
+  event_loop::{ControlFlow, DeviceEventFilter, EventLoopClosed, EventLoopWindowTarget as RootELW},
+  keyboard::{KeyCode, ModifiersState},
+  monitor::MonitorHandle as RootMonitorHandle,
+  platform_impl::platform::{
+    dark_mode::try_window_theme,
+    dpi::{become_dpi_aware, dpi_to_scale_factor},
+    ime::ImeContext,
+    keyboard::KeyEventBuilder,
+    keyboard_layout::get_agnostic_mods,
+    monitor::{self, MonitorHandle},
+
+--- src/platform_impl/windows/event.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{
+  char,
+  os::raw::c_int,
+  ptr,
+  sync::atomic::{AtomicBool, AtomicPtr, Ordering},
+};
+
+use crate::event::{ModifiersState, ScanCode, VirtualKeyCode};
+
+use windows::Win32::{
+  Foundation::{HWND, LPARAM, WPARAM},
+  UI::{
+    Input::KeyboardAndMouse::*,
+    TextServices::HKL,
+    WindowsAndMessaging::{self as win32wm, *},
+  },
+};
+
+fn key_pressed(vkey: c_int) -> bool {
+  unsafe { (GetKeyState(vkey) & (1 << 15)) == (1 << 15) }
+}
+
+pub fn get_key_mods() -> ModifiersState {
+  let filter_out_altgr = layout_uses_altgr() && key_pressed(VK_RMENU);
+
+  let mut mods = ModifiersState::empty();
+  mods.set(ModifiersState::SHIFT, key_pressed(VK_SHIFT));
+  mods.set(
+    ModifiersState::CTRL,
+    key_pressed(VK_CONTROL) && !filter_out_altgr,
+  );
+  mods.set(
+    ModifiersState::ALT,
+    key_pressed(VK_MENU) && !filter_out_altgr,
+  );
+  mods.set(
+    ModifiersState::LOGO,
+    key_pressed(VK_LWIN) || key_pressed(VK_RWIN),
+  );
+  mods
+}
+
+bitflags! {
+    #[derive(Default)]
+    pub struct ModifiersStateSide: u32 {
+        const LSHIFT = 0b010 << 0;
+        const RSHIFT = 0b001 << 0;
+
+        const LCTRL = 0b010 << 3;
+        const RCTRL = 0b001 << 3;
+
+
+--- src/platform_impl/windows/icon.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{fmt, mem, path::Path, sync::Arc};
+
+use windows::{
+  core::PCWSTR,
+  Win32::{
+    Foundation::{HWND, LPARAM, WPARAM},
+    UI::WindowsAndMessaging::*,
+  },
+};
+use windows_core::Owned;
+
+use crate::{dpi::PhysicalSize, icon::*, platform_impl::platform::util};
+
+impl Pixel {
+  fn to_bgra(&mut self) {
+    mem::swap(&mut self.r, &mut self.b);
+  }
+}
+
+impl RgbaIcon {
+  fn into_windows_icon(self) -> Result<WinIcon, BadIcon> {
+    let mut rgba = self.rgba;
+    let pixel_count = rgba.len() / PIXEL_SIZE;
+    let mut and_mask = Vec::with_capacity(pixel_count);
+    let pixels =
+      unsafe { std::slice::from_raw_parts_mut(rgba.as_mut_ptr() as *mut Pixel, pixel_count) };
+    for pixel in pixels {
+      and_mask.push(pixel.a.wrapping_sub(u8::MAX)); // invert alpha channel
+      pixel.to_bgra();
+    }
+    assert_eq!(and_mask.len(), pixel_count);
+    let handle = unsafe {
+      CreateIcon(
+        None,
+        self.width as i32,
+        self.height as i32,
+        1,
+        (PIXEL_SIZE * 8) as u8,
+        and_mask.as_ptr(),
+        rgba.as_ptr(),
+      )
+    }
+    .map_err(|error| BadIcon::OsError(error.into()))?;
+    Ok(WinIcon::from_handle(HICON(handle.0)))
+  }
+}
+
+#[non_exhaustive]
+#[derive(Debug)]
+pub enum IconType {
+  Small = ICON_SMALL as isize,
+
+--- src/platform_impl/windows/mod.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use windows::Win32::{
+  Foundation::{HANDLE, HWND},
+  UI::WindowsAndMessaging::HMENU,
+};
+
+pub(crate) use self::{
+  event_loop::{
+    EventLoop, EventLoopProxy, EventLoopWindowTarget, PlatformSpecificEventLoopAttributes,
+  },
+  icon::WinIcon,
+  keycode::{keycode_from_scancode, keycode_to_scancode},
+  monitor::{MonitorHandle, VideoMode},
+  window::Window,
+};
+
+pub use self::icon::WinIcon as PlatformIcon;
+
+use crate::{event::DeviceId as RootDeviceId, icon::Icon, keyboard::Key};
+mod keycode;
+
+#[non_exhaustive]
+#[derive(Clone)]
+pub enum Parent {
+  None,
+  ChildOf(HWND),
+  OwnedBy(HWND),
+}
+
+#[derive(Clone)]
+pub struct PlatformSpecificWindowBuilderAttributes {
+  pub parent: Parent,
+  pub menu: Option<HMENU>,
+  pub taskbar_icon: Option<Icon>,
+  pub skip_taskbar: bool,
+  pub window_classname: String,
+  pub no_redirection_bitmap: bool,
+  pub drag_and_drop: bool,
+  pub decoration_shadow: bool,
+  pub rtl: bool,
+}
+
+impl Default for PlatformSpecificWindowBuilderAttributes {
+  fn default() -> Self {
+    Self {
+      parent: Parent::None,
+      menu: None,
+      taskbar_icon: None,
+      no_redirection_bitmap: false,
+      drag_and_drop: true,
+      skip_taskbar: false,
+      window_classname: "Window Class".to_string(),
+
+--- src/platform_impl/windows/monitor.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use windows::{
+  core::{BOOL, PCWSTR},
+  Win32::{
+    Foundation::{HWND, LPARAM, POINT, RECT},
+    Graphics::Gdi::*,
+    UI::WindowsAndMessaging::USER_DEFAULT_SCREEN_DPI,
+  },
+};
+
+use std::{
+  collections::{BTreeSet, VecDeque},
+  io, mem,
+};
+
+use super::util;
+use crate::{
+  dpi::{PhysicalPosition, PhysicalSize},
+  monitor::{MonitorHandle as RootMonitorHandle, VideoMode as RootVideoMode},
+  platform_impl::platform::{
+    dpi::{dpi_to_scale_factor, get_monitor_dpi},
+    window::Window,
+  },
+};
+
+#[derive(Clone)]
+pub struct VideoMode {
+  pub(crate) size: (u32, u32),
+  pub(crate) bit_depth: u16,
+  pub(crate) refresh_rate: u16,
+  pub(crate) monitor: MonitorHandle,
+  pub(crate) native_video_mode: DEVMODEW,
+}
+
+impl PartialEq for VideoMode {
+  fn eq(&self, other: &Self) -> bool {
+    self.size == other.size
+      && self.bit_depth == other.bit_depth
+      && self.refresh_rate == other.refresh_rate
+      && self.monitor == other.monitor
+  }
+}
+
+impl Eq for VideoMode {}
+
+impl std::hash::Hash for VideoMode {
+  fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    self.size.hash(state);
+    self.bit_depth.hash(state);
+    self.refresh_rate.hash(state);
+    self.monitor.hash(state);
+  }
+
+--- src/platform_impl/windows/raw_input.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::mem::{self, size_of};
+
+use windows::Win32::{
+  Devices::HumanInterfaceDevice::*,
+  Foundation::{HANDLE, HWND},
+  UI::{
+    Input::{self as win32i, *},
+    WindowsAndMessaging::*,
+  },
+};
+
+use crate::{event::ElementState, event_loop::DeviceEventFilter, platform_impl::platform::util};
+
+#[allow(dead_code)]
+pub fn get_raw_input_device_list() -> Option<Vec<RAWINPUTDEVICELIST>> {
+  let list_size = size_of::<RAWINPUTDEVICELIST>() as u32;
+
+  let mut num_devices = 0;
+  let status = unsafe { GetRawInputDeviceList(None, &mut num_devices, list_size) };
+
+  if status == u32::MAX {
+    return None;
+  }
+
+  let mut buffer = Vec::with_capacity(num_devices as _);
+
+  let num_stored =
+    unsafe { GetRawInputDeviceList(Some(buffer.as_ptr() as _), &mut num_devices, list_size) };
+
+  if num_stored == u32::MAX {
+    return None;
+  }
+
+  debug_assert_eq!(num_devices, num_stored);
+
+  unsafe { buffer.set_len(num_devices as _) };
+
+  Some(buffer)
+}
+
+#[non_exhaustive]
+#[allow(dead_code)]
+pub enum RawDeviceInfo {
+  Mouse(RID_DEVICE_INFO_MOUSE),
+  Keyboard(RID_DEVICE_INFO_KEYBOARD),
+  Hid(RID_DEVICE_INFO_HID),
+}
+
+impl From<RID_DEVICE_INFO> for RawDeviceInfo {
+  fn from(info: RID_DEVICE_INFO) -> Self {
+    unsafe {
+
+--- src/platform_impl/windows/util.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{
+  io,
+  iter::once,
+  mem,
+  ops::BitAnd,
+  os::windows::prelude::OsStrExt,
+  slice,
+  sync::atomic::{AtomicBool, Ordering},
+};
+
+use crate::{
+  dpi::{PhysicalPosition, PhysicalSize},
+  window::CursorIcon,
+};
+
+use std::sync::LazyLock;
+use windows::{
+  core::{BOOL, HRESULT, PCSTR, PCWSTR},
+  Win32::{
+    Foundation::{COLORREF, FARPROC, HWND, LPARAM, POINT, RECT, WPARAM},
+    Globalization::lstrlenW,
+    Graphics::Gdi::{ClientToScreen, InvalidateRgn, HMONITOR},
+    System::LibraryLoader::*,
+    UI::{
+      HiDpi::*,
+      Input::KeyboardAndMouse::*,
+      WindowsAndMessaging::{self as win32wm, *},
+    },
+  },
+};
+
+pub fn has_flag<T>(bitset: T, flag: T) -> bool
+where
+  T: Copy + PartialEq + BitAnd<T, Output = T>,
+{
+  bitset & flag == flag
+}
+
+pub fn wchar_to_string(wchar: &[u16]) -> String {
+  String::from_utf16_lossy(wchar)
+}
+
+pub fn wchar_ptr_to_string(wchar: PCWSTR) -> String {
+  let len = unsafe { lstrlenW(wchar) } as usize;
+  let wchar_slice = unsafe { slice::from_raw_parts(wchar.0, len) };
+  wchar_to_string(wchar_slice)
+}
+
+pub fn encode_wide(string: impl AsRef<std::ffi::OsStr>) -> Vec<u16> {
+  string.as_ref().encode_wide().chain(once(0)).collect()
+}
+
+--- src/platform_impl/windows/window_state.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use crate::{
+  dpi::PhysicalPosition,
+  icon::Icon,
+  keyboard::ModifiersState,
+  platform_impl::platform::{event_loop, util},
+  window::{CursorIcon, Fullscreen, Theme, WindowAttributes, WindowSizeConstraints, RGBA},
+};
+use parking_lot::MutexGuard;
+use std::io;
+use windows::Win32::{
+  Foundation::{HWND, LPARAM, RECT, WPARAM},
+  Graphics::Gdi::InvalidateRgn,
+  UI::WindowsAndMessaging::*,
+};
+
+/// Contains information about states and the window that the callback is going to use.
+pub struct WindowState {
+  pub mouse: MouseProperties,
+
+  /// Used by `WM_GETMINMAXINFO`.
+  pub size_constraints: WindowSizeConstraints,
+
+  pub window_icon: Option<Icon>,
+  pub taskbar_icon: Option<Icon>,
+
+  pub saved_window: Option<SavedWindow>,
+  pub scale_factor: f64,
+
+  pub dragging: bool,
+
+  pub skip_taskbar: bool,
+
+  pub modifiers_state: ModifiersState,
+  pub fullscreen: Option<Fullscreen>,
+  pub current_theme: Theme,
+  pub preferred_theme: Option<Theme>,
+
+  pub window_flags: WindowFlags,
+
+  // Used by WM_NCACTIVATE, WM_SETFOCUS and WM_KILLFOCUS
+  pub is_active: bool,
+  pub is_focused: bool,
+
+  pub background_color: Option<RGBA>,
+}
+
+unsafe impl Send for WindowState {}
+unsafe impl Sync for WindowState {}
+
+#[derive(Clone)]
+pub struct SavedWindow {
+
+--- src/platform_impl/windows/window.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+#![cfg(target_os = "windows")]
+
+use mem::MaybeUninit;
+use parking_lot::Mutex;
+use std::{
+  cell::{Cell, RefCell},
+  ffi::OsStr,
+  io, mem,
+  os::windows::ffi::OsStrExt,
+  panic,
+  sync::Arc,
+};
+
+use crossbeam_channel as channel;
+use windows::{
+  core::PCWSTR,
+  Win32::{
+    Foundation::{self as win32f, HINSTANCE, HWND, LPARAM, POINT, POINTS, RECT, WPARAM},
+    Graphics::{
+      Dwm::{DwmEnableBlurBehindWindow, DWM_BB_BLURREGION, DWM_BB_ENABLE, DWM_BLURBEHIND},
+      Gdi::*,
+    },
+    System::{Com::*, Ole::*},
+    UI::{
+      Input::{Ime::*, KeyboardAndMouse::*, Touch::*},
+      Shell::{ITaskbarList4 as ITaskbarList, TaskbarList, *},
+      WindowsAndMessaging::*,
+    },
+  },
+};
+
+use crate::{
+  dpi::{PhysicalPosition, PhysicalSize, Position, Size},
+  error::{ExternalError, NotSupportedError, OsError as RootOsError},
+  icon::Icon,
+  monitor::MonitorHandle as RootMonitorHandle,
+  platform_impl::platform::{
+    dark_mode::try_window_theme,
+    dpi::{dpi_to_scale_factor, enable_non_client_dpi_scaling, hwnd_dpi},
+    drop_handler::FileDropHandler,
+    event_loop::{self, EventLoopWindowTarget, DESTROY_MSG_ID},
+    icon::{self, IconType},
+    monitor::{self},
+    util,
+    window_state::{CursorFlags, SavedWindow, WindowFlags, WindowState},
+    OsError, Parent, PlatformSpecificWindowBuilderAttributes, WindowId,
+  },
+  window::{
+    CursorIcon, Fullscreen, ProgressBarState, ProgressState, ResizeDirection, Theme,
+    UserAttentionType, WindowAttributes, WindowSizeConstraints, RGBA,
+  },
+
+--- src/window.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+//! The `Window` struct and associated types.
+use std::fmt;
+
+use crate::{
+  dpi::{LogicalSize, PhysicalPosition, PhysicalSize, Pixel, PixelUnit, Position, Size},
+  error::{ExternalError, NotSupportedError, OsError},
+  event_loop::EventLoopWindowTarget,
+  monitor::{MonitorHandle, VideoMode},
+  platform_impl,
+};
+
+pub use crate::icon::{BadIcon, Icon};
+
+/// Progress State
+#[derive(Debug, Clone, Copy)]
+pub enum ProgressState {
+  None,
+  Normal,
+  /// **Treated as Normal in linux and macOS**
+  Indeterminate,
+  /// **Treated as Normal in linux**
+  Paused,
+  /// **Treated as Normal in linux**
+  Error,
+}
+
+pub struct ProgressBarState {
+  /// The progress bar state.
+  pub state: Option<ProgressState>,
+  /// The progress bar progress. This can be a value ranging from `0` to `100`
+  pub progress: Option<u64>,
+  /// The `.desktop` filename with the Unity desktop window manager, for example `myapp.desktop` **Linux Only**
+  pub desktop_filename: Option<String>,
+}
+
+/// Represents a window.
+///
+/// # Example
+///
+/// ```no_run
+/// use tao::{
+///     event::{Event, WindowEvent},
+///     event_loop::{ControlFlow, EventLoop},
+///     window::Window,
+/// };
+///
+/// let mut event_loop = EventLoop::new();
+/// let window = Window::new(&event_loop).unwrap();
+///
+/// event_loop.run(move |event, _, control_flow| {
+///     *control_flow = ControlFlow::Wait;

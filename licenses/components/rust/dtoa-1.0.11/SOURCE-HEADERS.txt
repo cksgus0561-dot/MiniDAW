@@ -1,0 +1,113 @@
+--- src/diyfp.rs ---
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+//
+// ---
+//
+// The C++ implementation preserved here in comments is licensed as follows:
+//
+// Tencent is pleased to support the open source community by making RapidJSON
+// available.
+//
+// Copyright (C) 2015 THL A29 Limited, a Tencent company, and Milo Yip. All
+// rights reserved.
+//
+// Licensed under the MIT License (the "License"); you may not use this file
+// except in compliance with the License. You may obtain a copy of the License
+// at
+//
+// http://opensource.org/licenses/MIT
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+// WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+// License for the specific language governing permissions and limitations under
+// the License.
+
+use core::ops::{Mul, Sub};
+#[cfg(feature = "no-panic")]
+use no_panic::no_panic;
+
+#[derive(Copy, Clone, Debug)]
+pub struct DiyFp<F, E> {
+    pub f: F,
+    pub e: E,
+}
+
+impl<F, E> DiyFp<F, E> {
+    #[cfg_attr(feature = "no-panic", no_panic)]
+    pub fn new(f: F, e: E) -> Self {
+        DiyFp { f, e }
+    }
+}
+
+impl<F, E> Sub for DiyFp<F, E>
+where
+    F: Sub<F, Output = F>,
+{
+    type Output = Self;
+
+    #[cfg_attr(feature = "no-panic", no_panic)]
+    fn sub(self, rhs: Self) -> Self {
+        DiyFp {
+            f: self.f - rhs.f,
+
+--- src/dtoa.rs ---
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+//
+// ---
+//
+// The C++ implementation preserved here in comments is licensed as follows:
+//
+// Tencent is pleased to support the open source community by making RapidJSON
+// available.
+//
+// Copyright (C) 2015 THL A29 Limited, a Tencent company, and Milo Yip. All
+// rights reserved.
+//
+// Licensed under the MIT License (the "License"); you may not use this file
+// except in compliance with the License. You may obtain a copy of the License
+// at
+//
+// http://opensource.org/licenses/MIT
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+// WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+// License for the specific language governing permissions and limitations under
+// the License.
+
+use core::ptr;
+#[cfg(feature = "no-panic")]
+use no_panic::no_panic;
+
+/*
+inline unsigned CountDecimalDigit32(uint32_t n) {
+    // Simple pure C++ implementation was faster than __builtin_clz version in this situation.
+    if (n < 10) return 1;
+    if (n < 100) return 2;
+    if (n < 1000) return 3;
+    if (n < 10000) return 4;
+    if (n < 100000) return 5;
+    if (n < 1000000) return 6;
+    if (n < 10000000) return 7;
+    if (n < 100000000) return 8;
+    // Will not reach 10 digits in DigitGen()
+    //if (n < 1000000000) return 9;
+    //return 10;
+    return 9;
+}
+*/
+
+#[inline]
+#[cfg_attr(feature = "no-panic", no_panic)]
+pub fn count_decimal_digit32(n: u32) -> usize {
+    if n < 10 {
+        1

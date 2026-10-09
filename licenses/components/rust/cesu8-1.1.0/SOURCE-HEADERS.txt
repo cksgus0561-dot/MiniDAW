@@ -1,0 +1,95 @@
+--- src/lib.rs ---
+// Copyright 2012-2014 The Rust Project Developers and Eric Kidd.  See the
+// COPYRIGHT-RUST.txt file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed except
+// according to those terms.
+
+
+//! A simple library implementing the [CESU-8 compatibility encoding
+//! scheme](http://www.unicode.org/reports/tr26/tr26-2.html).  This is a
+//! non-standard variant of UTF-8 that is used internally by some systems
+//! that need to represent UTF-16 data as 8-bit characters.  Yes, this is
+//! ugly.
+//!
+//! Use of this encoding is discouraged by the Unicode Consortium.  It's OK
+//! for working with existing internal APIs, but it should not be used for
+//! transmitting or storing data.
+//!
+//! ```
+//! use std::borrow::Cow;
+//! use cesu8::{from_cesu8, to_cesu8};
+//!
+//! // 16-bit Unicode characters are the same in UTF-8 and CESU-8.
+//! assert_eq!(Cow::Borrowed("aé日".as_bytes()),
+//!            to_cesu8("aé日"));
+//! assert_eq!(Cow::Borrowed("aé日"),
+//!            from_cesu8("aé日".as_bytes()).unwrap());
+//!
+//! // This string is CESU-8 data containing a 6-byte surrogate pair,
+//! // which decodes to a 4-byte UTF-8 string.
+//! let data = &[0xED, 0xA0, 0x81, 0xED, 0xB0, 0x81];
+//! assert_eq!(Cow::Borrowed("\u{10401}"),
+//!            from_cesu8(data).unwrap());
+//! ```
+//!
+//! ### A note about security
+//!
+//! As a general rule, this library is intended to fail on malformed or
+//! unexpected input.  CESU-8 is supposed to be an internal-only format,
+//! and if we're seeing malformed data, we assume that it's either a bug in
+//! somebody's code, or an attacker is trying to improperly encode data to
+//! evade security checks.
+//!
+//! If you have a use case for lossy conversion to UTF-8, or conversion
+//! from mixed UTF-8/CESU-8 data, please feel free to submit a pull request
+//! for `from_cesu8_lossy_permissive` with appropriate behavior.
+//!
+//! ### Java and U+0000, and other variants
+//!
+//! Java uses the CESU-8 encoding as described above, but with one
+//! difference: The null character U+0000 is represented as an overlong
+//! UTF-8 sequence `C0 80`. This is supported by the `from_java_cesu8` and
+//! `to_java_cesu8` methods.
+
+--- src/unicode.rs ---
+// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
+// file at http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+// (This used to be in the Rust unicode crate, which is now gone, so we'll
+// just include it inline.)
+
+// https://tools.ietf.org/html/rfc3629
+static UTF8_CHAR_WIDTH: [u8; 256] = [
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, // 0x1F
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, // 0x3F
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, // 0x5F
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, // 0x7F
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // 0x9F
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // 0xBF
+0,0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2, // 0xDF
+3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3, // 0xEF
+4,4,4,4,4,0,0,0,0,0,0,0,0,0,0,0, // 0xFF
+];
+
+/// Given a first byte, determine how many bytes are in this UTF-8 character
+#[inline]
+pub fn utf8_char_width(b: u8) -> usize {
+    return UTF8_CHAR_WIDTH[b as usize] as usize;
+}

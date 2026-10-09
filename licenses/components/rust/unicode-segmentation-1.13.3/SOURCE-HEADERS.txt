@@ -1,0 +1,398 @@
+--- src/grapheme.rs ---
+// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::tables::grapheme::GraphemeCat;
+use core::cmp;
+
+/// External iterator for grapheme clusters and byte offsets.
+///
+/// This struct is created by the [`grapheme_indices`] method on the [`UnicodeSegmentation`]
+/// trait. See its documentation for more.
+///
+/// [`grapheme_indices`]: trait.UnicodeSegmentation.html#tymethod.grapheme_indices
+/// [`UnicodeSegmentation`]: trait.UnicodeSegmentation.html
+#[derive(Debug, Clone)]
+pub struct GraphemeIndices<'a> {
+    start_offset: usize,
+    iter: Graphemes<'a>,
+}
+
+impl<'a> GraphemeIndices<'a> {
+    #[inline]
+    /// View the underlying data (the part yet to be iterated) as a slice of the original string.
+    ///
+    /// ```rust
+    /// # use unicode_segmentation::UnicodeSegmentation;
+    /// let mut iter = "abc".grapheme_indices(true);
+    /// assert_eq!(iter.as_str(), "abc");
+    /// iter.next();
+    /// assert_eq!(iter.as_str(), "bc");
+    /// iter.next();
+    /// iter.next();
+    /// assert_eq!(iter.as_str(), "");
+    /// ```
+    pub fn as_str(&self) -> &'a str {
+        self.iter.as_str()
+    }
+}
+
+impl<'a> Iterator for GraphemeIndices<'a> {
+    type Item = (usize, &'a str);
+
+    #[inline]
+    fn next(&mut self) -> Option<(usize, &'a str)> {
+        self.iter
+            .next()
+            .map(|s| (s.as_ptr() as usize - self.start_offset, s))
+    }
+
+
+--- src/lib.rs ---
+// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! Iterators which split strings on Grapheme Cluster, Word, or Sentence boundaries, according
+//! to the [Unicode Standard Annex #29](https://www.unicode.org/reports/tr29/) rules.
+//!
+//! ```rust
+//! use unicode_segmentation::UnicodeSegmentation;
+//!
+//! fn main() {
+//!     let s = "a̐éö̲\r\n";
+//!     let g = s.graphemes(true).collect::<Vec<&str>>();
+//!     let b: &[_] = &["a̐", "é", "ö̲", "\r\n"];
+//!     assert_eq!(g, b);
+//!
+//!     let s = "The quick (\"brown\") fox can't jump 32.3 feet, right?";
+//!     let w = s.unicode_words().collect::<Vec<&str>>();
+//!     let b: &[_] = &["The", "quick", "brown", "fox", "can't", "jump", "32.3", "feet", "right"];
+//!     assert_eq!(w, b);
+//!
+//!     let s = "The quick (\"brown\")  fox";
+//!     let w = s.split_word_bounds().collect::<Vec<&str>>();
+//!     let b: &[_] = &["The", " ", "quick", " ", "(", "\"", "brown", "\"", ")", "  ", "fox"];
+//!     assert_eq!(w, b);
+//! }
+//! ```
+//!
+//! # no_std
+//!
+//! unicode-segmentation does not depend on libstd, so it can be used in crates
+//! with the `#![no_std]` attribute.
+//!
+//! # crates.io
+//!
+//! You can use this package in your project by adding the following
+//! to your `Cargo.toml`:
+//!
+//! ```toml
+//! [dependencies]
+//! unicode-segmentation = "1"
+//! ```
+
+#![deny(missing_docs, unsafe_code)]
+#![doc(
+    html_logo_url = "https://unicode-rs.github.io/unicode-rs_sm.png",
+    html_favicon_url = "https://unicode-rs.github.io/unicode-rs_sm.png"
+)]
+#![no_std]
+
+--- src/sentence.rs ---
+// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use core::cmp;
+use core::iter::Filter;
+
+// All of the logic for forward iteration over sentences
+mod fwd {
+    use crate::tables::sentence::SentenceCat;
+    use core::cmp;
+
+    // Describe a parsed part of source string as described in this table:
+    // https://unicode.org/reports/tr29/#Default_Sentence_Boundaries
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum StatePart {
+        Sot,
+        Eot,
+        Other,
+        CR,
+        LF,
+        Sep,
+        ATerm,
+        UpperLower,
+        ClosePlus,
+        SpPlus,
+        STerm,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct SentenceBreaksState(pub [StatePart; 4]);
+
+    const INITIAL_STATE: SentenceBreaksState = SentenceBreaksState([
+        StatePart::Sot,
+        StatePart::Sot,
+        StatePart::Sot,
+        StatePart::Sot,
+    ]);
+
+    #[derive(Debug, Clone)]
+    pub struct SentenceBreaks<'a> {
+        pub string: &'a str,
+        pos: usize,
+        state: SentenceBreaksState,
+    }
+
+    impl SentenceBreaksState {
+        // Attempt to advance the internal state by one part
+        // Whitespace and some punctutation will be collapsed
+
+--- src/tables.rs ---
+// Copyright 2012-2018 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+// NOTE: The following code was generated by "scripts/unicode.py", do not edit directly
+
+#![allow(missing_docs, non_upper_case_globals, non_snake_case)]
+
+/// The version of [Unicode](http://www.unicode.org/)
+/// that this version of unicode-segmentation is based on.
+pub const UNICODE_VERSION: (u64, u64, u64) = (17, 0, 0);
+
+const UNICODE_VERSION_U8: (u8, u8, u8) = (17, 0, 0);
+
+pub mod util {
+    #[inline]
+    pub fn bsearch_range_table(c: char, r: &[(char,char)]) -> bool {
+        use core::cmp::Ordering::{Equal, Less, Greater};
+        r.binary_search_by(|&(lo,hi)| {
+            if lo <= c && c <= hi { Equal }
+            else if hi < c { Less }
+            else { Greater }
+        }).is_ok()
+    }
+
+    #[inline]
+    fn is_alphabetic(c: char) -> bool {
+        if super::UNICODE_VERSION_U8 == char::UNICODE_VERSION {
+            c.is_alphabetic()
+        } else {
+            match c {
+                'a' ..= 'z' | 'A' ..= 'Z' => true,
+                c if c > '\x7f' => super::derived_property::Alphabetic(c),
+                _ => false,
+            }
+        }
+    }
+
+    #[inline]
+    fn is_numeric(c: char) -> bool {
+        if super::UNICODE_VERSION_U8 == char::UNICODE_VERSION {
+            c.is_numeric()
+        } else {
+            match c {
+                '0' ..= '9' => true,
+                c if c > '\x7f' => super::general_category::N(c),
+                _ => false,
+            }
+        }
+
+--- src/word.rs ---
+// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use core::cmp;
+use core::iter::Filter;
+
+use crate::tables::word::WordCat;
+
+/// An iterator over the substrings of a string which, after splitting the string on
+/// [word boundaries](http://www.unicode.org/reports/tr29/#Word_Boundaries),
+/// contain any characters with the
+/// [Alphabetic](http://unicode.org/reports/tr44/#Alphabetic)
+/// property, or with
+/// [General_Category=Number](http://unicode.org/reports/tr44/#General_Category_Values).
+///
+/// This struct is created by the [`unicode_words`] method on the [`UnicodeSegmentation`] trait. See
+/// its documentation for more.
+///
+/// [`unicode_words`]: trait.UnicodeSegmentation.html#tymethod.unicode_words
+/// [`UnicodeSegmentation`]: trait.UnicodeSegmentation.html
+#[derive(Debug)]
+pub struct UnicodeWords<'a> {
+    inner: WordsIter<'a>,
+}
+
+impl<'a> Iterator for UnicodeWords<'a> {
+    type Item = &'a str;
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.inner {
+            WordsIter::Ascii(i) => i.next(),
+            WordsIter::Unicode(i) => i.next(),
+        }
+    }
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match &self.inner {
+            WordsIter::Ascii(i) => i.size_hint(),
+            WordsIter::Unicode(i) => i.size_hint(),
+        }
+    }
+}
+impl<'a> DoubleEndedIterator for UnicodeWords<'a> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        match &mut self.inner {
+            WordsIter::Ascii(i) => i.next_back(),
+            WordsIter::Unicode(i) => i.next_back(),
+
+--- tests/test.rs ---
+// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use quickcheck::quickcheck;
+use unicode_segmentation::UnicodeSegmentation;
+
+#[rustfmt::skip]
+mod testdata;
+
+#[test]
+fn test_graphemes() {
+    use crate::testdata::{TEST_DIFF, TEST_SAME};
+
+    pub const EXTRA_DIFF: &[(&str, &[&str], &[&str])] = &[
+        // Official test suite doesn't include two Prepend chars between two other chars.
+        (
+            "\u{20}\u{600}\u{600}\u{20}",
+            &["\u{20}", "\u{600}\u{600}\u{20}"],
+            &["\u{20}", "\u{600}", "\u{600}", "\u{20}"],
+        ),
+        // Test for Prepend followed by two Any chars
+        (
+            "\u{600}\u{20}\u{20}",
+            &["\u{600}\u{20}", "\u{20}"],
+            &["\u{600}", "\u{20}", "\u{20}"],
+        ),
+    ];
+
+    pub const EXTRA_SAME: &[(&str, &[&str])] = &[
+        // family emoji (more than two emoji joined by ZWJ)
+        (
+            "\u{1f468}\u{200d}\u{1f467}\u{200d}\u{1f466}",
+            &["\u{1f468}\u{200d}\u{1f467}\u{200d}\u{1f466}"],
+        ),
+        // cartwheel emoji followed by two fitzpatrick skin tone modifiers
+        // (test case from issue #19)
+        (
+            "\u{1F938}\u{1F3FE}\u{1F3FE}",
+            &["\u{1F938}\u{1F3FE}\u{1F3FE}"],
+        ),
+    ];
+
+    for &(s, g) in TEST_SAME.iter().chain(EXTRA_SAME) {
+        // test forward iterator
+        let our_extended: Vec<_> = UnicodeSegmentation::graphemes(s, true).collect();
+        let our_legacy: Vec<_> = UnicodeSegmentation::graphemes(s, false).collect();
+        assert_eq!(our_extended, g, "{s:?} extended");
+        assert_eq!(our_legacy, g, "{s:?} legacy");
+
+--- tests/testdata/mod.rs ---
+// Copyright 2012-2018 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+// NOTE: The following code was generated by "scripts/unicode.py", do not edit directly
+
+#![allow(missing_docs, non_upper_case_globals, non_snake_case)]
+    // official Unicode test data
+    // http://www.unicode.org/Public/17.0.0/ucd/auxiliary/GraphemeBreakTest.txt
+    pub const TEST_SAME: &[(&str, &[&str])] = &[
+        ("\u{d}\u{d}", &["\u{d}", "\u{d}"]), ("\u{d}\u{308}\u{d}", &["\u{d}", "\u{308}", "\u{d}"]),
+        ("\u{d}\u{a}", &["\u{d}\u{a}"]), ("\u{d}\u{308}\u{a}", &["\u{d}", "\u{308}", "\u{a}"]),
+        ("\u{d}\u{0}", &["\u{d}", "\u{0}"]), ("\u{d}\u{308}\u{0}", &["\u{d}", "\u{308}", "\u{0}"]),
+        ("\u{d}\u{94d}", &["\u{d}", "\u{94d}"]), ("\u{d}\u{308}\u{94d}", &["\u{d}",
+        "\u{308}\u{94d}"]), ("\u{d}\u{300}", &["\u{d}", "\u{300}"]), ("\u{d}\u{308}\u{300}",
+        &["\u{d}", "\u{308}\u{300}"]), ("\u{d}\u{200c}", &["\u{d}", "\u{200c}"]),
+        ("\u{d}\u{308}\u{200c}", &["\u{d}", "\u{308}\u{200c}"]), ("\u{d}\u{200d}", &["\u{d}",
+        "\u{200d}"]), ("\u{d}\u{308}\u{200d}", &["\u{d}", "\u{308}\u{200d}"]), ("\u{d}\u{1f1e6}",
+        &["\u{d}", "\u{1f1e6}"]), ("\u{d}\u{308}\u{1f1e6}", &["\u{d}", "\u{308}", "\u{1f1e6}"]),
+        ("\u{d}\u{6dd}", &["\u{d}", "\u{6dd}"]), ("\u{d}\u{308}\u{6dd}", &["\u{d}", "\u{308}",
+        "\u{6dd}"]), ("\u{d}\u{903}", &["\u{d}", "\u{903}"]), ("\u{d}\u{1100}", &["\u{d}",
+        "\u{1100}"]), ("\u{d}\u{308}\u{1100}", &["\u{d}", "\u{308}", "\u{1100}"]), ("\u{d}\u{1160}",
+        &["\u{d}", "\u{1160}"]), ("\u{d}\u{308}\u{1160}", &["\u{d}", "\u{308}", "\u{1160}"]),
+        ("\u{d}\u{11a8}", &["\u{d}", "\u{11a8}"]), ("\u{d}\u{308}\u{11a8}", &["\u{d}", "\u{308}",
+        "\u{11a8}"]), ("\u{d}\u{ac00}", &["\u{d}", "\u{ac00}"]), ("\u{d}\u{308}\u{ac00}", &["\u{d}",
+        "\u{308}", "\u{ac00}"]), ("\u{d}\u{ac01}", &["\u{d}", "\u{ac01}"]), ("\u{d}\u{308}\u{ac01}",
+        &["\u{d}", "\u{308}", "\u{ac01}"]), ("\u{d}\u{915}", &["\u{d}", "\u{915}"]),
+        ("\u{d}\u{308}\u{915}", &["\u{d}", "\u{308}", "\u{915}"]), ("\u{d}\u{a9}", &["\u{d}",
+        "\u{a9}"]), ("\u{d}\u{308}\u{a9}", &["\u{d}", "\u{308}", "\u{a9}"]), ("\u{d}\u{20}",
+        &["\u{d}", "\u{20}"]), ("\u{d}\u{308}\u{20}", &["\u{d}", "\u{308}", "\u{20}"]),
+        ("\u{d}\u{378}", &["\u{d}", "\u{378}"]), ("\u{d}\u{308}\u{378}", &["\u{d}", "\u{308}",
+        "\u{378}"]), ("\u{a}\u{d}", &["\u{a}", "\u{d}"]), ("\u{a}\u{308}\u{d}", &["\u{a}",
+        "\u{308}", "\u{d}"]), ("\u{a}\u{a}", &["\u{a}", "\u{a}"]), ("\u{a}\u{308}\u{a}", &["\u{a}",
+        "\u{308}", "\u{a}"]), ("\u{a}\u{0}", &["\u{a}", "\u{0}"]), ("\u{a}\u{308}\u{0}", &["\u{a}",
+        "\u{308}", "\u{0}"]), ("\u{a}\u{94d}", &["\u{a}", "\u{94d}"]), ("\u{a}\u{308}\u{94d}",
+        &["\u{a}", "\u{308}\u{94d}"]), ("\u{a}\u{300}", &["\u{a}", "\u{300}"]),
+        ("\u{a}\u{308}\u{300}", &["\u{a}", "\u{308}\u{300}"]), ("\u{a}\u{200c}", &["\u{a}",
+        "\u{200c}"]), ("\u{a}\u{308}\u{200c}", &["\u{a}", "\u{308}\u{200c}"]), ("\u{a}\u{200d}",
+        &["\u{a}", "\u{200d}"]), ("\u{a}\u{308}\u{200d}", &["\u{a}", "\u{308}\u{200d}"]),
+        ("\u{a}\u{1f1e6}", &["\u{a}", "\u{1f1e6}"]), ("\u{a}\u{308}\u{1f1e6}", &["\u{a}", "\u{308}",
+        "\u{1f1e6}"]), ("\u{a}\u{6dd}", &["\u{a}", "\u{6dd}"]), ("\u{a}\u{308}\u{6dd}", &["\u{a}",
+        "\u{308}", "\u{6dd}"]), ("\u{a}\u{903}", &["\u{a}", "\u{903}"]), ("\u{a}\u{1100}",
+        &["\u{a}", "\u{1100}"]), ("\u{a}\u{308}\u{1100}", &["\u{a}", "\u{308}", "\u{1100}"]),
+        ("\u{a}\u{1160}", &["\u{a}", "\u{1160}"]), ("\u{a}\u{308}\u{1160}", &["\u{a}", "\u{308}",
+        "\u{1160}"]), ("\u{a}\u{11a8}", &["\u{a}", "\u{11a8}"]), ("\u{a}\u{308}\u{11a8}", &["\u{a}",
+        "\u{308}", "\u{11a8}"]), ("\u{a}\u{ac00}", &["\u{a}", "\u{ac00}"]), ("\u{a}\u{308}\u{ac00}",
+        &["\u{a}", "\u{308}", "\u{ac00}"]), ("\u{a}\u{ac01}", &["\u{a}", "\u{ac01}"]),
+        ("\u{a}\u{308}\u{ac01}", &["\u{a}", "\u{308}", "\u{ac01}"]), ("\u{a}\u{915}", &["\u{a}",
+        "\u{915}"]), ("\u{a}\u{308}\u{915}", &["\u{a}", "\u{308}", "\u{915}"]), ("\u{a}\u{a9}",

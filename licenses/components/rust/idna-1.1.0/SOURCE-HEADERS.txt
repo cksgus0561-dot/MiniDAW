@@ -1,0 +1,398 @@
+--- src/deprecated.rs ---
+// Copyright 2013-2014 The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! Deprecated API for [*Unicode IDNA Compatibility Processing*
+//! (Unicode Technical Standard #46)](http://www.unicode.org/reports/tr46/)
+
+#![allow(deprecated)]
+
+use alloc::borrow::Cow;
+use alloc::string::String;
+
+use crate::uts46::*;
+use crate::Errors;
+
+/// Performs preprocessing equivalent to UTS 46 transitional processing
+/// if `transitional` is `true`. If `transitional` is `false`, merely
+/// lets the input pass through as-is (for call site convenience).
+///
+/// The output of this function is to be passed to [`Uts46::process`].
+fn map_transitional(domain: &str, transitional: bool) -> Cow<'_, str> {
+    if !transitional {
+        return Cow::Borrowed(domain);
+    }
+    let mut chars = domain.chars();
+    loop {
+        let prev = chars.clone();
+        if let Some(c) = chars.next() {
+            match c {
+                'ß' | 'ẞ' | 'ς' | '\u{200C}' | '\u{200D}' => {
+                    let mut s = String::with_capacity(domain.len());
+                    let tail = prev.as_str();
+                    let head = &domain[..domain.len() - tail.len()];
+                    s.push_str(head);
+                    for c in tail.chars() {
+                        match c {
+                            'ß' | 'ẞ' => {
+                                s.push_str("ss");
+                            }
+                            'ς' => {
+                                s.push('σ');
+                            }
+                            '\u{200C}' | '\u{200D}' => {}
+                            _ => {
+                                s.push(c);
+                            }
+                        }
+                    }
+                    return Cow::Owned(s);
+                }
+                _ => {}
+
+--- src/lib.rs ---
+// Copyright 2016 The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! This Rust crate implements IDNA
+//! [per the WHATWG URL Standard](https://url.spec.whatwg.org/#idna).
+//!
+//! It also exposes the underlying algorithms from [*Unicode IDNA Compatibility Processing*
+//! (Unicode Technical Standard #46)](http://www.unicode.org/reports/tr46/)
+//! and [Punycode (RFC 3492)](https://tools.ietf.org/html/rfc3492).
+//!
+//! Quoting from [UTS #46’s introduction](http://www.unicode.org/reports/tr46/#Introduction):
+//!
+//! > Initially, domain names were restricted to ASCII characters.
+//! > A system was introduced in 2003 for internationalized domain names (IDN).
+//! > This system is called Internationalizing Domain Names for Applications,
+//! > or IDNA2003 for short.
+//! > This mechanism supports IDNs by means of a client software transformation
+//! > into a format known as Punycode.
+//! > A revision of IDNA was approved in 2010 (IDNA2008).
+//! > This revision has a number of incompatibilities with IDNA2003.
+//! >
+//! > The incompatibilities force implementers of client software,
+//! > such as browsers and emailers,
+//! > to face difficult choices during the transition period
+//! > as registries shift from IDNA2003 to IDNA2008.
+//! > This document specifies a mechanism
+//! > that minimizes the impact of this transition for client software,
+//! > allowing client software to access domains that are valid under either system.
+#![no_std]
+
+// For forwards compatibility
+#[cfg(feature = "std")]
+extern crate std;
+
+extern crate alloc;
+
+#[cfg(not(feature = "alloc"))]
+compile_error!("the `alloc` feature must be enabled");
+
+// Avoid a breaking change if in the future there's a use case for
+// having a Bring-Your-Own-ICU4X-Data constructor for `Uts46` and
+// not also having compiled data in the binary.
+#[cfg(not(feature = "compiled_data"))]
+compile_error!("the `compiled_data` feature must be enabled");
+
+use alloc::borrow::Cow;
+use alloc::string::String;
+pub use uts46::AsciiDenyList;
+use uts46::Uts46;
+
+
+--- src/punycode.rs ---
+// Copyright 2013 The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! Punycode ([RFC 3492](http://tools.ietf.org/html/rfc3492)) implementation.
+//!
+//! Since Punycode fundamentally works on unicode code points,
+//! `encode` and `decode` take and return slices and vectors of `char`.
+//! `encode_str` and `decode_to_string` provide convenience wrappers
+//! that convert from and to Rust’s UTF-8 based `str` and `String` types.
+
+use alloc::{string::String, vec::Vec};
+use core::char;
+use core::fmt::Write;
+use core::marker::PhantomData;
+
+// Bootstring parameters for Punycode
+const BASE: u32 = 36;
+const T_MIN: u32 = 1;
+const T_MAX: u32 = 26;
+const SKEW: u32 = 38;
+const DAMP: u32 = 700;
+const INITIAL_BIAS: u32 = 72;
+const INITIAL_N: u32 = 0x80;
+
+#[inline]
+fn adapt(mut delta: u32, num_points: u32, first_time: bool) -> u32 {
+    delta /= if first_time { DAMP } else { 2 };
+    delta += delta / num_points;
+    let mut k = 0;
+    while delta > ((BASE - T_MIN) * T_MAX) / 2 {
+        delta /= BASE - T_MIN;
+        k += BASE;
+    }
+    k + (((BASE - T_MIN + 1) * delta) / (delta + SKEW))
+}
+
+/// Convert Punycode to an Unicode `String`.
+///
+/// Return None on malformed input or overflow.
+/// Overflow can only happen on inputs that take more than
+/// 63 encoded bytes, the DNS limit on domain name labels.
+#[inline]
+pub fn decode_to_string(input: &str) -> Option<String> {
+    Some(
+        Decoder::default()
+            .decode::<u8, ExternalCaller>(input.as_bytes())
+            .ok()?
+            .collect(),
+    )
+}
+
+--- src/uts46.rs ---
+// Copyright The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! This module provides the lower-level API for UTS 46.
+//!
+//! [`Uts46::process`] is the core that the other convenience
+//! methods build on.
+//!
+//! UTS 46 flags map to this API as follows:
+//!
+//! * _CheckHyphens_ - _true_: [`Hyphens::Check`], _false_: [`Hyphens::Allow`]; the WHATWG URL Standard sets this to _false_ for normal (non-conformance-checker) user agents.
+//! * _CheckBidi_ - Always _true_; cannot be configured, since this flag is _true_ even when WHATWG URL Standard _beStrict_ is _false_.
+//! * _CheckJoiners_ - Always _true_; cannot be configured, since this flag is _true_ even when WHATWG URL Standard _beStrict_ is _false_.
+//! * _UseSTD3ASCIIRules_ - _true_: [`AsciiDenyList::STD3`], _false_: [`AsciiDenyList::EMPTY`]; however, the check the WHATWG URL Standard performs right after the UTS 46 invocation corresponds to [`AsciiDenyList::URL`].
+//! * _Transitional_Processing_ - Always _false_ but could be implemented as a preprocessing step. This flag is deprecated and for Web purposes the transition is over in the sense that all of Firefox, Safari, or Chrome set this flag to _false_.
+//! * _VerifyDnsLength_ - _true_: [`DnsLength::Verify`], _false_: [`DnsLength::Ignore`]; the WHATWG URL Standard sets this to _false_ for normal (non-conformance-checker) user agents.
+//! * _IgnoreInvalidPunycode_ - Always _false_; cannot be configured. (Not yet covered by the WHATWG URL Standard, but 2 out of 3 major browser clearly behave as if this was _false_).
+
+use crate::punycode::Decoder;
+use crate::punycode::InternalCaller;
+use alloc::borrow::Cow;
+use alloc::string::String;
+use core::fmt::Write;
+use idna_adapter::*;
+use smallvec::SmallVec;
+use utf8_iter::Utf8CharsEx;
+
+/// ICU4C-compatible constraint.
+/// https://unicode-org.atlassian.net/browse/ICU-13727
+const PUNYCODE_DECODE_MAX_INPUT_LENGTH: usize = 2000;
+
+/// ICU4C-compatible constraint. (Note: ICU4C measures
+/// UTF-16 and we measure UTF-32. This means that we
+/// allow longer non-BMP inputs. For this implementation,
+/// the denial-of-service scaling does not depend on BMP vs.
+/// non-BMP: only the scalar values matter.)
+///
+/// https://unicode-org.atlassian.net/browse/ICU-13727
+const PUNYCODE_ENCODE_MAX_INPUT_LENGTH: usize = 1000;
+
+/// For keeping track of what kind of numerals have been
+/// seen in an RTL label.
+#[derive(Debug, PartialEq, Eq)]
+enum RtlNumeralState {
+    Undecided,
+    European,
+    Arabic,
+}
+
+/// Computes the mask for upper-case ASCII.
+
+--- tests/deprecated.rs ---
+// Copyright 2013-2014 The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+#![allow(clippy::assigning_clones)]
+#![allow(deprecated)]
+
+use crate::test::TestFn;
+use std::char;
+use std::fmt::Write;
+
+use idna::Errors;
+
+pub fn collect_tests<F: FnMut(String, TestFn)>(add_test: &mut F) {
+    // https://www.unicode.org/Public/idna/13.0.0/IdnaTestV2.txt
+    for (i, line) in include_str!("IdnaTestV2.txt").lines().enumerate() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        // Remove comments
+        let line = match line.find('#') {
+            Some(index) => &line[0..index],
+            None => line,
+        };
+
+        let mut pieces = line.split(';').map(|x| x.trim()).collect::<Vec<&str>>();
+        let source = unescape(pieces.remove(0));
+
+        // ToUnicode
+        let mut to_unicode = unescape(pieces.remove(0));
+        if to_unicode.is_empty() {
+            to_unicode = source.clone();
+        }
+        let to_unicode_status = status(pieces.remove(0));
+
+        // ToAsciiN
+        let to_ascii_n = pieces.remove(0);
+        let to_ascii_n = if to_ascii_n.is_empty() {
+            to_unicode.clone()
+        } else {
+            to_ascii_n.to_owned()
+        };
+        let to_ascii_n_status = pieces.remove(0);
+        let to_ascii_n_status = if to_ascii_n_status.is_empty() {
+            to_unicode_status.clone()
+        } else {
+            status(to_ascii_n_status)
+        };
+
+        // ToAsciiT
+
+--- tests/punycode.rs ---
+// Copyright 2013 The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::test::TestFn;
+use idna::punycode::{decode, decode_to_string, encode_str};
+use serde_json::map::Map;
+use serde_json::Value;
+use std::panic::catch_unwind;
+use std::str::FromStr;
+
+fn one_test(decoded: &str, encoded: &str) {
+    match decode(encoded) {
+        None => panic!("Decoding {} failed.", encoded),
+        Some(result) => {
+            let result = result.into_iter().collect::<String>();
+            assert!(
+                result == decoded,
+                "Incorrect decoding of \"{}\":\n   \"{}\"\n!= \"{}\"\n",
+                encoded,
+                result,
+                decoded
+            )
+        }
+    }
+
+    match decode_to_string(encoded) {
+        None => panic!("Decoding {} failed.", encoded),
+        Some(result) => assert!(
+            result == decoded,
+            "Incorrect decoding of \"{}\":\n   \"{}\"\n!= \"{}\"\n",
+            encoded,
+            result,
+            decoded
+        ),
+    }
+
+    match encode_str(decoded) {
+        None => panic!("Encoding {} failed.", decoded),
+        Some(result) => assert!(
+            result == encoded,
+            "Incorrect encoding of \"{}\":\n   \"{}\"\n!= \"{}\"\n",
+            decoded,
+            result,
+            encoded
+        ),
+    }
+}
+
+fn one_bad_test(encode: &str) {
+    let result = catch_unwind(|| encode_str(encode));
+
+--- tests/uts46.rs ---
+// Copyright 2013-2014 The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+#![allow(clippy::assigning_clones)]
+
+use crate::test::TestFn;
+use std::char;
+use std::fmt::Write;
+
+use idna::uts46::verify_dns_length;
+use idna::uts46::ProcessingError;
+use idna::uts46::ProcessingSuccess;
+use idna::uts46::{AsciiDenyList, DnsLength, ErrorPolicy, Hyphens};
+use idna::Errors;
+
+pub fn collect_tests<F: FnMut(String, TestFn)>(add_test: &mut F) {
+    // https://www.unicode.org/Public/idna/13.0.0/IdnaTestV2.txt
+    for (i, line) in include_str!("IdnaTestV2.txt").lines().enumerate() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        // Remove comments
+        let line = match line.find('#') {
+            Some(index) => &line[0..index],
+            None => line,
+        };
+
+        let mut pieces = line.split(';').map(|x| x.trim()).collect::<Vec<&str>>();
+        let source = unescape(pieces.remove(0));
+
+        // ToUnicode
+        let mut to_unicode = unescape(pieces.remove(0));
+        if to_unicode.is_empty() {
+            to_unicode = source.clone();
+        }
+        let to_unicode_status = status(pieces.remove(0));
+
+        // ToAsciiN
+        let to_ascii_n = pieces.remove(0);
+        let to_ascii_n = if to_ascii_n.is_empty() {
+            to_unicode.clone()
+        } else {
+            to_ascii_n.to_owned()
+        };
+        let to_ascii_n_status = pieces.remove(0);
+        let to_ascii_n_status = if to_ascii_n_status.is_empty() {
+            to_unicode_status.clone()
+        } else {
+            status(to_ascii_n_status)

@@ -1,0 +1,56 @@
+--- src/lib.rs ---
+// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+/*!
+Generate types for C-style flags with ergonomic APIs.
+
+# Getting started
+
+Add `bitflags` to your `Cargo.toml`:
+
+```toml
+[dependencies.bitflags]
+version = "2.13.2"
+```
+
+## Crate features
+
+The `bitflags` library defines a few Cargo features that you can opt-in to:
+
+- `std`: Implement the `Error` trait on error types used by `bitflags`.
+- `serde`: Support deriving `serde` traits on generated flags types.
+- `arbitrary`: Support deriving `arbitrary` traits on generated flags types.
+- `bytemuck`: Support deriving `bytemuck` traits on generated flags types.
+
+## Generating flags types
+
+Use the [`bitflags`] macro to generate flags types:
+
+```rust
+use bitflags::bitflags;
+
+bitflags! {
+    pub struct Flags: u32 {
+        const A = 0b00000001;
+        const B = 0b00000010;
+        const C = 0b00000100;
+    }
+}
+```
+
+See the docs for the `bitflags` macro for the full syntax.
+
+Also see the [`example_generated`](./example_generated/index.html) module for an example of what the `bitflags` macro generates for a flags type.
+
+### Externally defined flags
+
+If you're generating flags types for an external source, such as a C API, you can define
+an extra unnamed flag as a mask of all bits the external source may ever set. Usually this would be all bits (`!0`):

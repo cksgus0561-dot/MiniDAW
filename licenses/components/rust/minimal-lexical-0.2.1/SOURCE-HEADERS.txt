@@ -1,0 +1,56 @@
+--- src/libm.rs ---
+//! A small number of math routines for floats and doubles.
+//!
+//! These are adapted from libm, a port of musl libc's libm to Rust.
+//! libm can be found online [here](https://github.com/rust-lang/libm),
+//! and is similarly licensed under an Apache2.0/MIT license
+
+#![cfg(all(not(feature = "std"), feature = "compact"))]
+#![doc(hidden)]
+
+/* origin: FreeBSD /usr/src/lib/msun/src/e_powf.c */
+/*
+ * Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+ */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+
+/// # Safety
+///
+/// Safe if `index < array.len()`.
+macro_rules! i {
+    ($array:ident, $index:expr) => {
+        // SAFETY: safe if `index < array.len()`.
+        unsafe { *$array.get_unchecked($index) }
+    };
+}
+
+pub fn powf(x: f32, y: f32) -> f32 {
+    const BP: [f32; 2] = [1.0, 1.5];
+    const DP_H: [f32; 2] = [0.0, 5.84960938e-01]; /* 0x3f15c000 */
+    const DP_L: [f32; 2] = [0.0, 1.56322085e-06]; /* 0x35d1cfdc */
+    const TWO24: f32 = 16777216.0; /* 0x4b800000 */
+    const HUGE: f32 = 1.0e30;
+    const TINY: f32 = 1.0e-30;
+    const L1: f32 = 6.0000002384e-01; /* 0x3f19999a */
+    const L2: f32 = 4.2857143283e-01; /* 0x3edb6db7 */
+    const L3: f32 = 3.3333334327e-01; /* 0x3eaaaaab */
+    const L4: f32 = 2.7272811532e-01; /* 0x3e8ba305 */
+    const L5: f32 = 2.3066075146e-01; /* 0x3e6c3255 */
+    const L6: f32 = 2.0697501302e-01; /* 0x3e53f142 */
+    const P1: f32 = 1.6666667163e-01; /* 0x3e2aaaab */
+    const P2: f32 = -2.7777778450e-03; /* 0xbb360b61 */
+    const P3: f32 = 6.6137559770e-05; /* 0x388ab355 */
+    const P4: f32 = -1.6533901999e-06; /* 0xb5ddea0e */
+    const P5: f32 = 4.1381369442e-08; /* 0x3331bb4c */
+    const LG2: f32 = 6.9314718246e-01; /* 0x3f317218 */
+    const LG2_H: f32 = 6.93145752e-01; /* 0x3f317200 */
+    const LG2_L: f32 = 1.42860654e-06; /* 0x35bfbe8c */

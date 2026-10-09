@@ -1,0 +1,666 @@
+--- src/condvar.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use crate::mutex::MutexGuard;
+use crate::raw_mutex::{RawMutex, TOKEN_HANDOFF, TOKEN_NORMAL};
+use crate::{deadlock, util};
+use core::{
+    fmt, ptr,
+    sync::atomic::{AtomicPtr, Ordering},
+};
+use lock_api::RawMutex as RawMutex_;
+use parking_lot_core::{self, ParkResult, RequeueOp, UnparkResult, DEFAULT_PARK_TOKEN};
+use std::ops::DerefMut;
+use std::time::{Duration, Instant};
+
+/// A type indicating whether a timed wait on a condition variable returned
+/// due to a time out or not.
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+pub struct WaitTimeoutResult(bool);
+
+impl WaitTimeoutResult {
+    /// Returns whether the wait was known to have timed out.
+    #[inline]
+    pub fn timed_out(self) -> bool {
+        self.0
+    }
+}
+
+/// A Condition Variable
+///
+/// Condition variables represent the ability to block a thread such that it
+/// consumes no CPU time while waiting for an event to occur. Condition
+/// variables are typically associated with a boolean predicate (a condition)
+/// and a mutex. The predicate is always verified inside of the mutex before
+/// determining that thread must block.
+///
+/// Note that this module places one additional restriction over the system
+/// condition variables: each condvar can be used with only one mutex at a
+/// time. Any attempt to use multiple mutexes on the same condition variable
+/// simultaneously will result in a runtime panic. However it is possible to
+/// switch to a different mutex if there are no threads currently waiting on
+/// the condition variable.
+///
+/// # Differences from the standard library `Condvar`
+///
+/// - No spurious wakeups: A wait will only return a non-timeout result if it
+///   was woken up by `notify_one` or `notify_all`.
+/// - `Condvar::notify_all` will only wake up a single thread, the rest are
+///   requeued to wait for the `Mutex` to be unlocked by the thread that was
+///   woken up.
+/// - Only requires 1 word of space, whereas the standard library boxes the
+
+--- src/elision.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use std::sync::atomic::AtomicUsize;
+
+// Extension trait to add lock elision primitives to atomic types
+pub trait AtomicElisionExt {
+    type IntType;
+
+    // Perform a compare_exchange and start a transaction
+    fn elision_compare_exchange_acquire(
+        &self,
+        current: Self::IntType,
+        new: Self::IntType,
+    ) -> Result<Self::IntType, Self::IntType>;
+
+    // Perform a fetch_sub and end a transaction
+    fn elision_fetch_sub_release(&self, val: Self::IntType) -> Self::IntType;
+}
+
+// Indicates whether the target architecture supports lock elision
+#[inline]
+pub fn have_elision() -> bool {
+    cfg!(all(
+        feature = "hardware-lock-elision",
+        not(miri),
+        any(target_arch = "x86", target_arch = "x86_64"),
+    ))
+}
+
+// This implementation is never actually called because it is guarded by
+// have_elision().
+#[cfg(not(all(
+    feature = "hardware-lock-elision",
+    not(miri),
+    any(target_arch = "x86", target_arch = "x86_64")
+)))]
+impl AtomicElisionExt for AtomicUsize {
+    type IntType = usize;
+
+    #[inline]
+    fn elision_compare_exchange_acquire(&self, _: usize, _: usize) -> Result<usize, usize> {
+        unreachable!();
+    }
+
+    #[inline]
+    fn elision_fetch_sub_release(&self, _: usize) -> usize {
+        unreachable!();
+    }
+}
+
+
+--- src/fair_mutex.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use crate::raw_fair_mutex::RawFairMutex;
+
+/// A mutual exclusive primitive that is always fair, useful for protecting shared data
+///
+/// This mutex will block threads waiting for the lock to become available. The
+/// mutex can be statically initialized or created by the `new`
+/// constructor. Each mutex has a type parameter which represents the data that
+/// it is protecting. The data can only be accessed through the RAII guards
+/// returned from `lock` and `try_lock`, which guarantees that the data is only
+/// ever accessed when the mutex is locked.
+///
+/// The regular mutex provided by `parking_lot` uses eventual fairness
+/// (after some time it will default to the fair algorithm), but eventual
+/// fairness does not provide the same guarantees an always fair method would.
+/// Fair mutexes are generally slower, but sometimes needed.
+///
+/// In a fair mutex the waiters form a queue, and the lock is always granted to
+/// the next requester in the queue, in first-in first-out order. This ensures
+/// that one thread cannot starve others by quickly re-acquiring the lock after
+/// releasing it.
+///
+/// A fair mutex may not be interesting if threads have different priorities (this is known as
+/// priority inversion).
+///
+/// # Differences from the standard library `Mutex`
+///
+/// - No poisoning, the lock is released normally on panic.
+/// - Only requires 1 byte of space, whereas the standard library boxes the
+///   `FairMutex` due to platform limitations.
+/// - Can be statically constructed.
+/// - Does not require any drop glue when dropped.
+/// - Inline fast path for the uncontended case.
+/// - Efficient handling of micro-contention using adaptive spinning.
+/// - Allows raw locking & unlocking without a guard.
+///
+/// # Examples
+///
+/// ```
+/// use parking_lot::FairMutex;
+/// use std::sync::{Arc, mpsc::channel};
+/// use std::thread;
+///
+/// const N: usize = 10;
+///
+/// // Spawn a few threads to increment a shared variable (non-atomically), and
+/// // let the main thread know once all increments are done.
+/// //
+/// // Here we're using an Arc to share memory among threads, and the data inside
+
+--- src/lib.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+//! This library provides implementations of `Mutex`, `RwLock`, `Condvar` and
+//! `Once` that are smaller, faster and more flexible than those in the Rust
+//! standard library. It also provides a `ReentrantMutex` type.
+
+#![warn(missing_docs)]
+#![warn(rust_2018_idioms)]
+
+mod condvar;
+mod elision;
+mod fair_mutex;
+mod mutex;
+mod once;
+mod raw_fair_mutex;
+mod raw_mutex;
+mod raw_rwlock;
+mod remutex;
+mod rwlock;
+mod util;
+
+#[cfg(feature = "deadlock_detection")]
+pub mod deadlock;
+#[cfg(not(feature = "deadlock_detection"))]
+mod deadlock;
+
+// If deadlock detection is enabled, we cannot allow lock guards to be sent to
+// other threads.
+#[cfg(all(feature = "send_guard", feature = "deadlock_detection"))]
+compile_error!("the `send_guard` and `deadlock_detection` features cannot be used together");
+#[cfg(feature = "send_guard")]
+type GuardMarker = lock_api::GuardSend;
+#[cfg(not(feature = "send_guard"))]
+type GuardMarker = lock_api::GuardNoSend;
+
+pub use self::condvar::{Condvar, WaitTimeoutResult};
+pub use self::fair_mutex::{const_fair_mutex, FairMutex, FairMutexGuard, MappedFairMutexGuard};
+pub use self::mutex::{const_mutex, MappedMutexGuard, Mutex, MutexGuard};
+pub use self::once::{Once, OnceState};
+pub use self::raw_fair_mutex::RawFairMutex;
+pub use self::raw_mutex::RawMutex;
+pub use self::raw_rwlock::RawRwLock;
+pub use self::remutex::{
+    const_reentrant_mutex, MappedReentrantMutexGuard, RawThreadId, ReentrantMutex,
+    ReentrantMutexGuard,
+};
+pub use self::rwlock::{
+    const_rwlock, MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLock, RwLockReadGuard,
+    RwLockUpgradableReadGuard, RwLockWriteGuard,
+};
+
+--- src/mutex.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use crate::raw_mutex::RawMutex;
+
+/// A mutual exclusion primitive useful for protecting shared data
+///
+/// This mutex will block threads waiting for the lock to become available. The
+/// mutex can be statically initialized or created by the `new`
+/// constructor. Each mutex has a type parameter which represents the data that
+/// it is protecting. The data can only be accessed through the RAII guards
+/// returned from `lock` and `try_lock`, which guarantees that the data is only
+/// ever accessed when the mutex is locked.
+///
+/// # Fairness
+///
+/// A typical unfair lock can often end up in a situation where a single thread
+/// quickly acquires and releases the same mutex in succession, which can starve
+/// other threads waiting to acquire the mutex. While this improves throughput
+/// because it doesn't force a context switch when a thread tries to re-acquire
+/// a mutex it has just released, this can starve other threads.
+///
+/// This mutex uses [eventual fairness](https://trac.webkit.org/changeset/203350)
+/// to ensure that the lock will be fair on average without sacrificing
+/// throughput. This is done by forcing a fair unlock on average every 0.5ms,
+/// which will force the lock to go to the next thread waiting for the mutex.
+///
+/// Additionally, any critical section longer than 1ms will always use a fair
+/// unlock, which has a negligible impact on throughput considering the length
+/// of the critical section.
+///
+/// You can also force a fair unlock by calling `MutexGuard::unlock_fair` when
+/// unlocking a mutex instead of simply dropping the `MutexGuard`.
+///
+/// # Differences from the standard library `Mutex`
+///
+/// - No poisoning, the lock is released normally on panic.
+/// - Only requires 1 byte of space, whereas the standard library boxes the
+///   `Mutex` due to platform limitations.
+/// - Can be statically constructed.
+/// - Does not require any drop glue when dropped.
+/// - Inline fast path for the uncontended case.
+/// - Efficient handling of micro-contention using adaptive spinning.
+/// - Allows raw locking & unlocking without a guard.
+/// - Supports eventual fairness so that the mutex is fair on average.
+/// - Optionally allows making the mutex fair by calling `MutexGuard::unlock_fair`.
+///
+/// # Examples
+///
+/// ```
+/// use parking_lot::Mutex;
+
+--- src/once.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use crate::util::UncheckedOptionExt;
+use core::{
+    fmt, mem,
+    sync::atomic::{fence, AtomicU8, Ordering},
+};
+use parking_lot_core::{self, SpinWait, DEFAULT_PARK_TOKEN, DEFAULT_UNPARK_TOKEN};
+
+const DONE_BIT: u8 = 1;
+const POISON_BIT: u8 = 2;
+const LOCKED_BIT: u8 = 4;
+const PARKED_BIT: u8 = 8;
+
+/// Current state of a `Once`.
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum OnceState {
+    /// A closure has not been executed yet
+    New,
+
+    /// A closure was executed but panicked.
+    Poisoned,
+
+    /// A thread is currently executing a closure.
+    InProgress,
+
+    /// A closure has completed successfully.
+    Done,
+}
+
+impl OnceState {
+    /// Returns whether the associated `Once` has been poisoned.
+    ///
+    /// Once an initialization routine for a `Once` has panicked it will forever
+    /// indicate to future forced initialization routines that it is poisoned.
+    #[inline]
+    pub fn poisoned(self) -> bool {
+        matches!(self, OnceState::Poisoned)
+    }
+
+    /// Returns whether the associated `Once` has successfully executed a
+    /// closure.
+    #[inline]
+    pub fn done(self) -> bool {
+        matches!(self, OnceState::Done)
+    }
+}
+
+/// A synchronization primitive which can be used to run a one-time
+/// initialization. Useful for one-time initialization for globals, FFI or
+
+--- src/raw_fair_mutex.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use crate::raw_mutex::RawMutex;
+use lock_api::RawMutexFair;
+
+/// Raw fair mutex type backed by the parking lot.
+pub struct RawFairMutex(RawMutex);
+
+unsafe impl lock_api::RawMutex for RawFairMutex {
+    const INIT: Self = RawFairMutex(<RawMutex as lock_api::RawMutex>::INIT);
+
+    type GuardMarker = <RawMutex as lock_api::RawMutex>::GuardMarker;
+
+    #[inline]
+    fn lock(&self) {
+        self.0.lock()
+    }
+
+    #[inline]
+    fn try_lock(&self) -> bool {
+        self.0.try_lock()
+    }
+
+    #[inline]
+    unsafe fn unlock(&self) {
+        self.unlock_fair()
+    }
+
+    #[inline]
+    fn is_locked(&self) -> bool {
+        self.0.is_locked()
+    }
+}
+
+unsafe impl lock_api::RawMutexFair for RawFairMutex {
+    #[inline]
+    unsafe fn unlock_fair(&self) {
+        self.0.unlock_fair()
+    }
+
+    #[inline]
+    unsafe fn bump(&self) {
+        self.0.bump()
+    }
+}
+
+unsafe impl lock_api::RawMutexTimed for RawFairMutex {
+    type Duration = <RawMutex as lock_api::RawMutexTimed>::Duration;
+    type Instant = <RawMutex as lock_api::RawMutexTimed>::Instant;
+
+
+--- src/raw_mutex.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use crate::{deadlock, util};
+use core::{
+    sync::atomic::{AtomicU8, Ordering},
+    time::Duration,
+};
+use lock_api::RawMutex as RawMutex_;
+use parking_lot_core::{self, ParkResult, SpinWait, UnparkResult, UnparkToken, DEFAULT_PARK_TOKEN};
+use std::time::Instant;
+
+// UnparkToken used to indicate that that the target thread should attempt to
+// lock the mutex again as soon as it is unparked.
+pub(crate) const TOKEN_NORMAL: UnparkToken = UnparkToken(0);
+
+// UnparkToken used to indicate that the mutex is being handed off to the target
+// thread directly without unlocking it.
+pub(crate) const TOKEN_HANDOFF: UnparkToken = UnparkToken(1);
+
+/// This bit is set in the `state` of a `RawMutex` when that mutex is locked by some thread.
+const LOCKED_BIT: u8 = 0b01;
+/// This bit is set in the `state` of a `RawMutex` just before parking a thread. A thread is being
+/// parked if it wants to lock the mutex, but it is currently being held by some other thread.
+const PARKED_BIT: u8 = 0b10;
+
+/// Raw mutex type backed by the parking lot.
+pub struct RawMutex {
+    /// This atomic integer holds the current state of the mutex instance. Only the two lowest bits
+    /// are used. See `LOCKED_BIT` and `PARKED_BIT` for the bitmask for these bits.
+    ///
+    /// # State table:
+    ///
+    /// PARKED_BIT | LOCKED_BIT | Description
+    ///     0      |     0      | The mutex is not locked, nor is anyone waiting for it.
+    /// -----------+------------+------------------------------------------------------------------
+    ///     0      |     1      | The mutex is locked by exactly one thread. No other thread is
+    ///            |            | waiting for it.
+    /// -----------+------------+------------------------------------------------------------------
+    ///     1      |     0      | The mutex is not locked. One or more thread is parked or about to
+    ///            |            | park. At least one of the parked threads are just about to be
+    ///            |            | unparked, or a thread heading for parking might abort the park.
+    /// -----------+------------+------------------------------------------------------------------
+    ///     1      |     1      | The mutex is locked by exactly one thread. One or more thread is
+    ///            |            | parked or about to park, waiting for the lock to become available.
+    ///            |            | In this state, PARKED_BIT is only ever cleared when a bucket lock
+    ///            |            | is held (i.e. in a parking_lot_core callback). This ensures that
+    ///            |            | we never end up in a situation where there are parked threads but
+    ///            |            | PARKED_BIT is not set (which would result in those threads
+    ///            |            | potentially never getting woken up).
+    state: AtomicU8,
+
+--- src/raw_rwlock.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use crate::elision::{have_elision, AtomicElisionExt};
+use crate::raw_mutex::{TOKEN_HANDOFF, TOKEN_NORMAL};
+use crate::util;
+use core::{
+    cell::Cell,
+    sync::atomic::{AtomicUsize, Ordering},
+};
+use lock_api::{RawRwLock as RawRwLock_, RawRwLockUpgrade};
+use parking_lot_core::{
+    self, deadlock, FilterOp, ParkResult, ParkToken, SpinWait, UnparkResult, UnparkToken,
+};
+use std::time::{Duration, Instant};
+
+// This reader-writer lock implementation is based on Boost's upgrade_mutex:
+// https://github.com/boostorg/thread/blob/fc08c1fe2840baeeee143440fba31ef9e9a813c8/include/boost/thread/v2/shared_mutex.hpp#L432
+//
+// This implementation uses 2 wait queues, one at key [addr] and one at key
+// [addr + 1]. The primary queue is used for all new waiting threads, and the
+// secondary queue is used by the thread which has acquired WRITER_BIT but is
+// waiting for the remaining readers to exit the lock.
+//
+// This implementation is fair between readers and writers since it uses the
+// order in which threads first started queuing to alternate between read phases
+// and write phases. In particular is it not vulnerable to write starvation
+// since readers will block if there is a pending writer.
+
+// There is at least one thread in the main queue.
+const PARKED_BIT: usize = 0b0001;
+// There is a parked thread holding WRITER_BIT. WRITER_BIT must be set.
+const WRITER_PARKED_BIT: usize = 0b0010;
+// A reader is holding an upgradable lock. The reader count must be non-zero and
+// WRITER_BIT must not be set.
+const UPGRADABLE_BIT: usize = 0b0100;
+// If the reader count is zero: a writer is currently holding an exclusive lock.
+// Otherwise: a writer is waiting for the remaining readers to exit the lock.
+const WRITER_BIT: usize = 0b1000;
+// Mask of bits used to count readers.
+const READERS_MASK: usize = !0b1111;
+// Base unit for counting readers.
+const ONE_READER: usize = 0b10000;
+
+// Token indicating what type of lock a queued thread is trying to acquire
+const TOKEN_SHARED: ParkToken = ParkToken(ONE_READER);
+const TOKEN_EXCLUSIVE: ParkToken = ParkToken(WRITER_BIT);
+const TOKEN_UPGRADABLE: ParkToken = ParkToken(ONE_READER | UPGRADABLE_BIT);
+
+/// Raw reader-writer lock type backed by the parking lot.
+pub struct RawRwLock {
+
+--- src/remutex.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use crate::raw_mutex::RawMutex;
+use core::num::NonZeroUsize;
+use lock_api::{self, GetThreadId};
+
+/// Implementation of the `GetThreadId` trait for `lock_api::ReentrantMutex`.
+pub struct RawThreadId;
+
+unsafe impl GetThreadId for RawThreadId {
+    const INIT: RawThreadId = RawThreadId;
+
+    fn nonzero_thread_id(&self) -> NonZeroUsize {
+        // The address of a thread-local variable is guaranteed to be unique to the
+        // current thread, and is also guaranteed to be non-zero. The variable has to have a
+        // non-zero size to guarantee it has a unique address for each thread.
+        thread_local!(static KEY: u8 = 0);
+        KEY.with(|x| {
+            NonZeroUsize::new(x as *const _ as usize)
+                .expect("thread-local variable address is null")
+        })
+    }
+}
+
+/// A mutex which can be recursively locked by a single thread.
+///
+/// This type is identical to `Mutex` except for the following points:
+///
+/// - Locking multiple times from the same thread will work correctly instead of
+///   deadlocking.
+/// - `ReentrantMutexGuard` does not give mutable references to the locked data.
+///   Use a `RefCell` if you need this.
+///
+/// See [`Mutex`](crate::Mutex) for more details about the underlying mutex
+/// primitive.
+pub type ReentrantMutex<T> = lock_api::ReentrantMutex<RawMutex, RawThreadId, T>;
+
+/// Creates a new reentrant mutex in an unlocked state ready for use.
+///
+/// This allows creating a reentrant mutex in a constant context on stable Rust.
+pub const fn const_reentrant_mutex<T>(val: T) -> ReentrantMutex<T> {
+    ReentrantMutex::const_new(
+        <RawMutex as lock_api::RawMutex>::INIT,
+        <RawThreadId as lock_api::GetThreadId>::INIT,
+        val,
+    )
+}
+
+/// An RAII implementation of a "scoped lock" of a reentrant mutex. When this structure
+/// is dropped (falls out of scope), the lock will be unlocked.
+
+--- src/rwlock.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use crate::raw_rwlock::RawRwLock;
+
+/// A reader-writer lock
+///
+/// This type of lock allows a number of readers or at most one writer at any
+/// point in time. The write portion of this lock typically allows modification
+/// of the underlying data (exclusive access) and the read portion of this lock
+/// typically allows for read-only access (shared access).
+///
+/// This lock uses a task-fair locking policy which avoids both reader and
+/// writer starvation. This means that readers trying to acquire the lock will
+/// block even if the lock is unlocked when there are writers waiting to acquire
+/// the lock. Because of this, attempts to recursively acquire a read lock
+/// within a single thread may result in a deadlock.
+///
+/// The type parameter `T` represents the data that this lock protects. It is
+/// required that `T` satisfies `Send` to be shared across threads and `Sync` to
+/// allow concurrent access through readers. The RAII guards returned from the
+/// locking methods implement `Deref` (and `DerefMut` for the `write` methods)
+/// to allow access to the contained of the lock.
+///
+/// # Fairness
+///
+/// A typical unfair lock can often end up in a situation where a single thread
+/// quickly acquires and releases the same lock in succession, which can starve
+/// other threads waiting to acquire the rwlock. While this improves throughput
+/// because it doesn't force a context switch when a thread tries to re-acquire
+/// a rwlock it has just released, this can starve other threads.
+///
+/// This rwlock uses [eventual fairness](https://trac.webkit.org/changeset/203350)
+/// to ensure that the lock will be fair on average without sacrificing
+/// throughput. This is done by forcing a fair unlock on average every 0.5ms,
+/// which will force the lock to go to the next thread waiting for the rwlock.
+///
+/// Additionally, any critical section longer than 1ms will always use a fair
+/// unlock, which has a negligible impact on throughput considering the length
+/// of the critical section.
+///
+/// You can also force a fair unlock by calling `RwLockReadGuard::unlock_fair`
+/// or `RwLockWriteGuard::unlock_fair` when unlocking a mutex instead of simply
+/// dropping the guard.
+///
+/// # Differences from the standard library `RwLock`
+///
+/// - Supports atomically downgrading a write lock into a read lock.
+/// - Task-fair locking policy instead of an unspecified platform default.
+/// - No poisoning, the lock is released normally on panic.
+/// - Only requires 1 word of space, whereas the standard library boxes the
+
+--- src/util.rs ---
+// Copyright 2016 Amanieu d'Antras
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+use std::time::{Duration, Instant};
+
+// Option::unchecked_unwrap
+pub trait UncheckedOptionExt<T> {
+    unsafe fn unchecked_unwrap(self) -> T;
+}
+
+impl<T> UncheckedOptionExt<T> for Option<T> {
+    #[inline]
+    unsafe fn unchecked_unwrap(self) -> T {
+        match self {
+            Some(x) => x,
+            None => unreachable(),
+        }
+    }
+}
+
+// hint::unreachable_unchecked() in release mode
+#[inline]
+unsafe fn unreachable() -> ! {
+    if cfg!(debug_assertions) {
+        unreachable!();
+    } else {
+        core::hint::unreachable_unchecked()
+    }
+}
+
+#[inline]
+pub fn to_deadline(timeout: Duration) -> Option<Instant> {
+    Instant::now().checked_add(timeout)
+}

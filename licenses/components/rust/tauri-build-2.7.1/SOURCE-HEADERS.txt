@@ -1,0 +1,349 @@
+--- src/acl.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{
+  collections::{BTreeMap, HashMap},
+  env, fs,
+  path::{Path, PathBuf},
+};
+
+use anyhow::{Context, Result};
+use tauri_utils::{
+  acl::{
+    ACL_MANIFESTS_FILE_NAME, APP_ACL_KEY, CAPABILITIES_FILE_NAME,
+    capability::Capability,
+    get_capabilities,
+    manifest::{Manifest, PermissionFile},
+    schema::CAPABILITIES_SCHEMA_FOLDER_PATH,
+  },
+  config::Config,
+  platform::Target,
+  write_if_changed,
+};
+
+use crate::Attributes;
+
+/// Definition of a plugin that is part of the Tauri application instead of having its own crate.
+///
+/// By default it generates a plugin manifest that parses permissions from the `permissions/$plugin-name` directory.
+/// To change the glob pattern that is used to find permissions, use [`Self::permissions_path_pattern`].
+///
+/// To autogenerate permissions for each of the plugin commands, see [`Self::commands`].
+#[derive(Debug, Default, Clone)]
+pub struct InlinedPlugin {
+  commands: &'static [&'static str],
+  permissions_path_pattern: Option<&'static str>,
+  default: Option<DefaultPermissionRule>,
+}
+
+/// Variants of a generated default permission that can be used on an [`InlinedPlugin`].
+#[derive(Debug, Clone)]
+pub enum DefaultPermissionRule {
+  /// Allow all commands from [`InlinedPlugin::commands`].
+  AllowAllCommands,
+  /// Allow the given list of permissions.
+  ///
+  /// Note that the list refers to permissions instead of command names,
+  /// so for example a command called `execute` would need to be allowed as `allow-execute`.
+  Allow(Vec<String>),
+}
+
+impl InlinedPlugin {
+  /// Creates a new inlined plugin definition with the default options.
+  pub fn new() -> Self {
+    Self::default()
+
+--- src/codegen/context.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use anyhow::{Context, Result};
+use std::{
+  env::var,
+  fs::{File, create_dir_all},
+  io::{BufWriter, Write},
+  path::{Path, PathBuf},
+};
+use tauri_codegen::{ContextData, context_codegen};
+use tauri_utils::config::FrontendDist;
+
+// TODO docs
+/// A builder for generating a Tauri application context during compile time.
+#[cfg_attr(docsrs, doc(cfg(feature = "codegen")))]
+#[derive(Debug)]
+pub struct CodegenContext {
+  pub(crate) config_path: Option<PathBuf>,
+  out_file: PathBuf,
+  capabilities: Option<Vec<PathBuf>>,
+}
+
+impl Default for CodegenContext {
+  fn default() -> Self {
+    Self {
+      config_path: None,
+      out_file: PathBuf::from("tauri-build-context.rs"),
+      capabilities: None,
+    }
+  }
+}
+
+impl CodegenContext {
+  /// Create a new [`CodegenContext`] builder that is already filled with the default options.
+  pub fn new() -> Self {
+    Self::default()
+  }
+
+  /// Set the path to the `tauri.conf.json` (relative to the crate's directory).
+  ///
+  /// This defaults to a file called `tauri.conf.json` inside of the current working directory of
+  /// the crate compiling; does not need to be set manually if that config file is in the same
+  /// directory as your `Cargo.toml`.
+  #[must_use]
+  #[deprecated(since = "2.12.0", note = "Use `Attributes::config_path()` instead")]
+  pub fn config_path(mut self, config_path: impl Into<PathBuf>) -> Self {
+    self.config_path.replace(config_path.into());
+    self
+  }
+
+  /// Sets the output file's path.
+  ///
+  /// **Note:** This path should be relative to the `OUT_DIR`.
+
+--- src/codegen/mod.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+pub(crate) mod context;
+
+
+--- src/lib.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! Build-time helpers for Tauri applications.
+//!
+//! Every Tauri application must run [`build()`] (or [`try_build()`]) from its `build.rs`,
+//! on every target platform. It sets up everything the [`tauri`] crate expects to find at
+//! compile time and at runtime:
+//!
+//! - emits `cargo:rerun-if-changed` instructions for the Tauri configuration files;
+//! - defines the `dev`, `desktop` and `mobile` [cfg aliases] used across the Tauri crates;
+//! - parses the permissions of the application and of its plugins, resolves the capabilities
+//!   (from the `capabilities` directory and from `app > security > capabilities` in the
+//!   configuration file) and validates them, writing the resulting Access Control List to the
+//!   `OUT_DIR` so [`tauri::generate_context!`] can embed it;
+//!   it also writes the capability JSON schemas to `gen/schemas`;
+//! - copies the configured `bundle > externalBin` sidecars and `bundle > resources` next to
+//!   the compiled binary so they are available when running the app with `cargo run`;
+//! - on macOS and iOS, sets the deployment target from the configuration and links the
+//!   configured frameworks;
+//! - on Windows, compiles a resource file with the application icon, version information and
+//!   the [application manifest], and optionally statically links the Visual C++ runtime
+//!   (see [`WindowsAttributes`]);
+//! - on Android, generates the Gradle files of the mobile project and updates the Android
+//!   manifest with the configured file associations;
+//! - optionally runs the context code generation at build time instead of at macro expansion
+//!   time (see `Attributes::codegen`, requires the `codegen` Cargo feature).
+//!
+//! # Examples
+//!
+//! The default `build.rs` of a Tauri application:
+//!
+//! ```rust,ignore
+//! // build.rs
+//! fn main() {
+//!   tauri_build::build()
+//! }
+//! ```
+//!
+//! Customizing the build with [`Attributes`]:
+//!
+//! ```rust,ignore
+//! // build.rs
+//! fn main() {
+//!   let attributes = tauri_build::Attributes::new()
+//!     // the app commands that get a `allow-$command`/`deny-$command` permission generated
+//!     .app_manifest(tauri_build::AppManifest::new().commands(&["my_command"]))
+//!     // a plugin that lives in the app crate instead of its own crate
+//!     .plugin(
+//!       "my-plugin",
+//!       tauri_build::InlinedPlugin::new().commands(&["do_something"]),
+//!     )
+//!     .windows_attributes(
+//!       tauri_build::WindowsAttributes::new().window_icon_path("icons/icon.ico"),
+
+--- src/manifest.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use anyhow::{Result, anyhow};
+use cargo_toml::{Dependency, Manifest};
+use tauri_utils::config::{AppConfig, Config, PatternKind};
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Diff {
+  remove: Vec<String>,
+  add: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DependencyKind {
+  Build,
+  Normal,
+}
+
+#[derive(Debug)]
+struct AllowlistedDependency {
+  name: String,
+  alias: Option<String>,
+  kind: DependencyKind,
+  all_cli_managed_features: Vec<&'static str>,
+  expected_features: Vec<String>,
+}
+
+pub fn check(config: &Config, manifest: &mut Manifest) -> Result<()> {
+  let dependencies = vec![
+    AllowlistedDependency {
+      name: "tauri-build".into(),
+      alias: None,
+      kind: DependencyKind::Build,
+      all_cli_managed_features: vec!["isolation"],
+      expected_features: match config.app.security.pattern {
+        PatternKind::Isolation { .. } => vec!["isolation".to_string()],
+        _ => vec![],
+      },
+    },
+    AllowlistedDependency {
+      name: "tauri".into(),
+      alias: None,
+      kind: DependencyKind::Normal,
+      all_cli_managed_features: AppConfig::all_features()
+        .into_iter()
+        .filter(|f| f != &"tray-icon")
+        .collect(),
+      expected_features: config
+        .app
+        .features()
+        .into_iter()
+        .filter(|f| f != &"tray-icon")
+        .map(|f| f.to_string())
+
+--- src/mobile.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{collections::HashSet, path::PathBuf};
+
+use anyhow::{Context, Result};
+use tauri_utils::{config::AndroidIntentAction, write_if_changed};
+
+/// Updates the Android manifest to add file association intent filters
+pub fn update_android_manifest_file_associations(
+  associations: &[tauri_utils::config::FileAssociation],
+) -> Result<()> {
+  if associations.is_empty() {
+    return Ok(());
+  }
+
+  let intent_filters = generate_file_association_intent_filters(associations);
+  tauri_utils::build::update_android_manifest("tauri-file-associations", "activity", intent_filters)
+}
+
+fn generate_file_association_intent_filters(
+  associations: &[tauri_utils::config::FileAssociation],
+) -> String {
+  let mut filters = String::new();
+
+  for association in associations {
+    // Get mime types - use explicit mime_type, or infer from extensions
+    let mut mime_types = HashSet::new();
+
+    if let Some(mime_type) = &association.mime_type {
+      mime_types.insert((
+        mime_type.clone(),
+        association.android_intent_action_filters.clone(),
+      ));
+    } else {
+      // Infer mime types from extensions
+      for ext in &association.ext {
+        if let Some(mime) = extension_to_mime_type(&ext.0) {
+          mime_types.insert((mime, association.android_intent_action_filters.clone()));
+        }
+      }
+    }
+
+    // If we have mime types, create intent filters
+    if !mime_types.is_empty() {
+      for (mime_type, actions) in &mime_types {
+        filters.push_str("<intent-filter>\n");
+        if let Some(actions) = actions {
+          for action in actions {
+            let action = match action {
+              AndroidIntentAction::Send => "SEND",
+              AndroidIntentAction::SendMultiple => "SEND_MULTIPLE",
+              AndroidIntentAction::View => "VIEW",
+              _ => unimplemented!(),
+
+--- src/static_vcruntime.rs ---
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+// taken from <https://github.com/ChrisDenton/static_vcruntime/>
+// we're not using static_vcruntime directly because we want this for debug builds too
+
+use std::{env, fs, io::Write, path::Path};
+
+pub fn build() {
+  override_msvcrt_lib();
+
+  // Disable conflicting libraries that aren't hard coded by Rust
+  println!("cargo:rustc-link-arg=/NODEFAULTLIB:libvcruntimed.lib");
+  println!("cargo:rustc-link-arg=/NODEFAULTLIB:vcruntime.lib");
+  println!("cargo:rustc-link-arg=/NODEFAULTLIB:vcruntimed.lib");
+  println!("cargo:rustc-link-arg=/NODEFAULTLIB:libcmtd.lib");
+  println!("cargo:rustc-link-arg=/NODEFAULTLIB:msvcrt.lib");
+  println!("cargo:rustc-link-arg=/NODEFAULTLIB:msvcrtd.lib");
+  println!("cargo:rustc-link-arg=/NODEFAULTLIB:libucrt.lib");
+  println!("cargo:rustc-link-arg=/NODEFAULTLIB:libucrtd.lib");
+  // Set the libraries we want.
+  println!("cargo:rustc-link-arg=/DEFAULTLIB:libcmt.lib");
+  println!("cargo:rustc-link-arg=/DEFAULTLIB:libvcruntime.lib");
+  println!("cargo:rustc-link-arg=/DEFAULTLIB:ucrt.lib");
+}
+
+/// Override the hard-coded msvcrt.lib by replacing it with a (mostly) empty object file.
+fn override_msvcrt_lib() {
+  // Get the right machine type for the empty library.
+  let arch = std::env::var("CARGO_CFG_TARGET_ARCH");
+  let machine: &[u8] = if arch.as_deref() == Ok("x86_64") {
+    &[0x64, 0x86]
+  } else if arch.as_deref() == Ok("x86") {
+    &[0x4C, 0x01]
+  } else {
+    return;
+  };
+  let bytes: &[u8] = &[
+    1, 0, 94, 3, 96, 98, 60, 0, 0, 0, 1, 0, 0, 0, 0, 0, 132, 1, 46, 100, 114, 101, 99, 116, 118,
+    101, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    10, 16, 0, 46, 100, 114, 101, 99, 116, 118, 101, 0, 0, 0, 0, 1, 0, 0, 0, 3, 0, 4, 0, 0, 0,
+  ];
+
+  // Write the empty "msvcrt.lib" to the output directory.
+  let out_dir = env::var("OUT_DIR").unwrap();
+  let path = Path::new(&out_dir).join("msvcrt.lib");
+  let f = fs::OpenOptions::new()
+    .write(true)
+    .create_new(true)
+    .open(path);
+  if let Ok(mut f) = f {
+    f.write_all(machine).unwrap();
+    f.write_all(bytes).unwrap();
+  }

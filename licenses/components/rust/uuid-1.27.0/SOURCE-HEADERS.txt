@@ -1,0 +1,335 @@
+--- src/builder.rs ---
+// Copyright 2013-2014 The Rust Project Developers.
+// Copyright 2018 The Uuid Project Developers.
+//
+// See the COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! A Builder type for [`Uuid`]s.
+//!
+//! [`Uuid`]: ../struct.Uuid.html
+
+use crate::{error::*, timestamp, Bytes, Uuid, Variant, Version};
+
+/// A builder for creating a UUID.
+///
+/// This type is useful if you need to mutate individual fields of a [`Uuid`]
+/// while constructing it. Since the [`Uuid`] type is `Copy`, it doesn't offer
+/// any methods to mutate in place. They live on the `Builder` instead.
+///
+/// The `Builder` type also always exposes APIs to construct [`Uuid`]s for any
+/// version without needing crate features or additional dependencies. It's a
+/// lower-level API than the methods on [`Uuid`].
+///
+/// # Examples
+///
+/// Creating a version 4 UUID from externally generated random bytes:
+///
+/// ```
+/// # use uuid::{Builder, Version, Variant};
+/// # let rng = || [
+/// #     70, 235, 208, 238, 14, 109, 67, 201, 185, 13, 204, 195, 90,
+/// # 145, 63, 62,
+/// # ];
+/// let random_bytes = rng();
+///
+/// let uuid = Builder::from_random_bytes(random_bytes).into_uuid();
+///
+/// assert_eq!(Some(Version::Random), uuid.get_version());
+/// assert_eq!(Variant::RFC4122, uuid.get_variant());
+/// ```
+#[allow(missing_copy_implementations)]
+#[derive(Debug)]
+pub struct Builder(Uuid);
+
+impl Uuid {
+    /// The 'nil UUID' (all zeros).
+    ///
+    /// The nil UUID is a special form of UUID that is specified to have all
+    /// 128 bits set to zero.
+    ///
+    /// # References
+
+--- src/external/serde_support.rs ---
+// Copyright 2013-2014 The Rust Project Developers.
+// Copyright 2018 The Uuid Project Developers.
+//
+// See the COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use core::marker::PhantomData;
+
+use crate::{
+    error::*,
+    fmt::{Braced, Hyphenated, Simple, Urn},
+    non_nil::NonNilUuid,
+    std::fmt,
+    Bytes, Uuid,
+};
+use serde_core::{
+    de::{self, Error as _},
+    Deserialize, Deserializer, Serialize, Serializer,
+};
+
+impl Serialize for Uuid {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if serializer.is_human_readable() {
+            serializer.serialize_str(self.hyphenated().encode_lower(&mut Uuid::encode_buffer()))
+        } else {
+            serializer.serialize_bytes(self.as_bytes())
+        }
+    }
+}
+
+impl Serialize for NonNilUuid {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde_core::Serializer,
+    {
+        Uuid::from(*self).serialize(serializer)
+    }
+}
+
+impl Serialize for Hyphenated {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.encode_lower(&mut Uuid::encode_buffer()))
+    }
+}
+
+impl Serialize for Simple {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.encode_lower(&mut Uuid::encode_buffer()))
+    }
+}
+
+--- src/external/slog_support.rs ---
+// Copyright 2013-2014 The Rust Project Developers.
+// Copyright 2018 The Uuid Project Developers.
+//
+// See the COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::{non_nil::NonNilUuid, Uuid};
+
+impl slog::Value for Uuid {
+    fn serialize(
+        &self,
+        _: &slog::Record<'_>,
+        key: slog::Key,
+        serializer: &mut dyn slog::Serializer,
+    ) -> Result<(), slog::Error> {
+        serializer.emit_arguments(key, &format_args!("{}", self))
+    }
+}
+
+impl slog::Value for NonNilUuid {
+    fn serialize(
+        &self,
+        record: &slog::Record<'_>,
+        key: slog::Key,
+        serializer: &mut dyn slog::Serializer,
+    ) -> Result<(), slog::Error> {
+        Uuid::from(*self).serialize(record, key, serializer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::tests::some_uuid_v4;
+
+    use slog::{crit, Drain};
+
+    #[test]
+    fn test_slog_kv() {
+        let root = slog::Logger::root(slog::Discard.fuse(), slog::o!());
+        let u1 = some_uuid_v4();
+        crit!(root, "test"; "u1" => u1);
+    }
+}
+
+
+--- src/fmt.rs ---
+// Copyright 2013-2014 The Rust Project Developers.
+// Copyright 2018 The Uuid Project Developers.
+//
+// See the COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! Adapters for alternative string formats.
+
+use core::{mem::MaybeUninit, ptr, slice, str::FromStr};
+
+use crate::{
+    std::{borrow::Borrow, fmt, str},
+    Error, Uuid, Variant,
+};
+
+#[cfg(feature = "std")]
+use crate::std::string::{String, ToString};
+
+impl std::fmt::Debug for Uuid {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::LowerHex::fmt(self, f)
+    }
+}
+
+impl fmt::Display for Uuid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::LowerHex::fmt(self, f)
+    }
+}
+
+#[cfg(feature = "std")]
+impl From<Uuid> for String {
+    fn from(uuid: Uuid) -> Self {
+        uuid.to_string()
+    }
+}
+
+impl fmt::Display for Variant {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Variant::NCS => write!(f, "NCS"),
+            Variant::RFC4122 => write!(f, "RFC4122"),
+            Variant::Microsoft => write!(f, "Microsoft"),
+            Variant::Future => write!(f, "Future"),
+        }
+    }
+}
+
+impl fmt::LowerHex for Uuid {
+
+--- src/lib.rs ---
+// Copyright 2013-2014 The Rust Project Developers.
+// Copyright 2018 The Uuid Project Developers.
+//
+// See the COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! Generate and parse universally unique identifiers (UUIDs).
+//!
+//! Here's an example of a UUID:
+//!
+//! ```text
+//! 67e55044-10b1-426f-9247-bb680e5fe0c8
+//! ```
+//!
+//! A UUID is a unique 128-bit value, stored as 16 octets, and regularly
+//! formatted as a hex string in five groups. UUIDs are used to assign unique
+//! identifiers to entities without requiring a central allocating authority.
+//!
+//! They are particularly useful in distributed systems, though can be used in
+//! disparate areas, such as databases and network protocols.  Typically a UUID
+//! is displayed in a readable string form as a sequence of hexadecimal digits,
+//! separated into groups by hyphens.
+//!
+//! The uniqueness property is not strictly guaranteed, however for all
+//! practical purposes, it can be assumed that an unintentional collision would
+//! be extremely unlikely.
+//!
+//! UUIDs have a number of standardized encodings that are specified in [RFC 9562](https://www.ietf.org/rfc/rfc9562.html).
+//!
+//! # Getting started
+//!
+//! Add the following to your `Cargo.toml`:
+//!
+//! ```toml
+//! [dependencies.uuid]
+//! version = "1.27.0"
+//! # Lets you generate random UUIDs
+//! features = [
+//!     "v4",
+//! ]
+//! ```
+//!
+//! When you want a UUID, you can generate one:
+//!
+//! ```
+//! # fn main() {
+//! # #[cfg(feature = "v4")]
+//! # {
+//! use uuid::Uuid;
+//!
+
+--- src/parser.rs ---
+// Copyright 2013-2014 The Rust Project Developers.
+// Copyright 2018 The Uuid Project Developers.
+//
+// See the COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! [`Uuid`] parsing constructs and utilities.
+//!
+//! [`Uuid`]: ../struct.Uuid.html
+
+use crate::{
+    error::*,
+    std::{convert::TryFrom, str},
+    Uuid,
+};
+
+#[cfg(feature = "std")]
+use crate::std::string::String;
+
+impl str::FromStr for Uuid {
+    type Err = Error;
+
+    fn from_str(uuid_str: &str) -> Result<Self, Self::Err> {
+        Uuid::parse_str(uuid_str)
+    }
+}
+
+impl TryFrom<&'_ str> for Uuid {
+    type Error = Error;
+
+    fn try_from(uuid_str: &'_ str) -> Result<Self, Self::Error> {
+        Uuid::parse_str(uuid_str)
+    }
+}
+
+#[cfg(feature = "std")]
+impl TryFrom<String> for Uuid {
+    type Error = Error;
+
+    fn try_from(uuid_str: String) -> Result<Self, Self::Error> {
+        Uuid::try_from(uuid_str.as_ref())
+    }
+}
+
+impl Uuid {
+    /// Parses a `Uuid` from a string of hexadecimal digits with optional
+    /// hyphens.
+    ///
+    /// Any of the formats generated by this module (simple, hyphenated, urn,
+    /// Microsoft GUID) are supported by this parsing function.

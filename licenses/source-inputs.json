@@ -1,0 +1,32 @@
+{
+  "files": [
+    {
+      "file": "tauri-api-source.tar.gz",
+      "name": "@tauri-apps/api",
+      "version": "2.12.1",
+      "url": "https://codeload.github.com/tauri-apps/tauri/tar.gz/30da1fd6e17de6107ecc850c95dfb16b5729f2dd",
+      "sha256": "b20a4ea911118086ccc60cdb0ecad21b51a7a7eed56b5abfb3d3a45932a6e71f"
+    },
+    {
+      "file": "plugin-dialog-source.tar.gz",
+      "name": "@tauri-apps/plugin-dialog",
+      "version": "2.8.1",
+      "url": "https://codeload.github.com/tauri-apps/plugins-workspace/tar.gz/d4835d0e947179bac24a383212792d74be3ebe4f",
+      "sha256": "c36d599fc23486c3b3446147a17c8e5884167f618dc1b5d6e5dd568ef24190d3"
+    },
+    {
+      "file": "vite-source.tar.gz",
+      "name": "vite",
+      "version": "7.3.6",
+      "url": "https://codeload.github.com/vitejs/vite/tar.gz/refs/tags/v7.3.6",
+      "sha256": "c1387eb42352bbca7b6e65bfdbbf003c8ab6655033d8916ece4643a82a006dea"
+    },
+    {
+      "file": "nsis-tauri-utils-source.tar.gz",
+      "name": "nsis-tauri-utils",
+      "version": "0.5.3",
+      "url": "https://codeload.github.com/tauri-apps/nsis-tauri-utils/tar.gz/refs/tags/nsis_tauri_utils-v0.5.3",
+      "sha256": "34150c4cee737baca022a18d4b0483c5e8f684924249f0580fbef3d6dfe970d4"
+    }
+  ]
+}

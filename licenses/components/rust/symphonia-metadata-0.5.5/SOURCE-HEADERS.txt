@@ -1,0 +1,480 @@
+--- src/flac.rs ---
+// Symphonia
+// Copyright (c) 2019-2024 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Readers for FLAC comment and picture metadata blocks.
+
+use std::num::NonZeroU32;
+
+use symphonia_core::errors::{decode_error, Result};
+use symphonia_core::io::ReadBytes;
+use symphonia_core::meta::{ColorMode, MetadataBuilder, Size, StandardTagKey, Tag, Value, Visual};
+
+use crate::{id3v2, vorbis};
+
+/// Converts a string of bytes to an ASCII string if all characters are within the printable ASCII
+/// range. If a null byte is encounted, the string terminates at that point.
+fn printable_ascii_to_string(bytes: &[u8]) -> Option<String> {
+    let mut result = String::with_capacity(bytes.len());
+
+    for c in bytes {
+        match c {
+            0x00 => break,
+            0x20..=0x7e => result.push(char::from(*c)),
+            _ => return None,
+        }
+    }
+
+    Some(result)
+}
+
+/// Read a comment metadata block.
+pub fn read_comment_block<B: ReadBytes>(
+    reader: &mut B,
+    metadata: &mut MetadataBuilder,
+) -> Result<()> {
+    vorbis::read_comment_no_framing(reader, metadata)
+}
+
+/// Read a picture metadata block.
+pub fn read_picture_block<B: ReadBytes>(
+    reader: &mut B,
+    metadata: &mut MetadataBuilder,
+) -> Result<()> {
+    let type_enc = reader.read_be_u32()?;
+
+    // Read the Media Type length in bytes.
+    let media_type_len = reader.read_be_u32()? as usize;
+
+    // Read the Media Type bytes
+    let mut media_type_buf = vec![0u8; media_type_len];
+    reader.read_buf_exact(&mut media_type_buf)?;
+
+
+--- src/id3v1.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! An ID3v1 metadata reader.
+
+use symphonia_core::errors::{unsupported_error, Result};
+use symphonia_core::io::ReadBytes;
+use symphonia_core::meta::{MetadataBuilder, StandardTagKey, Tag, Value};
+
+const GENRES: &[&str] = &[
+    // Standard Genres as per ID3v1 specificaation
+    "Blues",
+    "Classic rock",
+    "Country",
+    "Dance",
+    "Disco",
+    "Funk",
+    "Grunge",
+    "Hip-Hop",
+    "Jazz",
+    "Metal",
+    "New Age",
+    "Oldies",
+    "Other",
+    "Pop",
+    "Rhythm and Blues",
+    "Rap",
+    "Reggae",
+    "Rock",
+    "Techno",
+    "Industrial",
+    "Alternative",
+    "Ska",
+    "Death metal",
+    "Pranks",
+    "Soundtrack",
+    "Euro-Techno",
+    "Ambient",
+    "Trip-Hop",
+    "Vocal",
+    "Jazz & Funk",
+    "Fusion",
+    "Trance",
+    "Classical",
+    "Instrumental",
+    "Acid",
+    "House",
+    "Game",
+    "Sound clip",
+    "Gospel",
+    "Noise",
+
+--- src/id3v2/frames.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::io;
+use std::str;
+
+use symphonia_core::errors::{decode_error, unsupported_error, Result};
+use symphonia_core::io::{BufReader, FiniteStream, ReadBytes};
+use symphonia_core::meta::{StandardTagKey, Tag, Value, Visual};
+
+use encoding_rs::UTF_16BE;
+use lazy_static::lazy_static;
+use log::warn;
+
+use super::unsync::{decode_unsynchronisation, read_syncsafe_leq32};
+use super::util;
+
+// The following is a list of all standardized ID3v2.x frames for all ID3v2 major versions and their
+// implementation status ("S" column) in Symphonia.
+//
+// ID3v2.2 uses 3 character frame identifiers as opposed to the 4 character identifiers used in
+// subsequent versions. This table may be used to map equivalent frames between the two versions.
+//
+// All ID3v2.3 frames are officially part of ID3v2.4 with the exception of those marked "n/a".
+// However, it is likely that ID3v2.3-only frames appear in some real-world ID3v2.4 tags.
+//
+//   -   ----   ----    ----    ----------------    ------------------------------------------------
+//   S   v2.2   v2.3    v2.4    Std. Key            Description
+//   -   ----   ----    ----    ----------------    ------------------------------------------------
+//       CRA    AENC                                Audio encryption
+//       CRM                                        Encrypted meta frame
+//   x   PIC    APIC                                Attached picture
+//                      ASPI                        Audio seek point index
+//   x   COM    COMM             Comment            Comments
+//              COMR                                Commercial frame
+//              ENCR                                Encryption method registration
+//       EQU    EQUA                                Equalisation
+//                      EQU2                        Equalisation (2)
+//       ETC    ETCO                                Event timing codes
+//       GEO    GEOB                                General encapsulated object
+//              GRID                                Group identification registration
+//   x   IPL    IPLS    TIPL                        Involved people list
+//       LNK    LINK                                Linked information
+//   x   MCI    MCDI                                Music CD identifier
+//       MLL    MLLT                                MPEG location lookup table
+//              OWNE                                Ownership frame
+//   x          PRIV                                Private frame
+//   x   CNT    PCNT                                Play counter
+//   x   POP    POPM             Rating             Popularimeter
+//              POSS                                Position synchronisation frame
+
+--- src/id3v2/mod.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! An ID3v2 metadata reader.
+
+use symphonia_core::errors::{decode_error, unsupported_error, Result};
+use symphonia_core::io::*;
+use symphonia_core::meta::{MetadataBuilder, MetadataOptions, MetadataReader, MetadataRevision};
+use symphonia_core::probe::{Descriptor, Instantiate, QueryDescriptor};
+use symphonia_core::support_metadata;
+
+use log::{info, trace, warn};
+
+mod frames;
+mod unsync;
+
+use frames::*;
+use unsync::{read_syncsafe_leq32, UnsyncStream};
+
+#[derive(Debug)]
+#[allow(clippy::enum_variant_names)]
+enum TagSizeRestriction {
+    Max128Frames1024KiB,
+    Max64Frames128KiB,
+    Max32Frames40KiB,
+    Max32Frames4KiB,
+}
+
+#[derive(Debug)]
+enum TextEncodingRestriction {
+    None,
+    Utf8OrIso88591,
+}
+
+#[derive(Debug)]
+enum TextFieldSize {
+    None,
+    Max1024Characters,
+    Max128Characters,
+    Max30Characters,
+}
+
+#[derive(Debug)]
+enum ImageEncodingRestriction {
+    None,
+    PngOrJpegOnly,
+}
+
+#[derive(Debug)]
+enum ImageSizeRestriction {
+    None,
+
+--- src/id3v2/unsync.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::io;
+
+use symphonia_core::errors::Result;
+use symphonia_core::io::{FiniteStream, ReadBytes};
+
+pub fn read_syncsafe_leq32<B: ReadBytes>(reader: &mut B, bit_width: u8) -> Result<u32> {
+    debug_assert!(bit_width <= 32);
+
+    let mut result = 0u32;
+    let mut bits_read = 0;
+
+    while bits_read < bit_width {
+        // Ensure bits_read never exceeds the bit width which will cause an overflow
+        let next_read = (bit_width - bits_read).min(7);
+        bits_read += next_read;
+        // The mask should have of the bits below 2 ^ nex_read set to 1
+        let mask = (1 << next_read) - 1;
+        result |= u32::from(reader.read_u8()? & mask) << (bit_width - bits_read);
+    }
+
+    Ok(result)
+}
+
+pub fn decode_unsynchronisation(buf: &mut [u8]) -> &mut [u8] {
+    let len = buf.len();
+    let mut src = 0;
+    let mut dst = 0;
+
+    // Decode the unsynchronisation scheme in-place.
+    while src < len - 1 {
+        buf[dst] = buf[src];
+        dst += 1;
+        src += 1;
+
+        if buf[src - 1] == 0xff && buf[src] == 0x00 {
+            src += 1;
+        }
+    }
+
+    if src < len {
+        buf[dst] = buf[src];
+        dst += 1;
+    }
+
+    &mut buf[..dst]
+}
+
+pub struct UnsyncStream<B: ReadBytes + FiniteStream> {
+
+--- src/itunes.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! iTunes metadata support.
+
+use symphonia_core::meta::StandardTagKey;
+
+use std::collections::HashMap;
+
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref ITUNES_TAG_MAP: HashMap<&'static str, StandardTagKey> = {
+        let mut m = HashMap::new();
+        m.insert("com.apple.iTunes:ARTISTS", StandardTagKey::Artist);
+        m.insert("com.apple.iTunes:ASIN", StandardTagKey::IdentAsin);
+        m.insert("com.apple.iTunes:BARCODE", StandardTagKey::IdentBarcode);
+        m.insert("com.apple.iTunes:CATALOGNUMBER", StandardTagKey::IdentCatalogNumber);
+        m.insert("com.apple.iTunes:CONDUCTOR", StandardTagKey::Conductor);
+        m.insert("com.apple.iTunes:DISCSUBTITLE", StandardTagKey::DiscSubtitle);
+        m.insert("com.apple.iTunes:DJMIXER", StandardTagKey::MixDj);
+        m.insert("com.apple.iTunes:ENGINEER", StandardTagKey::Engineer);
+        m.insert("com.apple.iTunes:ISRC", StandardTagKey::IdentIsrc);
+        m.insert("com.apple.iTunes:LABEL", StandardTagKey::Label);
+        m.insert("com.apple.iTunes:LANGUAGE", StandardTagKey::Language);
+        m.insert("com.apple.iTunes:LICENSE", StandardTagKey::License);
+        m.insert("com.apple.iTunes:LYRICIST", StandardTagKey::Lyricist);
+        m.insert("com.apple.iTunes:MEDIA", StandardTagKey::MediaFormat);
+        m.insert("com.apple.iTunes:MIXER", StandardTagKey::MixEngineer);
+        m.insert("com.apple.iTunes:MOOD", StandardTagKey::Mood);
+        m.insert(
+            "com.apple.iTunes:MusicBrainz Album Artist Id",
+            StandardTagKey::MusicBrainzAlbumArtistId,
+        );
+        m.insert("com.apple.iTunes:MusicBrainz Album Id", StandardTagKey::MusicBrainzAlbumId);
+        m.insert(
+            "com.apple.iTunes:MusicBrainz Album Release Country",
+            StandardTagKey::ReleaseCountry,
+        );
+        m.insert(
+            "com.apple.iTunes:MusicBrainz Album Status",
+            StandardTagKey::MusicBrainzReleaseStatus,
+        );
+        m.insert("com.apple.iTunes:MusicBrainz Album Type", StandardTagKey::MusicBrainzReleaseType);
+        m.insert("com.apple.iTunes:MusicBrainz Artist Id", StandardTagKey::MusicBrainzArtistId);
+        m.insert(
+            "com.apple.iTunes:MusicBrainz Release Group Id",
+            StandardTagKey::MusicBrainzReleaseGroupId,
+        );
+        m.insert(
+            "com.apple.iTunes:MusicBrainz Release Track Id",
+
+--- src/lib.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+#![warn(rust_2018_idioms)]
+#![forbid(unsafe_code)]
+// The following lints are allowed in all Symphonia crates. Please see clippy.toml for their
+// justification.
+#![allow(clippy::comparison_chain)]
+#![allow(clippy::excessive_precision)]
+#![allow(clippy::identity_op)]
+#![allow(clippy::manual_range_contains)]
+
+pub mod flac;
+pub mod id3v1;
+pub mod id3v2;
+pub mod itunes;
+pub mod riff;
+pub mod vorbis;
+
+
+--- src/riff.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! A RIFF INFO metadata reader.
+
+use lazy_static::lazy_static;
+use std::collections::HashMap;
+use symphonia_core::meta::{StandardTagKey, Tag, Value};
+
+lazy_static! {
+    static ref RIFF_INFO_MAP: HashMap<&'static str, StandardTagKey> = {
+        let mut m = HashMap::new();
+        m.insert("ages", StandardTagKey::Rating);
+        m.insert("cmnt", StandardTagKey::Comment);
+        // Is this the same as a cmnt?
+        m.insert("comm", StandardTagKey::Comment);
+        m.insert("dtim", StandardTagKey::OriginalDate);
+        m.insert("genr", StandardTagKey::Genre);
+        m.insert("iart", StandardTagKey::Artist);
+        // Is this also  the same as cmnt?
+        m.insert("icmt", StandardTagKey::Comment);
+        m.insert("icop", StandardTagKey::Copyright);
+        m.insert("icrd", StandardTagKey::Date);
+        m.insert("idit", StandardTagKey::OriginalDate);
+        m.insert("ienc", StandardTagKey::EncodedBy);
+        m.insert("ieng", StandardTagKey::Engineer);
+        m.insert("ifrm", StandardTagKey::TrackTotal);
+        m.insert("ignr", StandardTagKey::Genre);
+        m.insert("ilng", StandardTagKey::Language);
+        m.insert("imus", StandardTagKey::Composer);
+        m.insert("inam", StandardTagKey::TrackTitle);
+        m.insert("iprd", StandardTagKey::Album);
+        m.insert("ipro", StandardTagKey::Producer);
+        m.insert("iprt", StandardTagKey::TrackNumber);
+        m.insert("irtd", StandardTagKey::Rating);
+        m.insert("isft", StandardTagKey::Encoder);
+        m.insert("isgn", StandardTagKey::Genre);
+        m.insert("isrf", StandardTagKey::MediaFormat);
+        m.insert("itch", StandardTagKey::EncodedBy);
+        m.insert("iwri", StandardTagKey::Writer);
+        m.insert("lang", StandardTagKey::Language);
+        m.insert("prt1", StandardTagKey::TrackNumber);
+        m.insert("prt2", StandardTagKey::TrackTotal);
+        // Same as inam?
+        m.insert("titl", StandardTagKey::TrackTitle);
+        m.insert("torg", StandardTagKey::Label);
+        m.insert("trck", StandardTagKey::TrackNumber);
+        m.insert("tver", StandardTagKey::Version);
+        m.insert("year", StandardTagKey::Date);
+        m
+    };
+
+--- src/vorbis.rs ---
+// Symphonia
+// Copyright (c) 2019-2024 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! A Vorbic COMMENT metadata reader for FLAC or OGG formats.
+
+use std::collections::HashMap;
+
+use lazy_static::lazy_static;
+use log::warn;
+
+use symphonia_core::errors::Result;
+use symphonia_core::io::{BufReader, ReadBytes};
+use symphonia_core::meta::{MetadataBuilder, StandardTagKey, Tag, Value};
+
+use crate::flac;
+
+lazy_static! {
+    static ref VORBIS_COMMENT_MAP: HashMap<&'static str, StandardTagKey> = {
+        let mut m = HashMap::new();
+        m.insert("album artist"                , StandardTagKey::AlbumArtist);
+        m.insert("album"                       , StandardTagKey::Album);
+        m.insert("albumartist"                 , StandardTagKey::AlbumArtist);
+        m.insert("albumartistsort"             , StandardTagKey::SortAlbumArtist);
+        m.insert("albumsort"                   , StandardTagKey::SortAlbum);
+        m.insert("arranger"                    , StandardTagKey::Arranger);
+        m.insert("artist"                      , StandardTagKey::Artist);
+        m.insert("artistsort"                  , StandardTagKey::SortArtist);
+        // TODO: Is Author a synonym for Writer?
+        m.insert("author"                      , StandardTagKey::Writer);
+        m.insert("barcode"                     , StandardTagKey::IdentBarcode);
+        m.insert("bpm"                         , StandardTagKey::Bpm);
+        m.insert("catalog #"                   , StandardTagKey::IdentCatalogNumber);
+        m.insert("catalog"                     , StandardTagKey::IdentCatalogNumber);
+        m.insert("catalognumber"               , StandardTagKey::IdentCatalogNumber);
+        m.insert("catalogue #"                 , StandardTagKey::IdentCatalogNumber);
+        m.insert("comment"                     , StandardTagKey::Comment);
+        m.insert("compileation"                , StandardTagKey::Compilation);
+        m.insert("composer"                    , StandardTagKey::Composer);
+        m.insert("conductor"                   , StandardTagKey::Conductor);
+        m.insert("copyright"                   , StandardTagKey::Copyright);
+        m.insert("date"                        , StandardTagKey::Date);
+        m.insert("description"                 , StandardTagKey::Description);
+        m.insert("disc"                        , StandardTagKey::DiscNumber);
+        m.insert("discnumber"                  , StandardTagKey::DiscNumber);
+        m.insert("discsubtitle"                , StandardTagKey::DiscSubtitle);
+        m.insert("disctotal"                   , StandardTagKey::DiscTotal);
+        m.insert("disk"                        , StandardTagKey::DiscNumber);
+        m.insert("disknumber"                  , StandardTagKey::DiscNumber);
+        m.insert("disksubtitle"                , StandardTagKey::DiscSubtitle);
+        m.insert("disktotal"                   , StandardTagKey::DiscTotal);
+        m.insert("djmixer"                     , StandardTagKey::MixDj);

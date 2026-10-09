@@ -1,0 +1,56 @@
+--- src/lib.rs ---
+// Copyright 2013 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! Complex numbers.
+//!
+//! ## Compatibility
+//!
+//! The `num-complex` crate is tested for rustc 1.60 and greater.
+
+#![doc(html_root_url = "https://docs.rs/num-complex/0.4")]
+#![no_std]
+
+#[cfg(any(test, feature = "std"))]
+#[cfg_attr(test, macro_use)]
+extern crate std;
+
+use core::fmt;
+#[cfg(test)]
+use core::hash;
+use core::iter::{Product, Sum};
+use core::ops::{Add, Div, Mul, Neg, Rem, Sub};
+use core::str::FromStr;
+#[cfg(feature = "std")]
+use std::error::Error;
+
+use num_traits::{ConstOne, ConstZero, Inv, MulAdd, Num, One, Pow, Signed, Zero};
+
+use num_traits::float::FloatCore;
+#[cfg(any(feature = "std", feature = "libm"))]
+use num_traits::float::{Float, FloatConst};
+
+mod cast;
+mod pow;
+
+#[cfg(any(feature = "std", feature = "libm"))]
+mod complex_float;
+#[cfg(any(feature = "std", feature = "libm"))]
+pub use crate::complex_float::ComplexFloat;
+
+#[cfg(feature = "rand")]
+mod crand;
+#[cfg(feature = "rand")]
+pub use crate::crand::ComplexDistribution;
+
+// FIXME #1284: handle complex NaN & infinity etc. This
+// probably doesn't map to C's _Complex correctly.
+
+/// A complex number in Cartesian form.

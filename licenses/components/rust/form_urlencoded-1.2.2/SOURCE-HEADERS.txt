@@ -1,0 +1,56 @@
+--- src/lib.rs ---
+// Copyright 2013-2016 The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! Parser and serializer for the [`application/x-www-form-urlencoded` syntax](
+//! http://url.spec.whatwg.org/#application/x-www-form-urlencoded),
+//! as used by HTML forms.
+//!
+//! Converts between a string (such as an URL’s query string)
+//! and a sequence of (name, value) pairs.
+#![no_std]
+
+// For forwards compatibility
+#[cfg(feature = "std")]
+extern crate std as _;
+
+extern crate alloc;
+
+#[cfg(not(feature = "alloc"))]
+compile_error!("the `alloc` feature must currently be enabled");
+
+use alloc::borrow::{Borrow, Cow, ToOwned};
+use alloc::string::String;
+use core::str;
+use percent_encoding::{percent_decode, percent_encode_byte};
+
+/// Convert a byte string in the `application/x-www-form-urlencoded` syntax
+/// into a iterator of (name, value) pairs.
+///
+/// Use `parse(input.as_bytes())` to parse a `&str` string.
+///
+/// The names and values are percent-decoded. For instance, `%23first=%25try%25` will be
+/// converted to `[("#first", "%try%")]`.
+#[inline]
+pub fn parse(input: &[u8]) -> Parse<'_> {
+    Parse { input }
+}
+/// The return type of `parse()`.
+#[derive(Copy, Clone)]
+pub struct Parse<'a> {
+    input: &'a [u8],
+}
+
+impl<'a> Iterator for Parse<'a> {
+    type Item = (Cow<'a, str>, Cow<'a, str>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.input.is_empty() {
+                return None;
+            }

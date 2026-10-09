@@ -1,0 +1,112 @@
+--- src/ascii_set.rs ---
+// Copyright 2013-2016 The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use core::{mem, ops};
+
+/// Represents a set of characters or bytes in the ASCII range.
+///
+/// This is used in [`percent_encode`] and [`utf8_percent_encode`].
+/// This is similar to [percent-encode sets](https://url.spec.whatwg.org/#percent-encoded-bytes).
+///
+/// Use the `add` method of an existing set to define a new set. For example:
+///
+/// [`percent_encode`]: crate::percent_encode
+/// [`utf8_percent_encode`]: crate::utf8_percent_encode
+///
+/// ```
+/// use percent_encoding::{AsciiSet, CONTROLS};
+///
+/// /// https://url.spec.whatwg.org/#fragment-percent-encode-set
+/// const FRAGMENT: &AsciiSet = &CONTROLS.add(b' ').add(b'"').add(b'<').add(b'>').add(b'`');
+/// ```
+#[derive(Debug, PartialEq, Eq)]
+pub struct AsciiSet {
+    mask: [Chunk; ASCII_RANGE_LEN / BITS_PER_CHUNK],
+}
+
+type Chunk = u32;
+
+const ASCII_RANGE_LEN: usize = 0x80;
+
+const BITS_PER_CHUNK: usize = 8 * mem::size_of::<Chunk>();
+
+impl AsciiSet {
+    /// An empty set.
+    pub const EMPTY: Self = Self {
+        mask: [0; ASCII_RANGE_LEN / BITS_PER_CHUNK],
+    };
+
+    /// Called with UTF-8 bytes rather than code points.
+    /// Not used for non-ASCII bytes.
+    pub(crate) const fn contains(&self, byte: u8) -> bool {
+        let chunk = self.mask[byte as usize / BITS_PER_CHUNK];
+        let mask = 1 << (byte as usize % BITS_PER_CHUNK);
+        (chunk & mask) != 0
+    }
+
+    pub(crate) fn should_percent_encode(&self, byte: u8) -> bool {
+        !byte.is_ascii() || self.contains(byte)
+    }
+
+
+--- src/lib.rs ---
+// Copyright 2013-2016 The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! URLs use special characters to indicate the parts of the request.
+//! For example, a `?` question mark marks the end of a path and the start of a query string.
+//! In order for that character to exist inside a path, it needs to be encoded differently.
+//!
+//! Percent encoding replaces reserved characters with the `%` escape character
+//! followed by a byte value as two hexadecimal digits.
+//! For example, an ASCII space is replaced with `%20`.
+//!
+//! When encoding, the set of characters that can (and should, for readability) be left alone
+//! depends on the context.
+//! The `?` question mark mentioned above is not a separator when used literally
+//! inside of a query string, and therefore does not need to be encoded.
+//! The [`AsciiSet`] parameter of [`percent_encode`] and [`utf8_percent_encode`]
+//! lets callers configure this.
+//!
+//! This crate deliberately does not provide many different sets.
+//! Users should consider in what context the encoded string will be used,
+//! read relevant specifications, and define their own set.
+//! This is done by using the `add` method of an existing set.
+//!
+//! # Examples
+//!
+//! ```
+//! use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
+//!
+//! /// https://url.spec.whatwg.org/#fragment-percent-encode-set
+//! const FRAGMENT: &AsciiSet = &CONTROLS.add(b' ').add(b'"').add(b'<').add(b'>').add(b'`');
+//!
+//! assert_eq!(utf8_percent_encode("foo <bar>", FRAGMENT).to_string(), "foo%20%3Cbar%3E");
+//! ```
+#![no_std]
+
+// For forwards compatibility
+#[cfg(feature = "std")]
+extern crate std as _;
+
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
+#[cfg(feature = "alloc")]
+use alloc::{
+    borrow::{Cow, ToOwned},
+    string::String,
+    vec::Vec,
+};
+use core::{fmt, slice, str};

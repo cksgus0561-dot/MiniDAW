@@ -1,0 +1,744 @@
+--- src/counter.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::sync::atomic::{AtomicU32, Ordering};
+
+pub struct Counter(AtomicU32);
+
+impl Counter {
+    pub const fn new() -> Self {
+        Self(AtomicU32::new(1))
+    }
+
+    pub fn next(&self) -> u32 {
+        self.0.fetch_add(1, Ordering::Relaxed)
+    }
+}
+
+
+--- src/error.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use thiserror::Error;
+
+/// Errors returned by tray-icon.
+#[non_exhaustive]
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error(transparent)]
+    OsError(#[from] std::io::Error),
+    #[cfg(any(
+        any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd"
+        ),
+        target_os = "macos"
+    ))]
+    #[error(transparent)]
+    PngEncodingError(#[from] png::EncodingError),
+    #[error("not on the main thread")]
+    NotMainThread,
+    #[cfg(all(
+        any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd"
+        ),
+        feature = "ksni"
+    ))]
+    #[error(transparent)]
+    Ksni(#[from] ksni::Error),
+}
+
+/// Convenient type alias of Result type for tray-icon.
+pub type Result<T> = std::result::Result<T, Error>;
+
+
+--- src/icon.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+// taken from https://github.com/rust-windowing/winit/blob/92fdf5ba85f920262a61cee4590f4a11ad5738d1/src/icon.rs
+
+use crate::platform_impl::PlatformIcon;
+use std::{error::Error, fmt, io, mem};
+
+#[repr(C)]
+#[derive(Debug)]
+pub(crate) struct Pixel {
+    pub(crate) r: u8,
+    pub(crate) g: u8,
+    pub(crate) b: u8,
+    pub(crate) a: u8,
+}
+
+pub(crate) const PIXEL_SIZE: usize = mem::size_of::<Pixel>();
+
+#[derive(Debug)]
+/// An error produced when using [`Icon::from_rgba`] with invalid arguments.
+pub enum BadIcon {
+    /// Produced when the length of the `rgba` argument isn't divisible by 4, thus `rgba` can't be
+    /// safely interpreted as 32bpp RGBA pixels.
+    ByteCountNotDivisibleBy4 { byte_count: usize },
+    /// Produced when the number of pixels (`rgba.len() / 4`) isn't equal to `width * height`.
+    /// At least one of your arguments is incorrect.
+    DimensionsVsPixelCount {
+        width: u32,
+        height: u32,
+        width_x_height: usize,
+        pixel_count: usize,
+    },
+    /// Produced when underlying OS functionality failed to create the icon
+    OsError(io::Error),
+}
+
+impl fmt::Display for BadIcon {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BadIcon::ByteCountNotDivisibleBy4 { byte_count } => write!(f,
+                "The length of the `rgba` argument ({:?}) isn't divisible by 4, making it impossible to interpret as 32bpp RGBA pixels.",
+                byte_count,
+            ),
+            BadIcon::DimensionsVsPixelCount {
+                width,
+                height,
+                width_x_height,
+                pixel_count,
+            } => write!(f,
+                "The specified dimensions ({:?}x{:?}) don't match the number of pixels supplied by the `rgba` argument ({:?}). For those dimensions, the expected pixel count is {:?}.",
+                width, height, pixel_count, width_x_height,
+            ),
+            BadIcon::OsError(e) => write!(f, "OS error when instantiating the icon: {:?}", e),
+
+--- src/lib.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+#![allow(clippy::uninlined_format_args)]
+
+//! tray-icon lets you create tray icons for desktop applications.
+//!
+//! # Platforms supported:
+//!
+//! - Windows
+//! - macOS
+//! - Linux and BSD (AppIndicator or KSNI)
+//!
+//! # Platform-specific notes:
+//!
+//! - On Windows and the Linux/BSD AppIndicator backend, an event loop must be running on the thread. The
+//!   KSNI backend runs its D-Bus service on a worker thread and does not require a GTK event loop.
+//! - When both the `libappindicator` and `ksni` features are enabled on Linux or BSD, tray-icon
+//!   uses the KSNI backend and emits a Cargo warning.
+//! - On macOS, an event loop must be running on the main thread so you also need to create the tray icon on the main thread. You must make sure that the event loop is already running and not just created before creating a TrayIcon to prevent issues with fullscreen apps. In Winit for example the earliest you can create icons is on [`StartCause::Init`](https://docs.rs/winit/latest/winit/event/enum.StartCause.html#variant.Init).
+//!
+//! # Dependencies (Linux/BSD)
+//!
+//! The default Linux backend uses GTK, `libxdo`, and `libappindicator` or
+//! `libayatana-appindicator`. The `ksni` backend does not require these system libraries unless a
+//!  GTK backend is also enabled.
+//!
+//! #### Arch Linux / Manjaro:
+//!
+//! ```sh
+//! pacman -S gtk3 xdotool libappindicator-gtk3 #or libayatana-appindicator
+//! ```
+//!
+//! #### Debian / Ubuntu:
+//!
+//! ```sh
+//! sudo apt install libgtk-3-dev libxdo-dev libappindicator3-dev #or libayatana-appindicator3-dev
+//! ```
+//!
+//! # Examples
+//!
+//! #### Create a tray icon without a menu.
+//!
+//! ```no_run
+//! use tray_icon::{TrayIconBuilder, Icon};
+//!
+//! # let icon = Icon::from_rgba(Vec::new(), 0, 0).unwrap();
+//! let tray_icon = TrayIconBuilder::new()
+//!     .with_tooltip("system-tray - tray icon library!")
+//!     .with_icon(icon)
+//!     .build()
+//!     .unwrap();
+//! ```
+//!
+
+--- src/platform_impl/gtk/icon.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{fs::File, io::BufWriter, path::Path};
+
+use crate::icon::BadIcon;
+
+#[derive(Debug, Clone)]
+pub struct PlatformIcon {
+    rgba: Vec<u8>,
+    width: i32,
+    height: i32,
+}
+
+impl PlatformIcon {
+    pub fn from_rgba(rgba: Vec<u8>, width: u32, height: u32) -> Result<Self, BadIcon> {
+        Ok(Self {
+            rgba,
+            width: width as i32,
+            height: height as i32,
+        })
+    }
+
+    pub fn write_to_png(&self, path: impl AsRef<Path>) -> crate::Result<()> {
+        let png = File::create(path)?;
+        let w = &mut BufWriter::new(png);
+
+        let mut encoder = png::Encoder::new(w, self.width as _, self.height as _);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+
+        let mut writer = encoder.write_header()?;
+        writer.write_image_data(&self.rgba)?;
+
+        Ok(())
+    }
+}
+
+
+--- src/platform_impl/gtk/mod.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+mod icon;
+use std::path::{Path, PathBuf};
+
+use crate::icon::Icon;
+pub(crate) use icon::PlatformIcon;
+
+use crate::{TrayIconAttributes, TrayIconId};
+use libappindicator::{AppIndicator, AppIndicatorStatus};
+
+pub struct TrayIcon {
+    id: TrayIconId,
+    indicator: AppIndicator,
+    temp_dir_path: Option<PathBuf>,
+    path: PathBuf,
+    counter: u32,
+    menu: Option<Box<dyn muda::ContextMenu>>,
+}
+
+impl TrayIcon {
+    pub fn new(id: TrayIconId, attrs: TrayIconAttributes) -> crate::Result<Self> {
+        let mut indicator = AppIndicator::new(&format!("tray-icon tray app {}", id.as_ref()), "");
+        indicator.set_status(AppIndicatorStatus::Active);
+
+        let (parent_path, icon_path) = temp_icon_path(attrs.temp_dir_path.as_ref(), &id, 0)?;
+
+        if let Some(icon) = attrs.icon {
+            icon.inner.write_to_png(&icon_path)?;
+        }
+
+        indicator.set_icon_theme_path(&parent_path.to_string_lossy());
+        indicator.set_icon_full(&icon_path.to_string_lossy(), "icon");
+
+        if let Some(menu) = &attrs.menu {
+            indicator.set_menu(&mut menu.gtk_context_menu());
+        }
+
+        if let Some(title) = attrs.title {
+            indicator.set_label(title.as_str(), "");
+        }
+
+        Ok(Self {
+            id,
+            indicator,
+            path: icon_path,
+            temp_dir_path: attrs.temp_dir_path,
+            counter: 0,
+            menu: attrs.menu,
+        })
+    }
+    pub fn set_icon(&mut self, icon: Option<Icon>) -> crate::Result<()> {
+        let _ = std::fs::remove_file(&self.path);
+
+--- src/platform_impl/ksni/icon.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::icon::{BadIcon, RgbaIcon};
+
+#[derive(Debug, Clone)]
+pub struct PlatformIcon(ksni::Icon);
+
+impl PlatformIcon {
+    pub fn from_rgba(rgba: Vec<u8>, width: u32, height: u32) -> Result<Self, BadIcon> {
+        let icon = RgbaIcon::from_rgba(rgba, width, height)?;
+        let mut data = icon.rgba;
+        for pixel in data.as_chunks_mut::<4>().0 {
+            pixel.rotate_right(1);
+        }
+
+        Ok(Self(ksni::Icon {
+            width: icon.width as i32,
+            height: icon.height as i32,
+            data,
+        }))
+    }
+}
+
+impl From<PlatformIcon> for ksni::Icon {
+    fn from(icon: PlatformIcon) -> Self {
+        icon.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PlatformIcon;
+
+    #[test]
+    fn converts_rgba_to_network_order_argb() {
+        let icon = PlatformIcon::from_rgba(vec![1, 2, 3, 4], 1, 1).unwrap();
+        let icon: ksni::Icon = icon.into();
+
+        assert_eq!(icon.width, 1);
+        assert_eq!(icon.height, 1);
+        assert_eq!(icon.data, [4, 1, 2, 3]);
+    }
+}
+
+
+--- src/platform_impl/ksni/menu.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{io::Cursor, sync::Arc};
+
+use muda::{MenuItemKindSnapshot, SnapshotIcon};
+
+use super::StatusNotifierTray;
+
+pub(super) fn into_ksni_menu(
+    items: &[MenuItemKindSnapshot],
+) -> Vec<ksni::MenuItem<StatusNotifierTray>> {
+    items.iter().filter_map(into_ksni_item).collect()
+}
+
+fn into_ksni_item(item: &MenuItemKindSnapshot) -> Option<ksni::MenuItem<StatusNotifierTray>> {
+    match item {
+        MenuItemKindSnapshot::MenuItem(item) => {
+            let activate = Arc::clone(&item.activate);
+            Some(
+                ksni::menu::StandardItem {
+                    label: to_ksni_mnemonic(&item.text()),
+                    enabled: item.is_enabled(),
+                    activate: Box::new(move |_| activate()),
+                    ..Default::default()
+                }
+                .into(),
+            )
+        }
+        MenuItemKindSnapshot::Check(item) => {
+            let activate = Arc::clone(&item.activate);
+            Some(
+                ksni::menu::CheckmarkItem {
+                    label: to_ksni_mnemonic(&item.text()),
+                    enabled: item.is_enabled(),
+                    checked: item.is_checked(),
+                    activate: Box::new(move |_| activate()),
+                    ..Default::default()
+                }
+                .into(),
+            )
+        }
+        MenuItemKindSnapshot::Submenu(item) => {
+            let (icon_name, icon_data) = icon_fields(item.icon().as_ref());
+            Some(
+                ksni::menu::SubMenu {
+                    label: to_ksni_mnemonic(&item.text()),
+                    enabled: item.is_enabled(),
+                    icon_name,
+                    icon_data,
+                    submenu: into_ksni_menu(&item.items()),
+                    ..Default::default()
+                }
+                .into(),
+
+--- src/platform_impl/ksni/mod.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+mod icon;
+mod menu;
+
+use std::{path::Path, thread::JoinHandle};
+
+use crossbeam_channel::{select, unbounded, Receiver, Sender};
+use ksni::blocking::{Handle, TrayMethods};
+use muda::{ContextMenu, MenuChangeEvent, MenuSnapshotHandle};
+
+use crate::{
+    icon::Icon, MouseButton, MouseButtonState, Rect, TrayIconAttributes, TrayIconEvent, TrayIconId,
+};
+
+pub(crate) use icon::PlatformIcon;
+
+pub struct TrayIcon {
+    handle: Handle<StatusNotifierTray>,
+    menu_watcher_thread_shutdown_tx: Sender<()>,
+    menu_watcher_thread: Option<JoinHandle<()>>,
+    #[allow(dead_code)]
+    // Keep the menu alive to ensure the snapshot remains valid
+    menu: Option<Box<dyn ContextMenu>>,
+}
+
+impl TrayIcon {
+    pub fn new(id: TrayIconId, attrs: TrayIconAttributes) -> crate::Result<Self> {
+        let handle = StatusNotifierTray {
+            id,
+            icon: attrs
+                .icon
+                .map(|icon| icon.inner.into())
+                .into_iter()
+                .collect(),
+            title: attrs.title.unwrap_or_default(),
+            tooltip: attrs.tooltip.unwrap_or_default(),
+            status: ksni::Status::Active,
+            menu_snapshot: attrs.menu.as_ref().map(|menu| menu.snapshot_handle()),
+        }
+        .spawn()?;
+
+        let (menu_watcher_thread_shutdown_tx, menu_watcher_thread_shutdown_rx) = unbounded();
+
+        // Spawn a thread to watch for menu changes and update the tray icon accordingly
+        let menu_watcher_thread = std::thread::Builder::new()
+            .name("tray-icon-menu-watcher".into())
+            .spawn({
+                let handle = handle.clone();
+                move || watch_menu_changes(handle, menu_watcher_thread_shutdown_rx)
+            })?;
+
+        Ok(Self {
+
+--- src/platform_impl/macos/icon.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::icon::{BadIcon, RgbaIcon};
+use std::io::Cursor;
+
+#[derive(Debug, Clone)]
+pub struct PlatformIcon(RgbaIcon);
+
+impl PlatformIcon {
+    pub fn from_rgba(rgba: Vec<u8>, width: u32, height: u32) -> Result<Self, BadIcon> {
+        Ok(PlatformIcon(RgbaIcon::from_rgba(rgba, width, height)?))
+    }
+
+    pub fn get_size(&self) -> (u32, u32) {
+        (self.0.width, self.0.height)
+    }
+
+    pub fn to_png(&self) -> crate::Result<Vec<u8>> {
+        let mut png = Vec::new();
+
+        {
+            let mut encoder =
+                png::Encoder::new(Cursor::new(&mut png), self.0.width as _, self.0.height as _);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+
+            let mut writer = encoder.write_header()?;
+            writer.write_image_data(&self.0.rgba)?;
+        }
+
+        Ok(png)
+    }
+}
+
+
+--- src/platform_impl/macos/mod.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+mod icon;
+use std::cell::{Cell, RefCell};
+
+use objc2::rc::Retained;
+use objc2::{define_class, msg_send, AllocAnyThread, DeclaredClass, Message};
+use objc2_app_kit::{
+    NSCellImagePosition, NSEvent, NSImage, NSMenu, NSStatusBar, NSStatusItem, NSTrackingArea,
+    NSTrackingAreaOptions, NSVariableStatusItemLength, NSView, NSWindow,
+};
+use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+use objc2_core_graphics::{CGDisplayPixelsHigh, CGMainDisplayID};
+use objc2_foundation::{MainThreadMarker, NSData, NSSize, NSString};
+
+pub(crate) use self::icon::PlatformIcon;
+use crate::Error;
+use crate::{
+    icon::Icon, menu, MouseButton, MouseButtonState, Rect, TrayIconAttributes, TrayIconEvent,
+    TrayIconId,
+};
+
+pub struct TrayIcon {
+    ns_status_item: Option<Retained<NSStatusItem>>,
+    tray_target: Option<Retained<TrayTarget>>,
+    id: TrayIconId,
+    attrs: TrayIconAttributes,
+    mtm: MainThreadMarker,
+}
+
+impl TrayIcon {
+    pub fn new(id: TrayIconId, attrs: TrayIconAttributes) -> crate::Result<Self> {
+        let mtm = MainThreadMarker::new().ok_or(Error::NotMainThread)?;
+        let (ns_status_item, tray_target) = Self::create(&id, &attrs, mtm)?;
+
+        let tray_icon = Self {
+            ns_status_item: Some(ns_status_item),
+            tray_target: Some(tray_target),
+            id,
+            attrs,
+            mtm,
+        };
+
+        Ok(tray_icon)
+    }
+
+    fn create(
+        id: &TrayIconId,
+        attrs: &TrayIconAttributes,
+        mtm: MainThreadMarker,
+    ) -> crate::Result<(Retained<NSStatusItem>, Retained<TrayTarget>)> {
+        let ns_status_item =
+            NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
+
+--- src/platform_impl/mod.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+#[cfg(target_os = "windows")]
+#[path = "windows/mod.rs"]
+mod platform;
+#[cfg(all(
+    any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ),
+    feature = "libappindicator",
+    not(feature = "ksni")
+))]
+#[path = "gtk/mod.rs"]
+mod platform;
+#[cfg(all(
+    any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ),
+    feature = "ksni"
+))]
+#[path = "ksni/mod.rs"]
+mod platform;
+#[cfg(target_os = "macos")]
+#[path = "macos/mod.rs"]
+mod platform;
+
+pub(crate) use self::platform::*;
+
+
+--- src/platform_impl/windows/icon.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+// taken from https://github.com/rust-windowing/winit/blob/92fdf5ba85f920262a61cee4590f4a11ad5738d1/src/platform_impl/windows/icon.rs
+
+use std::{fmt, io, mem, path::Path, sync::Arc};
+
+use windows_sys::{
+    core::PCWSTR,
+    Win32::UI::WindowsAndMessaging::{
+        CreateIcon, DestroyIcon, LoadImageW, HICON, IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE,
+    },
+};
+
+use crate::icon::*;
+
+use super::util;
+
+impl Pixel {
+    fn convert_to_bgra(&mut self) {
+        mem::swap(&mut self.r, &mut self.b);
+    }
+}
+
+impl RgbaIcon {
+    fn into_windows_icon(self) -> Result<WinIcon, BadIcon> {
+        let rgba = self.rgba;
+        let pixel_count = rgba.len() / PIXEL_SIZE;
+        let mut and_mask = Vec::with_capacity(pixel_count);
+        let pixels =
+            unsafe { std::slice::from_raw_parts_mut(rgba.as_ptr() as *mut Pixel, pixel_count) };
+        for pixel in pixels {
+            and_mask.push(pixel.a.wrapping_sub(u8::MAX)); // invert alpha channel
+            pixel.convert_to_bgra();
+        }
+        assert_eq!(and_mask.len(), pixel_count);
+        let handle = unsafe {
+            CreateIcon(
+                std::ptr::null_mut(),
+                self.width as i32,
+                self.height as i32,
+                1,
+                (PIXEL_SIZE * 8) as u8,
+                and_mask.as_ptr(),
+                rgba.as_ptr(),
+            )
+        };
+        if !handle.is_null() {
+            Ok(WinIcon::from_handle(handle))
+        } else {
+            Err(BadIcon::OsError(io::Error::last_os_error()))
+        }
+    }
+}
+
+--- src/platform_impl/windows/mod.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+mod icon;
+mod util;
+use std::{mem::size_of, ptr};
+
+use once_cell::sync::Lazy;
+use windows_sys::{
+    core::GUID,
+    s,
+    Win32::{
+        Foundation::{FALSE, HWND, LPARAM, LRESULT, POINT, RECT, S_OK, TRUE, WPARAM},
+        UI::{
+            Shell::{
+                Shell_NotifyIconGetRect, Shell_NotifyIconW, NIF_GUID, NIF_ICON, NIF_MESSAGE,
+                NIF_STATE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIS_HIDDEN, NOTIFYICONDATAW,
+                NOTIFYICONIDENTIFIER,
+            },
+            WindowsAndMessaging::{
+                ChangeWindowMessageFilterEx, CreateWindowExW, DefWindowProcW, DestroyWindow,
+                GetCursorPos, KillTimer, PostMessageW, RegisterClassW, RegisterWindowMessageA,
+                SendMessageW, SetForegroundWindow, SetTimer, TrackPopupMenu, CREATESTRUCTW,
+                CW_USEDEFAULT, GWL_USERDATA, HICON, HMENU, MSGFLT_ALLOW, TPM_BOTTOMALIGN,
+                TPM_LEFTALIGN, WM_CREATE, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
+                WM_LBUTTONUP, WM_MBUTTONDBLCLK, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE,
+                WM_NCCREATE, WM_NULL, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_TIMER,
+                WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+                WS_OVERLAPPED,
+            },
+        },
+    },
+};
+
+use crate::{
+    dpi::PhysicalPosition, icon::Icon, menu, MouseButton, MouseButtonState, Rect,
+    TrayIconAttributes, TrayIconEvent, TrayIconId, COUNTER,
+};
+
+pub(crate) use self::icon::WinIcon as PlatformIcon;
+
+const WM_USER_TRAYICON: u32 = 6002;
+const WM_USER_UPDATE_TRAYMENU: u32 = 6003;
+const WM_USER_UPDATE_TRAYICON: u32 = 6004;
+const WM_USER_SHOW_TRAYICON: u32 = 6005;
+const WM_USER_UPDATE_TRAYTOOLTIP: u32 = 6006;
+const WM_USER_LEAVE_TIMER_ID: u32 = 6007;
+const WM_USER_SHOW_MENU_ON_LEFT_CLICK: u32 = 6008;
+const WM_USER_SHOW_MENU_ON_RIGHT_CLICK: u32 = 6009;
+/// When the taskbar is created, it registers a message with the "TaskbarCreated" string and then broadcasts this message to all top-level windows
+/// When the application receives this message, it should assume that any taskbar icons it added have been removed and add them again.
+static S_U_TASKBAR_RESTART: Lazy<u32> =
+    Lazy::new(|| unsafe { RegisterWindowMessageA(s!("TaskbarCreated")) });
+
+
+--- src/platform_impl/windows/util.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use windows_sys::Win32::{Foundation::HWND, UI::WindowsAndMessaging::WINDOW_LONG_PTR_INDEX};
+
+pub fn encode_wide<S: AsRef<std::ffi::OsStr>>(string: S) -> Vec<u16> {
+    std::os::windows::prelude::OsStrExt::encode_wide(string.as_ref())
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+// taken from winit's code base
+// https://github.com/rust-windowing/winit/blob/ee88e38f13fbc86a7aafae1d17ad3cd4a1e761df/src/platform_impl/windows/util.rs#L138
+pub fn get_instance_handle() -> windows_sys::Win32::Foundation::HMODULE {
+    // Gets the instance handle by taking the address of the
+    // pseudo-variable created by the microsoft linker:
+    // https://devblogs.microsoft.com/oldnewthing/20041025-00/?p=37483
+
+    // This is preferred over GetModuleHandle(NULL) because it also works in DLLs:
+    // https://stackoverflow.com/questions/21718027/getmodulehandlenull-vs-hinstance
+
+    extern "C" {
+        static __ImageBase: windows_sys::Win32::System::SystemServices::IMAGE_DOS_HEADER;
+    }
+
+    unsafe { &__ImageBase as *const _ as _ }
+}
+
+#[inline(always)]
+pub unsafe fn get_window_long(hwnd: HWND, nindex: WINDOW_LONG_PTR_INDEX) -> isize {
+    #[cfg(target_pointer_width = "64")]
+    return unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetWindowLongPtrW(hwnd, nindex) };
+    #[cfg(target_pointer_width = "32")]
+    return unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::GetWindowLongW(hwnd, nindex) as isize
+    };
+}
+
+#[inline(always)]
+pub unsafe fn set_window_long(
+    hwnd: HWND,
+    nindex: WINDOW_LONG_PTR_INDEX,
+    dwnewlong: isize,
+) -> isize {
+    #[cfg(target_pointer_width = "64")]
+    return unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::SetWindowLongPtrW(hwnd, nindex, dwnewlong)
+    };
+    #[cfg(target_pointer_width = "32")]
+    return unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::SetWindowLongW(hwnd, nindex, dwnewlong as i32)
+            as isize
+    };
+}

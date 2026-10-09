@@ -1,0 +1,56 @@
+--- src/lib.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+#![warn(rust_2018_idioms)]
+#![forbid(unsafe_code)]
+
+//! # Project Symphonia
+//!
+//! Symphonia is a 100% pure Rust audio decoding and multimedia format demuxing framework.
+//!
+//! # Support
+//!
+//! Supported formats, codecs, and metadata tags are listed below. By default Symphonia only enables
+//! royalty-free open standard media formats and codecs. Other formats and codecs must be enabled
+//! using feature flags.
+//!
+//! **Tip:** All formats and codecs can be enabled with the `all` feature flag.
+//!
+//! ## Formats
+//!
+//! The following container formats are supported.
+//!
+//! | Format   | Feature Flag | Gapless* | Default |
+//! |----------|--------------|----------|---------|
+//! | AIFF     | `aiff`       | Yes      | No      |
+//! | CAF      | `caf`        | No       | No      |
+//! | ISO/MP4  | `isomp4`     | No       | No      |
+//! | MKV/WebM | `mkv`        | No       | Yes     |
+//! | OGG      | `ogg`        | Yes      | Yes     |
+//! | Wave     | `wav`        | Yes      | Yes     |
+//!
+//! \* Gapless playback requires support from both the demuxer and decoder.
+//!
+//! **Tip:** All formats can be enabled with the `all-formats` feature flag.
+//!
+//! ## Codecs
+//!
+//! The following codecs are supported.
+//!
+//! | Codec    | Feature Flag | Gapless | Default |
+//! |----------|--------------|---------|---------|
+//! | AAC-LC   | `aac`        | No      | No      |
+//! | ADPCM    | `adpcm`      | Yes     | Yes     |
+//! | ALAC     | `alac`       | Yes     | No      |
+//! | FLAC     | `flac`       | Yes     | Yes     |
+//! | MP1      | `mp1`, `mpa` | No      | No      |
+//! | MP2      | `mp2`, `mpa` | No      | No      |
+//! | MP3      | `mp3`, `mpa` | Yes     | No      |
+//! | PCM      | `pcm`        | Yes     | Yes     |
+//! | Vorbis   | `vorbis`     | Yes     | Yes     |
+//!

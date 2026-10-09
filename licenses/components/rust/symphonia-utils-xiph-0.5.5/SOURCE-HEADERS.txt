@@ -1,0 +1,143 @@
+--- src/flac/metadata.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::ascii;
+
+use symphonia_core::audio::Channels;
+use symphonia_core::errors::{decode_error, Result};
+use symphonia_core::formats::{util::SeekIndex, Cue, CuePoint};
+use symphonia_core::io::*;
+use symphonia_core::meta::{StandardTagKey, Tag, Value, VendorData};
+
+#[derive(PartialEq, Eq)]
+pub enum MetadataBlockType {
+    StreamInfo,
+    Padding,
+    Application,
+    SeekTable,
+    VorbisComment,
+    Cuesheet,
+    Picture,
+    Unknown(u8),
+}
+
+fn flac_channels_to_channels(channels: u32) -> Channels {
+    debug_assert!(channels > 0 && channels < 9);
+
+    match channels {
+        1 => Channels::FRONT_LEFT,
+        2 => Channels::FRONT_LEFT | Channels::FRONT_RIGHT,
+        3 => Channels::FRONT_LEFT | Channels::FRONT_RIGHT | Channels::FRONT_CENTRE,
+        4 => {
+            Channels::FRONT_LEFT
+                | Channels::FRONT_RIGHT
+                | Channels::REAR_LEFT
+                | Channels::REAR_RIGHT
+        }
+        5 => {
+            Channels::FRONT_LEFT
+                | Channels::FRONT_RIGHT
+                | Channels::FRONT_CENTRE
+                | Channels::REAR_LEFT
+                | Channels::REAR_RIGHT
+        }
+        6 => {
+            Channels::FRONT_LEFT
+                | Channels::FRONT_RIGHT
+                | Channels::FRONT_CENTRE
+                | Channels::LFE1
+                | Channels::REAR_LEFT
+                | Channels::REAR_RIGHT
+        }
+
+--- src/flac/mod.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+pub mod metadata;
+
+
+--- src/lib.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+// The following lints are allowed in all Symphonia crates. Please see clippy.toml for their
+// justification.
+#![allow(clippy::comparison_chain)]
+#![allow(clippy::excessive_precision)]
+#![allow(clippy::identity_op)]
+#![allow(clippy::manual_range_contains)]
+
+pub mod flac;
+pub mod vorbis;
+
+
+--- src/vorbis/mod.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use symphonia_core::audio::Channels;
+
+/// Get the mapping 0 channel listing for the given number of channels.
+pub fn vorbis_channels_to_channels(num_channels: u8) -> Option<Channels> {
+    let channels = match num_channels {
+        1 => Channels::FRONT_LEFT,
+        2 => Channels::FRONT_LEFT | Channels::FRONT_RIGHT,
+        3 => Channels::FRONT_LEFT | Channels::FRONT_CENTRE | Channels::FRONT_RIGHT,
+        4 => {
+            Channels::FRONT_LEFT
+                | Channels::FRONT_RIGHT
+                | Channels::REAR_LEFT
+                | Channels::REAR_RIGHT
+        }
+        5 => {
+            Channels::FRONT_LEFT
+                | Channels::FRONT_CENTRE
+                | Channels::FRONT_RIGHT
+                | Channels::REAR_LEFT
+                | Channels::REAR_RIGHT
+        }
+        6 => {
+            Channels::FRONT_LEFT
+                | Channels::FRONT_CENTRE
+                | Channels::FRONT_RIGHT
+                | Channels::REAR_LEFT
+                | Channels::REAR_RIGHT
+                | Channels::LFE1
+        }
+        7 => {
+            Channels::FRONT_LEFT
+                | Channels::FRONT_CENTRE
+                | Channels::FRONT_RIGHT
+                | Channels::SIDE_LEFT
+                | Channels::SIDE_RIGHT
+                | Channels::REAR_CENTRE
+                | Channels::LFE1
+        }
+        8 => {
+            Channels::FRONT_LEFT
+                | Channels::FRONT_CENTRE
+                | Channels::FRONT_RIGHT
+                | Channels::SIDE_LEFT
+                | Channels::SIDE_RIGHT
+                | Channels::REAR_LEFT
+                | Channels::REAR_RIGHT
+                | Channels::LFE1
+        }

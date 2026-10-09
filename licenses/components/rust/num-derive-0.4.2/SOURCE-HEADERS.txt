@@ -1,0 +1,219 @@
+--- src/lib.rs ---
+// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+#![crate_type = "proc-macro"]
+#![doc(html_root_url = "https://docs.rs/num-derive/0.3")]
+#![recursion_limit = "512"]
+
+//! Procedural macros to derive numeric traits in Rust.
+//!
+//! ## Usage
+//!
+//! Add this to your `Cargo.toml`:
+//!
+//! ```toml
+//! [dependencies]
+//! num-traits = "0.2"
+//! num-derive = "0.3"
+//! ```
+//!
+//! Then you can derive traits on your own types:
+//!
+//! ```rust
+//! #[macro_use]
+//! extern crate num_derive;
+//!
+//! #[derive(FromPrimitive, ToPrimitive)]
+//! enum Color {
+//!     Red,
+//!     Blue,
+//!     Green,
+//! }
+//! # fn main() {}
+//! ```
+//!
+//! ## Explicit import
+//!
+//! By default the `num_derive` procedural macros assume that the
+//! `num_traits` crate is a direct dependency. If `num_traits` is instead
+//! a transitive dependency, the `num_traits` helper attribute can be
+//! used to tell `num_derive` to use a specific identifier for its imports.
+//!
+//! ```rust
+//! #[macro_use]
+//! extern crate num_derive;
+//! // Lets pretend this is a transitive dependency from another crate
+//! // reexported as `some_other_ident`.
+//! extern crate num_traits as some_other_ident;
+//!
+
+--- tests/empty_enum.rs ---
+// Copyright 2013-2015 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+extern crate num as num_renamed;
+#[macro_use]
+extern crate num_derive;
+
+#[derive(Debug, PartialEq, FromPrimitive, ToPrimitive)]
+enum Color {}
+
+#[test]
+fn test_empty_enum() {
+    let v: [Option<Color>; 1] = [num_renamed::FromPrimitive::from_u64(0)];
+
+    assert_eq!(v, [None]);
+}
+
+
+--- tests/num_derive_without_num.rs ---
+// Copyright 2013-2015 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+#[macro_use]
+extern crate num_derive;
+
+#[derive(Debug, FromPrimitive, ToPrimitive)]
+enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+
+--- tests/trivial.rs ---
+// Copyright 2013-2015 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+extern crate num as num_renamed;
+#[macro_use]
+extern crate num_derive;
+
+#[derive(Debug, PartialEq, FromPrimitive, ToPrimitive)]
+enum Color {
+    Red,
+    Blue,
+    Green,
+}
+
+#[test]
+fn test_from_primitive_for_trivial_case() {
+    let v: [Option<Color>; 4] = [
+        num_renamed::FromPrimitive::from_u64(0),
+        num_renamed::FromPrimitive::from_u64(1),
+        num_renamed::FromPrimitive::from_u64(2),
+        num_renamed::FromPrimitive::from_u64(3),
+    ];
+
+    assert_eq!(
+        v,
+        [
+            Some(Color::Red),
+            Some(Color::Blue),
+            Some(Color::Green),
+            None
+        ]
+    );
+}
+
+#[test]
+fn test_to_primitive_for_trivial_case() {
+    let v: [Option<u64>; 3] = [
+        num_renamed::ToPrimitive::to_u64(&Color::Red),
+        num_renamed::ToPrimitive::to_u64(&Color::Blue),
+        num_renamed::ToPrimitive::to_u64(&Color::Green),
+    ];
+
+    assert_eq!(v, [Some(0), Some(1), Some(2)]);
+}
+
+#[test]
+fn test_reflexive_for_trivial_case() {
+    let before: [u64; 3] = [0, 1, 2];
+
+--- tests/with_custom_values.rs ---
+// Copyright 2013-2015 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+extern crate num as num_renamed;
+#[macro_use]
+extern crate num_derive;
+
+#[derive(Debug, PartialEq, FromPrimitive, ToPrimitive)]
+enum Color {
+    Red,
+    Blue = 5,
+    Green,
+    Alpha = (-3 - (-5isize)) - 10,
+}
+
+#[test]
+fn test_from_primitive_for_enum_with_custom_value() {
+    let v: [Option<Color>; 5] = [
+        num_renamed::FromPrimitive::from_u64(0),
+        num_renamed::FromPrimitive::from_u64(5),
+        num_renamed::FromPrimitive::from_u64(6),
+        num_renamed::FromPrimitive::from_u64(-8isize as u64),
+        num_renamed::FromPrimitive::from_u64(3),
+    ];
+
+    assert_eq!(
+        v,
+        [
+            Some(Color::Red),
+            Some(Color::Blue),
+            Some(Color::Green),
+            Some(Color::Alpha),
+            None
+        ]
+    );
+}
+
+#[test]
+fn test_to_primitive_for_enum_with_custom_value() {
+    let v: [Option<u64>; 4] = [
+        num_renamed::ToPrimitive::to_u64(&Color::Red),
+        num_renamed::ToPrimitive::to_u64(&Color::Blue),
+        num_renamed::ToPrimitive::to_u64(&Color::Green),
+        num_renamed::ToPrimitive::to_u64(&Color::Alpha),
+    ];
+
+    assert_eq!(v, [Some(0), Some(5), Some(6), Some(-8isize as u64)]);
+}

@@ -1,0 +1,56 @@
+--- src/bufreader.rs ---
+// Copyright 2013 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// <https://github.com/rust-lang/rust/blob/HEAD/COPYRIGHT>.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::io;
+use crate::io::{BufRead, Read};
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use core::cmp;
+use core::mem;
+
+pub struct BufReader<R> {
+    inner: R,
+    buf: Box<[u8]>,
+    pos: usize,
+    cap: usize,
+}
+
+impl<R> ::core::fmt::Debug for BufReader<R>
+where
+    R: ::core::fmt::Debug,
+{
+    fn fmt(&self, fmt: &mut ::core::fmt::Formatter) -> Result<(), ::core::fmt::Error> {
+        fmt.debug_struct("BufReader")
+            .field("reader", &self.inner)
+            .field(
+                "buffer",
+                &format_args!("{}/{}", self.cap - self.pos, self.buf.len()),
+            )
+            .finish()
+    }
+}
+
+impl<R: Read> BufReader<R> {
+    pub fn new(inner: R) -> BufReader<R> {
+        BufReader::with_buf(vec![0; 32 * 1024], inner)
+    }
+
+    pub fn with_buf(buf: Vec<u8>, inner: R) -> BufReader<R> {
+        BufReader {
+            inner,
+            buf: buf.into_boxed_slice(),
+            pos: 0,
+            cap: 0,
+        }
+    }
+}
+
+impl<R> BufReader<R> {

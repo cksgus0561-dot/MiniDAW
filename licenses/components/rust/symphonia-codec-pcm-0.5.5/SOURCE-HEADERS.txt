@@ -1,0 +1,56 @@
+--- src/lib.rs ---
+// Symphonia
+// Copyright (c) 2019-2022 The Project Symphonia Developers.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+#![warn(rust_2018_idioms)]
+#![forbid(unsafe_code)]
+// The following lints are allowed in all Symphonia crates. Please see clippy.toml for their
+// justification.
+#![allow(clippy::comparison_chain)]
+#![allow(clippy::excessive_precision)]
+#![allow(clippy::identity_op)]
+#![allow(clippy::manual_range_contains)]
+
+use symphonia_core::support_codec;
+
+use symphonia_core::audio::{AsAudioBufferRef, AudioBuffer, AudioBufferRef, Signal, SignalSpec};
+use symphonia_core::codecs::{CodecDescriptor, CodecParameters, CodecType};
+use symphonia_core::codecs::{Decoder, DecoderOptions, FinalizeResult};
+// Signed Int PCM codecs
+use symphonia_core::codecs::{CODEC_TYPE_PCM_S16BE, CODEC_TYPE_PCM_S24BE, CODEC_TYPE_PCM_S32BE};
+use symphonia_core::codecs::{CODEC_TYPE_PCM_S16LE, CODEC_TYPE_PCM_S8};
+use symphonia_core::codecs::{CODEC_TYPE_PCM_S24LE, CODEC_TYPE_PCM_S32LE};
+// Unsigned Int PCM codecs
+use symphonia_core::codecs::{CODEC_TYPE_PCM_U16BE, CODEC_TYPE_PCM_U24BE, CODEC_TYPE_PCM_U32BE};
+use symphonia_core::codecs::{CODEC_TYPE_PCM_U16LE, CODEC_TYPE_PCM_U8};
+use symphonia_core::codecs::{CODEC_TYPE_PCM_U24LE, CODEC_TYPE_PCM_U32LE};
+// Floating point PCM codecs
+use symphonia_core::codecs::{CODEC_TYPE_PCM_F32BE, CODEC_TYPE_PCM_F32LE};
+use symphonia_core::codecs::{CODEC_TYPE_PCM_F64BE, CODEC_TYPE_PCM_F64LE};
+// G711 ALaw and MuLaw PCM codecs
+use symphonia_core::codecs::{CODEC_TYPE_PCM_ALAW, CODEC_TYPE_PCM_MULAW};
+use symphonia_core::conv::IntoSample;
+use symphonia_core::errors::{decode_error, unsupported_error, Result};
+use symphonia_core::formats::Packet;
+use symphonia_core::io::ReadBytes;
+use symphonia_core::sample::{i24, u24, SampleFormat};
+use symphonia_core::units::Duration;
+
+macro_rules! impl_generic_audio_buffer_func {
+    ($generic:expr, $buf:ident, $expr:expr) => {
+        match $generic {
+            GenericAudioBuffer::U8($buf) => $expr,
+            GenericAudioBuffer::U16($buf) => $expr,
+            GenericAudioBuffer::U24($buf) => $expr,
+            GenericAudioBuffer::U32($buf) => $expr,
+            GenericAudioBuffer::S8($buf) => $expr,
+            GenericAudioBuffer::S16($buf) => $expr,
+            GenericAudioBuffer::S24($buf) => $expr,
+            GenericAudioBuffer::S32($buf) => $expr,
+            GenericAudioBuffer::F32($buf) => $expr,
+            GenericAudioBuffer::F64($buf) => $expr,
+        }

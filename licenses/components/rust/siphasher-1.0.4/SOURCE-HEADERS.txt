@@ -1,0 +1,226 @@
+--- src/sip.rs ---
+// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! An implementation of SipHash.
+
+use core::cmp;
+use core::hash;
+use core::hash::Hasher as _;
+use core::marker::PhantomData;
+use core::mem;
+
+use crate::common::{compress, load_int_le, u8to64_le};
+
+/// An implementation of SipHash 1-3.
+///
+/// See: <https://www.aumasson.jp/siphash/siphash.pdf>
+#[derive(Debug, Clone, Copy, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SipHasher13 {
+    hasher: Hasher<Sip13Rounds>,
+}
+
+/// An implementation of SipHash 2-4.
+///
+/// See: <https://www.aumasson.jp/siphash/siphash.pdf>
+#[derive(Debug, Clone, Copy, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SipHasher24 {
+    hasher: Hasher<Sip24Rounds>,
+}
+
+/// An implementation of SipHash 2-4.
+///
+/// See: <https://www.aumasson.jp/siphash/siphash.pdf>
+///
+/// SipHash is a general-purpose hashing function: it runs at a good
+/// speed (competitive with Spooky and City) and permits strong _keyed_
+/// hashing. This lets you key your hashtables from a strong RNG, such as
+/// [`rand::os::OsRng`](https://doc.rust-lang.org/rand/rand/os/struct.OsRng.html).
+///
+/// Although the SipHash algorithm is considered to be generally strong,
+/// it is not intended for cryptographic purposes. As such, all
+/// cryptographic uses of this implementation are _strongly discouraged_.
+#[derive(Debug, Clone, Copy, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SipHasher(SipHasher24);
+
+#[derive(Debug, Clone, Copy)]
+
+--- src/sip128.rs ---
+// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! An implementation of SipHash with a 128-bit output.
+
+use core::cmp;
+use core::hash;
+use core::hash::Hasher as _;
+use core::marker::PhantomData;
+use core::mem;
+
+use crate::common::{compress, load_int_le, u8to64_le};
+
+/// A 128-bit (2x64) hash output
+#[derive(Debug, Clone, Copy, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Hash128 {
+    pub h1: u64,
+    pub h2: u64,
+}
+
+impl PartialEq for Hash128 {
+    /// Constant-time equality comparison to prevent timing attacks.
+    fn eq(&self, other: &Self) -> bool {
+        let x = (self.h1 ^ other.h1) | (self.h2 ^ other.h2);
+        unsafe { core::ptr::read_volatile(&x) == 0 }
+    }
+}
+
+impl Eq for Hash128 {}
+
+impl From<u128> for Hash128 {
+    fn from(v: u128) -> Self {
+        Hash128 {
+            h1: v as u64,
+            h2: (v >> 64) as u64,
+        }
+    }
+}
+
+impl From<Hash128> for u128 {
+    fn from(h: Hash128) -> u128 {
+        (h.h1 as u128) | ((h.h2 as u128) << 64)
+    }
+}
+
+/// An implementation of SipHash128 1-3.
+#[derive(Debug, Clone, Copy, Default)]
+
+--- src/tests.rs ---
+// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::hash::{Hash, Hasher};
+
+use super::sip::{SipHasher, SipHasher13, SipHasher24};
+
+// Hash just the bytes of the slice, without length prefix
+struct Bytes<'a>(&'a [u8]);
+
+impl Hash for Bytes<'_> {
+    #[allow(unused_must_use)]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let Bytes(v) = *self;
+        state.write(v);
+    }
+}
+
+macro_rules! u8to64_le {
+    ($buf:expr, $i:expr) => {
+        $buf[0 + $i] as u64
+            | ($buf[1 + $i] as u64) << 8
+            | ($buf[2 + $i] as u64) << 16
+            | ($buf[3 + $i] as u64) << 24
+            | ($buf[4 + $i] as u64) << 32
+            | ($buf[5 + $i] as u64) << 40
+            | ($buf[6 + $i] as u64) << 48
+            | ($buf[7 + $i] as u64) << 56
+    };
+    ($buf:expr, $i:expr, $len:expr) => {{
+        let mut t = 0;
+        let mut out = 0;
+        while t < $len {
+            out |= ($buf[t + $i] as u64) << t * 8;
+            t += 1;
+        }
+        out
+    }};
+}
+
+fn hash_with<H: Hasher, T: Hash>(mut st: H, x: &T) -> u64 {
+    x.hash(&mut st);
+    st.finish()
+}
+
+fn hash<T: Hash>(x: &T) -> u64 {
+    hash_with(SipHasher::new(), x)
+}
+
+--- src/tests128.rs ---
+// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::hash::{Hash, Hasher};
+
+use super::sip128::{Hasher128, SipHasher, SipHasher13, SipHasher24};
+
+// Hash just the bytes of the slice, without length prefix
+struct Bytes<'a>(&'a [u8]);
+
+impl Hash for Bytes<'_> {
+    #[allow(unused_must_use)]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let Bytes(v) = *self;
+        state.write(v);
+    }
+}
+
+fn hash_with<H: Hasher + Hasher128, T: Hash>(mut st: H, x: &T) -> [u8; 16] {
+    x.hash(&mut st);
+    st.finish128().as_bytes()
+}
+
+fn hash<T: Hash>(x: &T) -> [u8; 16] {
+    hash_with(SipHasher::new(), x)
+}
+
+#[test]
+fn test_siphash128_idempotent() {
+    let val64 = 0xdead_beef_dead_beef_u64;
+    assert_eq!(hash(&val64), hash(&val64));
+    let val32 = 0xdeadbeef_u32;
+    assert_eq!(hash(&val32), hash(&val32));
+}
+
+#[test]
+#[allow(unused_must_use)]
+fn test_siphash128_1_3() {
+    let vecs: [[u8; 16]; 1] = [[
+        231, 126, 188, 178, 39, 136, 165, 190, 253, 98, 219, 106, 221, 48, 48, 1,
+    ]];
+
+    let k0 = 0x_07_06_05_04_03_02_01_00;
+    let k1 = 0x_0f_0e_0d_0c_0b_0a_09_08;
+    let mut buf = Vec::new();
+    let mut t = 0;
+    let mut state_inc = SipHasher13::new_with_keys(k0, k1);

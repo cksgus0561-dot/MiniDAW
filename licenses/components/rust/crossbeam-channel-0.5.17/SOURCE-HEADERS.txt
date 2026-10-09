@@ -1,0 +1,170 @@
+--- examples/matching.rs ---
+//! Using `select!` to send and receive on the same channel at the same time.
+//!
+//! This example is based on the following program in Go.
+//!
+//! Source:
+//!   - https://web.archive.org/web/20171209034309/https://www.nada.kth.se/~snilsson/concurrency
+//!   - http://www.nada.kth.se/~snilsson/concurrency/src/matching.go
+//!
+//! Copyright & License:
+//!   - Stefan Nilsson
+//!   - Creative Commons Attribution 3.0 Unported License
+//!   - https://creativecommons.org/licenses/by/3.0/
+//!
+//! ```go
+//! func main() {
+//!     people := []string{"Anna", "Bob", "Cody", "Dave", "Eva"}
+//!     match := make(chan string, 1) // Make room for one unmatched send.
+//!     wg := new(sync.WaitGroup)
+//!     for _, name := range people {
+//!         wg.Add(1)
+//!         go Seek(name, match, wg)
+//!     }
+//!     wg.Wait()
+//!     select {
+//!     case name := <-match:
+//!         fmt.Printf("No one received %s’s message.\n", name)
+//!     default:
+//!         // There was no pending send operation.
+//!     }
+//! }
+//!
+//! // Seek either sends or receives, whichever possible, a name on the match
+//! // channel and notifies the wait group when done.
+//! func Seek(name string, match chan string, wg *sync.WaitGroup) {
+//!     select {
+//!     case peer := <-match:
+//!         fmt.Printf("%s received a message from %s.\n", name, peer)
+//!     case match <- name:
+//!         // Wait for someone to receive my message.
+//!     }
+//!     wg.Done()
+//! }
+//! ```
+
+use crossbeam_channel::{bounded, select};
+use crossbeam_utils::thread;
+
+fn main() {
+    let people = vec!["Anna", "Bob", "Cody", "Dave", "Eva"];
+    let (s, r) = bounded(1); // Make room for one unmatched send.
+
+    // Either send my name into the channel or receive someone else's, whatever happens first.
+    let seek = |name, s, r| {
+        select! {
+            recv(r) -> peer => println!("{} received a message from {}.", name, peer.unwrap()),
+
+--- tests/golang.rs ---
+//! Tests copied from Go and manually rewritten in Rust.
+//!
+//! Source:
+//!   - https://github.com/golang/go
+//!
+//! Copyright & License:
+//!   - Copyright (c) 2009 The Go Authors
+//!   - https://golang.org/AUTHORS
+//!   - https://golang.org/LICENSE
+//!   - https://golang.org/PATENTS
+
+#![allow(clippy::redundant_clone)]
+
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::any::Any;
+use std::cell::Cell;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering::SeqCst};
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread;
+use std::time::Duration;
+
+use crossbeam_channel::{bounded, never, select, tick, unbounded, Receiver, Select, Sender};
+
+fn ms(ms: u64) -> Duration {
+    Duration::from_millis(ms)
+}
+
+struct Chan<T> {
+    inner: Arc<Mutex<ChanInner<T>>>,
+}
+
+struct ChanInner<T> {
+    s: Option<Sender<T>>,
+    r: Option<Receiver<T>>,
+    // Receiver to use when r is None (Go blocks on receiving from nil)
+    nil_r: Receiver<T>,
+    // Sender to use when s is None (Go blocks on sending to nil)
+    nil_s: Sender<T>,
+    // Hold this receiver to prevent nil sender channel from disconnection
+    _nil_sr: Receiver<T>,
+}
+
+impl<T> Clone for Chan<T> {
+    fn clone(&self) -> Chan<T> {
+        Chan {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<T> Chan<T> {
+    fn send(&self, msg: T) {
+        let s = self
+            .inner
+
+--- tests/mpsc.rs ---
+//! Tests copied from `std::sync::mpsc`.
+//!
+//! This is a copy of tests for the `std::sync::mpsc` channels from the standard library, but
+//! modified to work with `crossbeam-channel` instead.
+//!
+//! Minor tweaks were needed to make the tests compile:
+//!
+//! - Replace `box` syntax with `Box::new`.
+//! - Replace all uses of `Select` with `select!`.
+//! - Change the imports.
+//! - Join all spawned threads.
+//! - Removed assertion from oneshot_multi_thread_send_close_stress tests.
+//!
+//! Source:
+//!   - https://github.com/rust-lang/rust/tree/master/src/libstd/sync/mpsc
+//!
+//! Copyright & License:
+//!   - Copyright 2013-2014 The Rust Project Developers
+//!   - Apache License, Version 2.0 or MIT license, at your option
+//!   - https://github.com/rust-lang/rust/blob/master/COPYRIGHT
+//!   - https://www.rust-lang.org/en-US/legal.html
+
+#![allow(clippy::match_single_binding, clippy::redundant_clone)]
+
+use std::sync::mpsc::{RecvError, RecvTimeoutError, TryRecvError};
+use std::sync::mpsc::{SendError, TrySendError};
+use std::thread::JoinHandle;
+use std::time::Duration;
+
+use crossbeam_channel as cc;
+
+pub struct Sender<T> {
+    pub inner: cc::Sender<T>,
+}
+
+impl<T> Sender<T> {
+    pub fn send(&self, t: T) -> Result<(), SendError<T>> {
+        self.inner.send(t).map_err(|cc::SendError(m)| SendError(m))
+    }
+}
+
+impl<T> Clone for Sender<T> {
+    fn clone(&self) -> Sender<T> {
+        Sender {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+pub struct SyncSender<T> {
+    pub inner: cc::Sender<T>,
+}
+
+impl<T> SyncSender<T> {
+    pub fn send(&self, t: T) -> Result<(), SendError<T>> {

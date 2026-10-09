@@ -1,0 +1,56 @@
+--- lib.rs ---
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+extern crate proc_macro;
+
+use proc_macro::TokenStream;
+
+fn get_byte_from_lit(lit: &syn::Lit) -> u8 {
+    if let syn::Lit::Byte(ref byte) = *lit {
+        byte.value()
+    } else {
+        panic!("Found a pattern that wasn't a byte")
+    }
+}
+
+fn get_byte_from_expr_lit(expr: &syn::Expr) -> u8 {
+    match *expr {
+        syn::Expr::Lit(syn::ExprLit { ref lit, .. }) => get_byte_from_lit(lit),
+        _ => unreachable!(),
+    }
+}
+
+/// Parse a pattern and fill the table accordingly
+fn parse_pat_to_table<'a>(
+    pat: &'a syn::Pat,
+    case_id: u8,
+    wildcard: &mut Option<&'a syn::Ident>,
+    table: &mut [Option<u8>; 256],
+) {
+    match pat {
+        syn::Pat::Lit(syn::PatLit { ref lit, .. }) => {
+            let value = get_byte_from_lit(lit);
+            table[value as usize].get_or_insert(case_id);
+        }
+        syn::Pat::Range(syn::PatRange {
+            ref start, ref end, ..
+        }) => {
+            let lo = get_byte_from_expr_lit(start.as_ref().unwrap());
+            let hi = get_byte_from_expr_lit(end.as_ref().unwrap());
+            for value in lo..hi {
+                table[value as usize].get_or_insert(case_id);
+            }
+            table[hi as usize].get_or_insert(case_id);
+        }
+        syn::Pat::Wild(_) => {
+            for byte in table.iter_mut() {
+                byte.get_or_insert(case_id);
+            }
+        }
+        syn::Pat::Ident(syn::PatIdent { ref ident, .. }) => {
+            assert_eq!(*wildcard, None);
+            *wildcard = Some(ident);
+            for byte in table.iter_mut() {
+                byte.get_or_insert(case_id);

@@ -1,0 +1,8 @@
+Local change to pinned Signalsmith Stretch a670068:
+setPreciseTimeCompensation(bool), default false, enabled only by Pitch renders.
+reanalysePrev on ANY nonzero hop difference (original tolerates +/-1 sample).
+Avoids measurable small-cent modulation with duration compensation near unity.
+No algorithm/settings change to Pitch=0. Internal ratios beyond 0.5..2 are
+cascaded in the MiniDAW Rust worker; original maxCleanStretch remains 2.
+Vendor licenses and original version identifiers are retained.
+See tests/pitch-quality.py for production output accuracy/artifact measurements.

@@ -1,0 +1,341 @@
+--- interface/mod.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+//! Types for tag and attribute names, and tree-builder functionality.
+
+use std::cell::Ref;
+use std::fmt;
+use tendril::StrTendril;
+use web_atoms::{LocalName, Namespace, Prefix};
+
+pub use self::tree_builder::{create_element, AppendNode, AppendText, ElementFlags, NodeOrText};
+pub use self::tree_builder::{ElemName, Tracer, TreeSink};
+pub use self::tree_builder::{LimitedQuirks, NoQuirks, Quirks, QuirksMode};
+
+/// An [expanded name], containing the tag and the namespace.
+///
+/// [expanded name]: https://www.w3.org/TR/REC-xml-names/#dt-expname
+#[derive(Copy, Clone, Eq, Hash, PartialEq)]
+pub struct ExpandedName<'a> {
+    pub ns: &'a Namespace,
+    pub local: &'a LocalName,
+}
+
+impl ElemName for ExpandedName<'_> {
+    #[inline(always)]
+    fn ns(&self) -> &Namespace {
+        self.ns
+    }
+
+    #[inline(always)]
+    fn local_name(&self) -> &LocalName {
+        self.local
+    }
+}
+
+impl<'a> ElemName for Ref<'a, ExpandedName<'a>> {
+    #[inline(always)]
+    fn ns(&self) -> &Namespace {
+        self.ns
+    }
+
+    #[inline(always)]
+    fn local_name(&self) -> &LocalName {
+        self.local
+    }
+}
+
+impl fmt::Debug for ExpandedName<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.ns.is_empty() {
+
+--- interface/tree_builder.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! This module contains functionality for managing the DOM, including adding/removing nodes.
+//!
+//! It can be used by a parser to create the DOM graph structure in memory.
+
+use crate::interface::{Attribute, ExpandedName, QualName};
+use std::borrow::Cow;
+use std::fmt::Debug;
+use tendril::StrTendril;
+use web_atoms::{LocalName, Namespace};
+
+pub use self::NodeOrText::{AppendNode, AppendText};
+pub use self::QuirksMode::{LimitedQuirks, NoQuirks, Quirks};
+
+/// Something which can be inserted into the DOM.
+///
+/// Adjacent sibling text nodes are merged into a single node, so
+/// the sink may not want to allocate a `Handle` for each.
+pub enum NodeOrText<Handle> {
+    AppendNode(Handle),
+    AppendText(StrTendril),
+}
+
+/// A document's quirks mode, for compatibility with old browsers. See [quirks mode on wikipedia]
+/// for more information.
+///
+/// [quirks mode on wikipedia]: https://en.wikipedia.org/wiki/Quirks_mode
+#[derive(PartialEq, Eq, Copy, Clone, Hash, Debug)]
+pub enum QuirksMode {
+    /// Full quirks mode
+    Quirks,
+    /// Almost standards mode
+    LimitedQuirks,
+    /// Standards mode
+    NoQuirks,
+}
+
+/// Special properties of an element, useful for tagging elements with this information.
+#[derive(Default)]
+#[non_exhaustive]
+pub struct ElementFlags {
+    /// A document fragment should be created, associated with the element,
+    /// and returned in TreeSink::get_template_contents.
+    ///
+    /// See [template-contents in the whatwg spec][whatwg template-contents].
+    ///
+    /// [whatwg template-contents]: https://html.spec.whatwg.org/multipage/#template-contents
+
+--- lib.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+pub use tendril;
+
+#[macro_use]
+extern crate web_atoms;
+
+/// Create a [`SmallCharSet`], with each space-separated number stored in the set.
+///
+/// # Examples
+///
+/// ```
+/// # #[macro_use] extern crate markup5ever;
+/// # fn main() {
+/// let set = small_char_set!(12 54 42);
+/// assert_eq!(set.bits,
+///            0b00000000_01000000_00000100_00000000_00000000_00000000_00010000_00000000);
+/// # }
+/// ```
+///
+/// [`SmallCharSet`]: struct.SmallCharSet.html
+#[macro_export]
+macro_rules! small_char_set ( ($($e:expr)+) => (
+    $ crate ::SmallCharSet {
+        bits: $( (1 << ($e as usize)) )|+
+    }
+));
+
+pub use web_atoms::{
+    local_name, namespace_prefix, namespace_url, ns, LocalName, LocalNameStaticSet, Namespace,
+    NamespaceStaticSet, Prefix, PrefixStaticSet,
+};
+
+pub mod data {
+    pub use web_atoms::C1_REPLACEMENTS;
+    pub use web_atoms::NAMED_ENTITIES;
+}
+#[macro_use]
+pub mod interface;
+pub mod serialize;
+mod util {
+    pub mod buffer_queue;
+    pub mod smallcharset;
+}
+
+pub use interface::{Attribute, ExpandedName, QualName, TokenizerResult};
+pub use util::smallcharset::SmallCharSet;
+pub use util::*;
+
+--- serialize.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+//! Traits for serializing elements.
+//!
+//! The serializer expects the data to be xml-like (with a name,
+//! and optional children, attrs, text, comments, doctypes, and [processing instructions]). It uses
+//! the visitor pattern, where the serializer and the serializable objects are decoupled and
+//! implement their own traits.
+//!
+//! [processing instructions]: https://en.wikipedia.org/wiki/Processing_Instruction
+
+use crate::QualName;
+use std::io;
+
+//§ serializing-html-fragments
+/// Used as a parameter to `serialize`, telling it if we want to skip the parent.
+#[derive(Clone, PartialEq)]
+pub enum TraversalScope {
+    /// Include the parent node when serializing.
+    IncludeNode,
+    /// Only serialize the children of the node, treating any provided qualified name as the
+    /// parent while serializing.
+    ///
+    /// This is used in the implementation of [`html5ever::serialize::serialize`]
+    ///
+    /// [`html5ever::serialize::serialize`]: ../../html5ever/serialize/fn.serialize.html
+    ChildrenOnly(Option<QualName>),
+}
+
+/// Types that can be serialized (according to the xml-like scheme in `Serializer`) implement this
+/// trait.
+pub trait Serialize {
+    /// Take the serializer and call its methods to serialize this type. The type will dictate
+    /// which methods are called and with what parameters.
+    fn serialize<S>(&self, serializer: &mut S, traversal_scope: TraversalScope) -> io::Result<()>
+    where
+        S: Serializer;
+}
+
+/// Types that are capable of serializing implement this trait
+pub trait Serializer {
+    /// Serialize the start of an element, for example `<div class="test">`.
+    fn start_elem<'a, AttrIter>(&mut self, name: QualName, attrs: AttrIter) -> io::Result<()>
+    where
+        AttrIter: Iterator<Item = AttrRef<'a>>;
+
+    /// Serialize the end of an element, for example `</div>`.
+    fn end_elem(&mut self, name: QualName) -> io::Result<()>;
+
+
+--- util/buffer_queue.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! The `BufferQueue` struct and helper types.
+//!
+//! This type is designed for the efficient parsing of string data, especially where many
+//! significant characters are from the ascii range 0-63. This includes, for example, important
+//! characters in xml/html parsing.
+//!
+//! Good and predictable performance is achieved by avoiding allocation where possible (a.k.a. zero
+//! copy).
+//!
+//! [`BufferQueue`]: struct.BufferQueue.html
+
+use std::{
+    cell::{RefCell, RefMut},
+    collections::VecDeque,
+    mem,
+};
+
+use tendril::StrTendril;
+
+pub use self::SetResult::{FromSet, NotFromSet};
+use crate::util::smallcharset::SmallCharSet;
+
+/// Result from [`pop_except_from`] containing either a character from a [`SmallCharSet`], or a
+/// string buffer of characters not from the set.
+///
+/// [`pop_except_from`]: struct.BufferQueue.html#method.pop_except_from
+/// [`SmallCharSet`]: ../struct.SmallCharSet.html
+#[derive(PartialEq, Eq, Debug)]
+pub enum SetResult {
+    /// A character from the `SmallCharSet`.
+    FromSet(char),
+    /// A string buffer containing no characters from the `SmallCharSet`.
+    NotFromSet(StrTendril),
+}
+
+/// A queue of owned string buffers, which supports incrementally consuming characters.
+///
+/// Internally it uses [`VecDeque`] and has the same complexity properties.
+///
+/// [`VecDeque`]: https://doc.rust-lang.org/std/collections/struct.VecDeque.html
+#[derive(Clone, Debug)]
+pub struct BufferQueue {
+    /// Buffers to process.
+    buffers: RefCell<VecDeque<StrTendril>>,
+}
+
+
+--- util/smallcharset.rs ---
+// Copyright 2014-2017 The html5ever Project Developers. See the
+// COPYRIGHT file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! This module contains a single struct [`SmallCharSet`]. See its documentation for details.
+//!
+//! [`SmallCharSet`]: struct.SmallCharSet.html
+
+/// Represents a set of "small characters", those with Unicode scalar
+/// values less than 64.
+///
+/// This is stored as a bitmap, with 1 bit for each value.
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Hash)]
+pub struct SmallCharSet {
+    pub bits: u64,
+}
+
+impl SmallCharSet {
+    /// Checks whether a character (u8 value below 64) is stored in the SmallCharSet.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// # use markup5ever::SmallCharSet;
+    /// let set = SmallCharSet {
+    ///     bits: 0b00000000_01000000_00000100_00000000_00000000_00000000_00010000_00000000
+    /// };
+    /// assert!(set.contains(64));
+    /// assert!(set.contains(b'6')); // `b'6'` is the same as 64u8
+    /// ```
+    #[inline]
+    fn contains(&self, n: u8) -> bool {
+        0 != (self.bits & (1 << (n as usize)))
+    }
+
+    /// Count the number of bytes of characters at the beginning of `buf` which are not in the set.
+    ///
+    /// This functionality is used in [`BufferQueue::pop_except_from`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[macro_use] extern crate markup5ever;
+    /// # fn main() {
+    /// let set = small_char_set!(48 49 50); // '0' '1' '2'
+    /// // `test` is 4 chars, 😁 is 4 chars, then we meet a character in the set
+    /// let test_str = "test😁01232afd";
+    /// assert_eq!(set.nonmember_prefix_len(test_str), 8);
+    /// # }
+    /// ```

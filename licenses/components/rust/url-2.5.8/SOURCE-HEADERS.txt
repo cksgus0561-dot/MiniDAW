@@ -1,0 +1,512 @@
+--- src/host.rs ---
+// Copyright 2013-2016 The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::net::{Ipv4Addr, Ipv6Addr};
+use alloc::borrow::Cow;
+use alloc::borrow::ToOwned;
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::cmp;
+use core::fmt::{self, Formatter};
+
+use percent_encoding::{percent_decode, utf8_percent_encode, CONTROLS};
+#[cfg(feature = "serde")]
+use serde_derive::{Deserialize, Serialize};
+
+use crate::parser::{ParseError, ParseResult};
+
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub(crate) enum HostInternal {
+    None,
+    Domain,
+    Ipv4(Ipv4Addr),
+    Ipv6(Ipv6Addr),
+}
+
+impl From<Host<Cow<'_, str>>> for HostInternal {
+    fn from(host: Host<Cow<'_, str>>) -> Self {
+        match host {
+            Host::Domain(ref s) if s.is_empty() => Self::None,
+            Host::Domain(_) => Self::Domain,
+            Host::Ipv4(address) => Self::Ipv4(address),
+            Host::Ipv6(address) => Self::Ipv6(address),
+        }
+    }
+}
+
+/// The host name of an URL.
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+#[derive(Clone, Debug, Eq, Ord, PartialOrd, Hash)]
+pub enum Host<S = String> {
+    /// A DNS domain name, as '.' dot-separated labels.
+    /// Non-ASCII labels are encoded in punycode per IDNA if this is the host of
+    /// a special URL, or percent encoded for non-special URLs. Hosts for
+    /// non-special URLs are also called opaque hosts.
+    Domain(S),
+
+    /// An IPv4 address.
+    /// `Url::host_str` returns the serialization of this address,
+    /// as four decimal integers separated by `.` dots.
+
+--- src/lib.rs ---
+// Copyright 2013-2015 The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+/*!
+
+rust-url is an implementation of the [URL Standard](http://url.spec.whatwg.org/)
+for the [Rust](http://rust-lang.org/) programming language.
+
+
+# URL parsing and data structures
+
+First, URL parsing may fail for various reasons and therefore returns a `Result`.
+
+```
+use url::{Url, ParseError};
+
+assert!(Url::parse("http://[:::1]") == Err(ParseError::InvalidIpv6Address))
+```
+
+Let’s parse a valid URL and look at its components.
+
+```
+use url::{Url, Host, Position};
+# use url::ParseError;
+# fn run() -> Result<(), ParseError> {
+let issue_list_url = Url::parse(
+    "https://github.com/rust-lang/rust/issues?labels=E-easy&state=open"
+)?;
+
+
+assert!(issue_list_url.scheme() == "https");
+assert!(issue_list_url.username() == "");
+assert!(issue_list_url.password() == None);
+assert!(issue_list_url.host_str() == Some("github.com"));
+assert!(issue_list_url.host() == Some(Host::Domain("github.com")));
+assert!(issue_list_url.port() == None);
+assert!(issue_list_url.path() == "/rust-lang/rust/issues");
+assert!(issue_list_url.path_segments().map(|c| c.collect::<Vec<_>>()) ==
+        Some(vec!["rust-lang", "rust", "issues"]));
+assert!(issue_list_url.query() == Some("labels=E-easy&state=open"));
+assert!(&issue_list_url[Position::BeforePath..] == "/rust-lang/rust/issues?labels=E-easy&state=open");
+assert!(issue_list_url.fragment() == None);
+assert!(!issue_list_url.cannot_be_a_base());
+# Ok(())
+# }
+# run().unwrap();
+```
+
+Some URLs are said to be *cannot-be-a-base*:
+they don’t have a username, password, host, or port,
+
+--- src/origin.rs ---
+// Copyright 2016 The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::host::Host;
+use crate::parser::default_port;
+use crate::Url;
+use alloc::borrow::ToOwned;
+use alloc::format;
+use alloc::string::String;
+use core::sync::atomic::{AtomicUsize, Ordering};
+
+pub fn url_origin(url: &Url) -> Origin {
+    let scheme = url.scheme();
+    match scheme {
+        "blob" => {
+            let result = Url::parse(url.path());
+            match result {
+                Ok(ref url) => url_origin(url),
+                Err(_) => Origin::new_opaque(),
+            }
+        }
+        "ftp" | "http" | "https" | "ws" | "wss" => Origin::Tuple(
+            scheme.to_owned(),
+            url.host().unwrap().to_owned(),
+            url.port_or_known_default().unwrap(),
+        ),
+        // TODO: Figure out what to do if the scheme is a file
+        "file" => Origin::new_opaque(),
+        _ => Origin::new_opaque(),
+    }
+}
+
+/// The origin of an URL
+///
+/// Two URLs with the same origin are considered
+/// to originate from the same entity and can therefore trust
+/// each other.
+///
+/// The origin is determined based on the scheme as follows:
+///
+/// - If the scheme is "blob" the origin is the origin of the
+///   URL contained in the path component. If parsing fails,
+///   it is an opaque origin.
+/// - If the scheme is "ftp", "http", "https", "ws", or "wss",
+///   then the origin is a tuple of the scheme, host, and port.
+/// - If the scheme is anything else, the origin is opaque, meaning
+///   the URL does not have the same origin as any other URL.
+///
+/// For more information see <https://url.spec.whatwg.org/#origin>
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+
+--- src/parser.rs ---
+// Copyright 2013-2016 The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use alloc::borrow::Cow;
+use alloc::string::String;
+use core::fmt::{self, Formatter, Write};
+use core::str;
+
+use crate::host::{Host, HostInternal};
+use crate::Url;
+use form_urlencoded::EncodingOverride;
+use percent_encoding::{percent_encode, utf8_percent_encode, AsciiSet, CONTROLS};
+
+/// https://url.spec.whatwg.org/#fragment-percent-encode-set
+const FRAGMENT: &AsciiSet = &CONTROLS.add(b' ').add(b'"').add(b'<').add(b'>').add(b'`');
+
+/// https://url.spec.whatwg.org/#path-percent-encode-set
+const PATH: &AsciiSet = &FRAGMENT.add(b'#').add(b'?').add(b'{').add(b'}');
+
+/// https://url.spec.whatwg.org/#userinfo-percent-encode-set
+pub(crate) const USERINFO: &AsciiSet = &PATH
+    .add(b'/')
+    .add(b':')
+    .add(b';')
+    .add(b'=')
+    .add(b'@')
+    .add(b'[')
+    .add(b'\\')
+    .add(b']')
+    .add(b'^')
+    .add(b'|');
+
+pub(crate) const PATH_SEGMENT: &AsciiSet = &PATH.add(b'/').add(b'%');
+
+// The backslash (\) character is treated as a path separator in special URLs
+// so it needs to be additionally escaped in that case.
+pub(crate) const SPECIAL_PATH_SEGMENT: &AsciiSet = &PATH_SEGMENT.add(b'\\');
+
+// https://url.spec.whatwg.org/#query-state
+const QUERY: &AsciiSet = &CONTROLS.add(b' ').add(b'"').add(b'#').add(b'<').add(b'>');
+const SPECIAL_QUERY: &AsciiSet = &QUERY.add(b'\'');
+
+pub type ParseResult<T> = Result<T, ParseError>;
+
+macro_rules! simple_enum_error {
+    ($($name: ident => $description: expr,)+) => {
+        /// Errors that can occur during parsing.
+        ///
+        /// This may be extended in the future so exhaustive matching is
+        /// forbidden.
+
+--- src/path_segments.rs ---
+// Copyright 2016 The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::parser::{self, to_u32, SchemeType};
+use crate::Url;
+use alloc::string::String;
+use core::str;
+
+/// Exposes methods to manipulate the path of an URL that is not cannot-be-base.
+///
+/// The path always starts with a `/` slash, and is made of slash-separated segments.
+/// There is always at least one segment (which may be the empty string).
+///
+/// Examples:
+///
+/// ```rust
+/// use url::Url;
+///
+/// # #[cfg(feature = "std")]
+/// # use std::error::Error;
+/// # #[cfg(not(feature = "std"))]
+/// # use core::error::Error;
+///
+/// # fn run() -> Result<(), Box<dyn Error>> {
+/// let mut url = Url::parse("mailto:me@example.com")?;
+/// assert!(url.path_segments_mut().is_err());
+///
+/// let mut url = Url::parse("http://example.net/foo/index.html")?;
+/// url.path_segments_mut().map_err(|_| "cannot be base")?
+///     .pop().push("img").push("2/100%.png");
+/// assert_eq!(url.as_str(), "http://example.net/foo/img/2%2F100%25.png");
+/// # Ok(())
+/// # }
+/// # run().unwrap();
+/// ```
+#[derive(Debug)]
+pub struct PathSegmentsMut<'a> {
+    url: &'a mut Url,
+    after_first_slash: usize,
+    after_path: String,
+    old_after_path_position: u32,
+}
+
+// Not re-exported outside the crate
+pub fn new(url: &mut Url) -> PathSegmentsMut<'_> {
+    let after_path = url.take_after_path();
+    let old_after_path_position = to_u32(url.serialization.len()).unwrap();
+    // Special urls always have a non empty path
+    if SchemeType::from(url.scheme()).is_special() {
+        debug_assert!(url.byte_at(url.path_start) == b'/');
+
+--- src/quirks.rs ---
+// Copyright 2016 The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! Getters and setters for URL components implemented per <https://url.spec.whatwg.org/#api>
+//!
+//! Unless you need to be interoperable with web browsers,
+//! you probably want to use `Url` method instead.
+
+use crate::parser::{default_port, Context, Input, Parser, SchemeType};
+use crate::{Host, ParseError, Position, Url};
+use alloc::string::String;
+use alloc::string::ToString;
+
+/// Internal components / offsets of a URL.
+///
+/// https://user@pass:example.com:1234/foo/bar?baz#quux
+///      |      |    |          | ^^^^|       |   |
+///      |      |    |          | |   |       |   `----- fragment_start
+///      |      |    |          | |   |       `--------- query_start
+///      |      |    |          | |   `----------------- path_start
+///      |      |    |          | `--------------------- port
+///      |      |    |          `----------------------- host_end
+///      |      |    `---------------------------------- host_start
+///      |      `--------------------------------------- username_end
+///      `---------------------------------------------- scheme_end
+#[derive(Copy, Clone)]
+#[cfg(feature = "expose_internals")]
+pub struct InternalComponents {
+    pub scheme_end: u32,
+    pub username_end: u32,
+    pub host_start: u32,
+    pub host_end: u32,
+    pub port: Option<u16>,
+    pub path_start: u32,
+    pub query_start: Option<u32>,
+    pub fragment_start: Option<u32>,
+}
+
+/// Internal component / parsed offsets of the URL.
+///
+/// This can be useful for implementing efficient serialization
+/// for the URL.
+#[cfg(feature = "expose_internals")]
+pub fn internal_components(url: &Url) -> InternalComponents {
+    InternalComponents {
+        scheme_end: url.scheme_end,
+        username_end: url.username_end,
+        host_start: url.host_start,
+        host_end: url.host_end,
+        port: url.port,
+
+--- src/slicing.rs ---
+// Copyright 2016 The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use core::ops::{Index, Range, RangeFrom, RangeFull, RangeTo};
+
+use crate::Url;
+
+impl Index<RangeFull> for Url {
+    type Output = str;
+    fn index(&self, _: RangeFull) -> &str {
+        &self.serialization
+    }
+}
+
+impl Index<RangeFrom<Position>> for Url {
+    type Output = str;
+    fn index(&self, range: RangeFrom<Position>) -> &str {
+        &self.serialization[self.index(range.start)..]
+    }
+}
+
+impl Index<RangeTo<Position>> for Url {
+    type Output = str;
+    fn index(&self, range: RangeTo<Position>) -> &str {
+        &self.serialization[..self.index(range.end)]
+    }
+}
+
+impl Index<Range<Position>> for Url {
+    type Output = str;
+    fn index(&self, range: Range<Position>) -> &str {
+        &self.serialization[self.index(range.start)..self.index(range.end)]
+    }
+}
+
+// Counts how many base-10 digits are required to represent n in the given base
+fn count_digits(n: u16) -> usize {
+    match n {
+        0..=9 => 1,
+        10..=99 => 2,
+        100..=999 => 3,
+        1000..=9999 => 4,
+        10000..=65535 => 5,
+    }
+}
+
+#[test]
+fn test_count_digits() {
+    assert_eq!(count_digits(0), 1);
+    assert_eq!(count_digits(1), 1);
+
+--- tests/unit.rs ---
+// Copyright 2013-2014 The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! Unit tests
+#![no_std]
+
+#[cfg(feature = "std")]
+extern crate std;
+
+#[macro_use]
+extern crate alloc;
+
+use alloc::borrow::Cow;
+use alloc::borrow::ToOwned;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::cell::{Cell, RefCell};
+#[cfg(feature = "std")]
+use std::dbg;
+use url::{form_urlencoded, Host, Origin, Url};
+
+/// `std` version of `net`
+#[cfg(feature = "std")]
+pub(crate) mod net {
+    pub use std::net::*;
+}
+/// `no_std` nightly version of `net`
+#[cfg(not(feature = "std"))]
+pub(crate) mod net {
+    pub use core::net::*;
+}
+
+use crate::net::{Ipv4Addr, Ipv6Addr};
+
+#[cfg(feature = "std")]
+#[cfg(any(unix, windows, target_os = "redox", target_os = "wasi"))]
+use std::path::{Path, PathBuf};
+
+// https://rustwasm.github.io/wasm-bindgen/wasm-bindgen-test/usage.html
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+use wasm_bindgen_test::{wasm_bindgen_test as test, wasm_bindgen_test_configure};
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+wasm_bindgen_test_configure!(run_in_browser);
+
+#[test]
+fn size() {
+    use core::mem::size_of;
+    assert_eq!(size_of::<Url>(), size_of::<Option<Url>>());
+}
+
+
+--- tests/wpt.rs ---
+// Copyright 2013-2014 The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! Data-driven tests imported from web-platform-tests
+
+use serde_json::Value;
+use std::collections::HashMap;
+use std::fmt::Write;
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+use std::sync::Mutex;
+use url::Url;
+
+// https://rustwasm.github.io/wasm-bindgen/wasm-bindgen-test/usage.html
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+use wasm_bindgen_test::{console_log, wasm_bindgen_test, wasm_bindgen_test_configure};
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+wasm_bindgen_test_configure!(run_in_browser);
+
+// wpt has its own test driver, but we shoe-horn this into wasm_bindgen_test
+// which will discard stdout and stderr. So, we make println! go to
+// console.log(), so we see failures that do not result in panics.
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+static PRINT_BUF: Mutex<Option<String>> = Mutex::new(None);
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+macro_rules! print {
+    ($($arg:tt)*) => {
+        let v = format!($($arg)*);
+        {
+            let mut buf = PRINT_BUF.lock().unwrap();
+            if let Some(buf) = buf.as_mut() {
+                buf.push_str(&v);
+            } else {
+                *buf = Some(v);
+            }
+        }
+    };
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+macro_rules! println {
+    () => {
+        let buf = PRINT_BUF.lock().unwrap().take();
+        match buf {
+            Some(buf) => console_log!("{buf}"),
+            None => console_log!(""),
+        }
+    };
+    ($($arg:tt)*) => {

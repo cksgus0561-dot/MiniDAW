@@ -1,0 +1,1166 @@
+--- examples/basic_usage.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+use std::io;
+use std::path::Path;
+use winreg::enums::*;
+use winreg::RegKey;
+
+fn main() -> io::Result<()> {
+    println!("Reading some system info...");
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let cur_ver = hklm.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion")?;
+    let pf: String = cur_ver.get_value("ProgramFilesDir")?;
+    let dp: String = cur_ver.get_value("DevicePath")?;
+    println!("ProgramFiles = {}\nDevicePath = {}", pf, dp);
+    let info = cur_ver.query_info()?;
+    println!("info = {:?}", info);
+    let mt = info.get_last_write_time_system();
+    println!(
+        "last_write_time as windows_sys::Win32::Foundation::SYSTEMTIME = {}-{:02}-{:02} {:02}:{:02}:{:02}",
+        mt.wYear, mt.wMonth, mt.wDay, mt.wHour, mt.wMinute, mt.wSecond
+    );
+    println!(
+        "last_write_time as chrono::NaiveDateTime = {}",
+        info.get_last_write_time_chrono()
+    );
+
+    println!("And now lets write something...");
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let path = Path::new("Software").join("WinregRsExample1");
+    let (key, disp) = hkcu.create_subkey(&path)?;
+
+    match disp {
+        REG_CREATED_NEW_KEY => println!("A new key has been created"),
+        REG_OPENED_EXISTING_KEY => println!("An existing key has been opened"),
+    }
+
+    key.set_value("TestSZ", &"written by Rust")?;
+    let sz_val: String = key.get_value("TestSZ")?;
+    key.delete_value("TestSZ")?;
+    println!("TestSZ = {}", sz_val);
+
+    key.set_value("TestMultiSZ", &vec!["written", "by", "Rust"])?;
+    let multi_sz_val: Vec<String> = key.get_value("TestMultiSZ")?;
+    key.delete_value("TestMultiSZ")?;
+    println!("TestMultiSZ = {:?}", multi_sz_val);
+
+    key.set_value("TestDWORD", &1_234_567_890u32)?;
+    let dword_val: u32 = key.get_value("TestDWORD")?;
+    println!("TestDWORD = {}", dword_val);
+
+    key.set_value("TestQWORD", &1_234_567_891_011_121_314u64)?;
+    let qword_val: u64 = key.get_value("TestQWORD")?;
+
+--- examples/enum.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+use std::io;
+use winreg::enums::*;
+use winreg::RegKey;
+
+fn main() -> io::Result<()> {
+    println!("File extensions, registered in system:");
+    for i in RegKey::predef(HKEY_CLASSES_ROOT)
+        .enum_keys()
+        .map(|x| x.unwrap())
+        .filter(|x| x.starts_with('.'))
+    {
+        println!("{}", i);
+    }
+
+    let system = RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey("HARDWARE\\DESCRIPTION\\System")?;
+    for (name, value) in system.enum_values().map(|x| x.unwrap()) {
+        println!("{} = {:?}", name, value);
+    }
+
+    Ok(())
+}
+
+
+--- examples/installed_apps.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+use serde_derive::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fmt;
+use winreg::enums::*;
+
+#[allow(non_snake_case)]
+#[derive(Debug, Serialize, Deserialize)]
+struct InstalledApp {
+    DisplayName: Option<String>,
+    DisplayVersion: Option<String>,
+    UninstallString: Option<String>,
+}
+
+macro_rules! str_from_opt {
+    ($s:expr) => {
+        $s.as_ref().map(|x| &**x).unwrap_or("")
+    };
+}
+
+impl fmt::Display for InstalledApp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}-{}",
+            str_from_opt!(self.DisplayName),
+            str_from_opt!(self.DisplayVersion)
+        )
+    }
+}
+
+fn main() {
+    let hklm = winreg::RegKey::predef(HKEY_LOCAL_MACHINE);
+    let uninstall_key = hklm
+        .open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall")
+        .expect("key is missing");
+
+    let apps: HashMap<String, InstalledApp> =
+        uninstall_key.decode().expect("deserialization failed");
+
+    for v in apps.values() {
+        println!("{}", v);
+    }
+}
+
+
+--- examples/load_app_key.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+use std::io;
+use winreg::enums::*;
+use winreg::RegKey;
+
+fn main() -> io::Result<()> {
+    {
+        // put this in a block so app_key_1 gets out of scope and doesn't prevent us
+        // from loading the key again later
+        let app_key_1 = RegKey::load_app_key("myhive.dat", true)?;
+        app_key_1.set_value("answer", &42u32)?;
+    }
+    let answer: u32 = {
+        // NOTE: on Windows 7 this fails with ERROR_ALREADY_EXISTS
+        let app_key_2 =
+            RegKey::load_app_key_with_flags("myhive.dat", KEY_READ, REG_PROCESS_APPKEY)?;
+        app_key_2.get_value("answer")?
+    };
+    println!("The Answer is {}", answer);
+    Ok(())
+}
+
+
+--- examples/map_key_serialization.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+use serde_derive::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::error::Error;
+use winreg::enums::*;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Coords {
+    x: u32,
+    y: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Size {
+    w: u32,
+    h: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Rectangle {
+    coords: Option<Coords>,
+    size: Size,
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let hkcu = winreg::RegKey::predef(HKEY_CURRENT_USER);
+    let (key, _disp) = hkcu.create_subkey("Software\\RustEncodeMapKey")?;
+    let mut v1 = HashMap::new();
+    v1.insert(
+        "first".to_owned(),
+        Rectangle {
+            coords: Some(Coords { x: 55, y: 77 }),
+            size: Size { w: 500, h: 300 },
+        },
+    );
+    v1.insert(
+        "second".to_owned(),
+        Rectangle {
+            coords: None,
+            size: Size { w: 1000, h: 600 },
+        },
+    );
+
+    key.encode(&v1)?;
+
+    let v2: HashMap<String, Rectangle> = key.decode()?;
+    println!("Decoded {:?}", v2);
+
+    println!("Equal to encoded: {:?}", v1 == v2);
+    Ok(())
+}
+
+--- examples/reg2json.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+extern crate serde_transcode;
+extern crate winreg;
+use std::error::Error;
+use winreg::enums::*;
+use winreg::RegKey;
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let key = RegKey::predef(HKEY_CLASSES_ROOT).open_subkey("Folder")?;
+
+    let mut deserializer = winreg::decoder::Decoder::from_key(&key)?;
+    let mut serializer = serde_json::Serializer::pretty(std::io::stdout());
+
+    serde_transcode::transcode(&mut deserializer, &mut serializer)?;
+    Ok(())
+}
+
+
+--- examples/serialization.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+use serde_derive::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::error::Error;
+use winreg::enums::*;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Coords {
+    x: u32,
+    y: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Size {
+    w: u32,
+    h: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Rectangle {
+    coords: Option<Coords>,
+    size: Size,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Test {
+    t_bool: bool,
+    t_u8: u8,
+    t_u16: u16,
+    t_u32: u32,
+    t_u64: u64,
+    t_usize: usize,
+    t_struct: Rectangle,
+    t_map: HashMap<String, u32>,
+    t_string: String,
+    t_optional_string: Option<String>,
+    #[serde(with = "serde_bytes")]
+    t_bytes: Vec<u8>,
+    #[serde(rename = "")] // empty name becomes the (Default) value in the registry
+    t_char: char,
+    t_i8: i8,
+    t_i16: i16,
+    t_i32: i32,
+    t_i64: i64,
+    t_isize: isize,
+    t_f64: f64,
+    t_f32: f32,
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let hkcu = winreg::RegKey::predef(HKEY_CURRENT_USER);
+
+--- examples/transacted_serialization.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+use serde_derive::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::error::Error;
+use winreg::enums::*;
+use winreg::transaction::Transaction;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Coords {
+    x: u32,
+    y: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Size {
+    w: u32,
+    h: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Rectangle {
+    coords: Option<Coords>,
+    size: Size,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Test {
+    t_bool: bool,
+    t_u8: u8,
+    t_u16: u16,
+    t_u32: u32,
+    t_u64: u64,
+    t_usize: usize,
+    t_struct: Rectangle,
+    t_map: HashMap<String, u32>,
+    t_string: String,
+    #[serde(with = "serde_bytes")]
+    t_bytes: Vec<u8>,
+    #[serde(rename = "")] // empty name becomes the (Default) value in the registry
+    t_char: char,
+    t_i8: i8,
+    t_i16: i16,
+    t_i32: i32,
+    t_i64: i64,
+    t_isize: isize,
+    t_f64: f64,
+    t_f32: f32,
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let transaction = Transaction::new()?;
+
+--- examples/transactions.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+use std::io;
+use winreg::enums::*;
+use winreg::transaction::Transaction;
+use winreg::RegKey;
+
+fn main() -> io::Result<()> {
+    let t = Transaction::new()?;
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (key, _disp) = hkcu.create_subkey_transacted("Software\\RustTransaction", &t)?;
+    key.set_value("TestQWORD", &1_234_567_891_011_121_314u64)?;
+    key.set_value("TestDWORD", &1_234_567_890u32)?;
+
+    println!("Commit transaction? [y/N]:");
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    input = input.trim_end().to_owned();
+    if input == "y" || input == "Y" {
+        t.commit()?;
+        println!("Transaction committed.");
+    } else {
+        // this is optional, if transaction wasn't committed,
+        // it will be rolled back on disposal
+        t.rollback()?;
+
+        println!("Transaction wasn't committed, it will be rolled back.");
+    }
+
+    Ok(())
+}
+
+
+--- src/common.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+#![macro_use]
+use std::ffi::OsStr;
+use std::os::windows::ffi::OsStrExt;
+use std::slice;
+
+macro_rules! werr {
+    ($e:expr) => {
+        Err(io::Error::from_raw_os_error($e as i32))
+    };
+}
+
+pub(crate) fn to_utf16<P: AsRef<OsStr>>(s: P) -> Vec<u16> {
+    s.as_ref().encode_wide().chain(Some(0)).collect()
+}
+
+pub(crate) fn v16_to_v8(v: &[u16]) -> Vec<u8> {
+    unsafe { slice::from_raw_parts(v.as_ptr() as *const u8, v.len() * 2).to_vec() }
+}
+
+
+--- src/decoder/mod.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+use crate::enums::*;
+use crate::reg_key::RegKey;
+use crate::reg_value::RegValue;
+use crate::types::FromRegValue;
+use std::error::Error;
+use std::fmt;
+use std::io;
+
+macro_rules! parse_string {
+    ($s:ident) => {{
+        let s: String = $s.read_value()?;
+        s.parse()
+            .map_err(|e| DecoderError::ParseError(format!("{:?}", e)))
+    }};
+}
+
+macro_rules! no_impl {
+    ($e:expr) => {
+        Err(DecoderError::DecodeNotImplemented($e.to_owned()))
+    };
+}
+
+#[cfg(feature = "serialization-serde")]
+mod serialization_serde;
+
+#[derive(Debug)]
+pub enum DecoderError {
+    DecodeNotImplemented(String),
+    DeserializerError(String),
+    IoError(io::Error),
+    ParseError(String),
+    NoFieldName,
+}
+
+impl fmt::Display for DecoderError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl Error for DecoderError {}
+
+impl From<io::Error> for DecoderError {
+    fn from(err: io::Error) -> DecoderError {
+        DecoderError::IoError(err)
+    }
+}
+
+pub type DecodeResult<T> = Result<T, DecoderError>;
+
+
+--- src/decoder/serialization_serde.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+use super::{DecodeResult, Decoder, DecoderCursor, DecoderError, DECODER_SAM};
+use crate::{types::FromRegValue, RegValue};
+use serde::de::*;
+use std::fmt;
+
+impl Error for DecoderError {
+    fn custom<T: fmt::Display>(msg: T) -> Self {
+        DecoderError::DeserializerError(format!("{}", msg))
+    }
+}
+
+impl<'de> Deserializer<'de> for &mut Decoder {
+    type Error = DecoderError;
+    fn deserialize_any<V>(self, visitor: V) -> DecodeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        use super::DecoderCursor::*;
+        let cursor = self.cursor.clone();
+        match cursor {
+            Start => self.deserialize_map(visitor),
+            KeyName(..) | FieldName(..) => self.deserialize_string(visitor),
+            FieldVal(index, name) => {
+                use crate::enums::RegType::*;
+                let v = self.key.get_raw_value(name)?;
+                self.cursor = Field(index + 1);
+                match v.vtype {
+                    REG_SZ | REG_EXPAND_SZ | REG_MULTI_SZ => {
+                        visitor.visit_string(String::from_reg_value(&v)?)
+                    }
+                    REG_DWORD => visitor.visit_u32(u32::from_reg_value(&v)?),
+                    REG_QWORD => visitor.visit_u64(u64::from_reg_value(&v)?),
+                    REG_BINARY => visitor.visit_byte_buf(v.bytes),
+                    REG_NONE => visitor.visit_none(),
+                    _ => no_impl!(format!(
+                        "value type deserialization not implemented {:?}",
+                        v.vtype
+                    )),
+                }
+            }
+            _ => no_impl!("deserialize_any"),
+        }
+    }
+
+    fn deserialize_bool<V>(self, visitor: V) -> DecodeResult<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_bool(self.read_value().map(|v: u32| v > 0)?)
+    }
+
+--- src/encoder/mod.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+use self::EncoderState::*;
+use crate::enums::*;
+use crate::reg_key::RegKey;
+use crate::transaction::Transaction;
+use std::error::Error;
+use std::fmt;
+use std::io;
+
+macro_rules! emit_value {
+    ($s:ident, $v:ident) => {
+        match mem::replace(&mut $s.state, Start) {
+            NextKey(ref s) => $s.keys[$s.keys.len() - 1]
+                .set_value(s, &$v)
+                .map_err(EncoderError::IoError),
+            Start => Err(EncoderError::NoFieldName),
+        }
+    };
+}
+
+macro_rules! no_impl {
+    ($e:expr) => {
+        Err(EncoderError::EncodeNotImplemented($e.to_owned()))
+    };
+}
+
+#[cfg(feature = "serialization-serde")]
+mod serialization_serde;
+
+#[derive(Debug)]
+pub enum EncoderError {
+    EncodeNotImplemented(String),
+    SerializerError(String),
+    IoError(io::Error),
+    NoFieldName,
+    KeyMustBeAString,
+}
+
+impl fmt::Display for EncoderError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl Error for EncoderError {}
+
+pub type EncodeResult<T> = Result<T, EncoderError>;
+
+impl From<io::Error> for EncoderError {
+    fn from(err: io::Error) -> EncoderError {
+        EncoderError::IoError(err)
+
+--- src/encoder/serialization_serde.rs ---
+// Copyright 2017, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+use super::EncoderState::*;
+use super::{EncodeResult, Encoder, EncoderError, ENCODER_SAM};
+use crate::enums::RegType;
+use crate::transaction::Transaction;
+use crate::RegValue;
+use serde::ser::*;
+use std::fmt;
+use std::mem;
+
+impl Error for EncoderError {
+    fn custom<T: fmt::Display>(msg: T) -> Self {
+        EncoderError::SerializerError(format!("{}", msg))
+    }
+}
+
+impl<'a, Tr: AsRef<Transaction>> Serializer for &'a mut Encoder<Tr> {
+    type Ok = ();
+    type Error = EncoderError;
+
+    type SerializeSeq = SeqEncoder;
+    type SerializeTuple = TupleEncoder;
+    type SerializeTupleStruct = TupleStructEncoder;
+    type SerializeTupleVariant = TupleVariantEncoder;
+    type SerializeMap = StructMapEncoder<'a, Tr>;
+    type SerializeStruct = StructMapEncoder<'a, Tr>;
+    type SerializeStructVariant = StructVariantEncoder;
+
+    fn serialize_bool(self, value: bool) -> EncodeResult<Self::Ok> {
+        self.serialize_u32(value as u32)
+    }
+
+    fn serialize_i8(self, value: i8) -> EncodeResult<Self::Ok> {
+        self.serialize_i64(value as i64)
+    }
+
+    fn serialize_i16(self, value: i16) -> EncodeResult<Self::Ok> {
+        self.serialize_i64(value as i64)
+    }
+
+    fn serialize_i32(self, value: i32) -> EncodeResult<Self::Ok> {
+        self.serialize_i64(value as i64)
+    }
+
+    fn serialize_i64(self, value: i64) -> EncodeResult<Self::Ok> {
+        let s = value.to_string();
+        emit_value!(self, s)
+    }
+
+    fn serialize_u8(self, value: u8) -> EncodeResult<Self::Ok> {
+        self.serialize_u32(value as u32)
+
+--- src/enums.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+
+//! `use winreg::enums::*;` to import all needed enumerations and constants
+pub use windows_sys::Win32::System::Registry::{
+    HKEY_CLASSES_ROOT, HKEY_CURRENT_CONFIG, HKEY_CURRENT_USER, HKEY_CURRENT_USER_LOCAL_SETTINGS,
+    HKEY_DYN_DATA, HKEY_LOCAL_MACHINE, HKEY_PERFORMANCE_DATA, HKEY_PERFORMANCE_NLSTEXT,
+    HKEY_PERFORMANCE_TEXT, HKEY_USERS, KEY_ALL_ACCESS, KEY_CREATE_LINK, KEY_CREATE_SUB_KEY,
+    KEY_ENUMERATE_SUB_KEYS, KEY_EXECUTE, KEY_NOTIFY, KEY_QUERY_VALUE, KEY_READ, KEY_SET_VALUE,
+    KEY_WOW64_32KEY, KEY_WOW64_64KEY, KEY_WOW64_RES, KEY_WRITE, REG_OPTION_BACKUP_RESTORE,
+    REG_OPTION_CREATE_LINK, REG_OPTION_DONT_VIRTUALIZE, REG_OPTION_NON_VOLATILE,
+    REG_OPTION_OPEN_LINK, REG_OPTION_RESERVED, REG_OPTION_VOLATILE, REG_PROCESS_APPKEY,
+};
+
+macro_rules! winapi_enum{
+    ($t:ident, $doc:expr => [$($v:ident),*]) => (
+        #[doc=$doc]
+        #[allow(non_camel_case_types)]
+        #[derive(Debug,Clone,PartialEq)]
+        pub enum $t {
+            $( $v = windows_sys::Win32::System::Registry::$v as isize ),*
+        }
+    )
+}
+
+winapi_enum!(RegType, "Enumeration of possible registry value types" => [
+REG_NONE,
+REG_SZ,
+REG_EXPAND_SZ,
+REG_BINARY,
+REG_DWORD,
+REG_DWORD_BIG_ENDIAN,
+REG_LINK,
+REG_MULTI_SZ,
+REG_RESOURCE_LIST,
+REG_FULL_RESOURCE_DESCRIPTOR,
+REG_RESOURCE_REQUIREMENTS_LIST,
+REG_QWORD
+]);
+pub use self::RegType::*;
+
+winapi_enum!(RegDisposition, "Enumeration of possible disposition values" => [
+REG_CREATED_NEW_KEY,
+REG_OPENED_EXISTING_KEY
+]);
+pub use self::RegDisposition::*;
+
+
+--- src/lib.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+
+//! Crate for accessing MS Windows registry
+//!
+//!## Usage
+//!
+//!### Basic usage
+//!
+//!```toml,ignore
+//!# Cargo.toml
+//![dependencies]
+//!winreg = "0.55"
+//!```
+//!
+//!```no_run
+//!use std::io;
+//!use std::path::Path;
+//!use winreg::enums::*;
+//!use winreg::RegKey;
+//!
+//!fn main() -> io::Result<()> {
+//!    println!("Reading some system info...");
+//!    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+//!    let cur_ver = hklm.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion")?;
+//!    let pf: String = cur_ver.get_value("ProgramFilesDir")?;
+//!    let dp: String = cur_ver.get_value("DevicePath")?;
+//!    println!("ProgramFiles = {}\nDevicePath = {}", pf, dp);
+//!    let info = cur_ver.query_info()?;
+//!    println!("info = {:?}", info);
+//!    let mt = info.get_last_write_time_system();
+//!    println!(
+//!        "last_write_time as windows_sys::Win32::Foundation::SYSTEMTIME = {}-{:02}-{:02} {:02}:{:02}:{:02}",
+//!        mt.wYear, mt.wMonth, mt.wDay, mt.wHour, mt.wMinute, mt.wSecond
+//!    );
+//!
+//!    // enable `chrono` feature on `winreg` to make this work
+//!    // println!(
+//!    //     "last_write_time as chrono::NaiveDateTime = {}",
+//!    //     info.get_last_write_time_chrono()
+//!    // );
+//!
+//!    println!("And now lets write something...");
+//!    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+//!    let path = Path::new("Software").join("WinregRsExample1");
+//!    let (key, disp) = hkcu.create_subkey(&path)?;
+//!
+//!    match disp {
+//!        REG_CREATED_NEW_KEY => println!("A new key has been created"),
+//!        REG_OPENED_EXISTING_KEY => println!("An existing key has been opened"),
+//!    }
+//!
+
+--- src/reg_key_metadata.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+use std::fmt;
+use std::ops::Deref;
+use windows_sys::Win32::Foundation::FILETIME;
+use windows_sys::Win32::Foundation::SYSTEMTIME;
+use windows_sys::Win32::System::Time::FileTimeToSystemTime;
+
+pub struct FileTime(pub(crate) FILETIME);
+
+impl Default for FileTime {
+    fn default() -> Self {
+        Self(FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        })
+    }
+}
+
+impl fmt::Debug for FileTime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FILETIME")
+            .field("dwLowDateTime", &self.dwLowDateTime)
+            .field("dwHighDateTime", &self.dwHighDateTime)
+            .finish()
+    }
+}
+
+impl Deref for FileTime {
+    type Target = FILETIME;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// Metadata returned by `RegKey::query_info`
+#[derive(Debug, Default)]
+pub struct RegKeyMetadata {
+    // pub Class: winapi::LPWSTR,
+    // pub ClassLen: u32,
+    pub sub_keys: u32,
+    pub max_sub_key_len: u32,
+    pub max_class_len: u32,
+    pub values: u32,
+    pub max_value_name_len: u32,
+    pub max_value_len: u32,
+    // pub SecurityDescriptor: u32,
+    pub last_write_time: FileTime,
+}
+
+impl RegKeyMetadata {
+
+--- src/reg_key.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+use crate::common::*;
+use crate::enums::{self, *};
+use crate::reg_key_metadata::RegKeyMetadata;
+use crate::reg_value::RegValue;
+#[cfg(feature = "transactions")]
+use crate::transaction::Transaction;
+use crate::types::{FromRegValue, ToRegValue};
+use std::default::Default;
+use std::ffi::OsStr;
+use std::io;
+use std::mem::transmute;
+use std::ptr;
+use windows_sys::Win32::Foundation;
+use windows_sys::Win32::System::Registry;
+pub use windows_sys::Win32::System::Registry::HKEY;
+
+/// Handle of opened registry key
+#[derive(Debug)]
+pub struct RegKey {
+    hkey: HKEY,
+}
+
+unsafe impl Send for RegKey {}
+
+impl RegKey {
+    /// Open one of predefined keys:
+    ///
+    /// * `HKEY_CLASSES_ROOT`
+    /// * `HKEY_CURRENT_USER`
+    /// * `HKEY_LOCAL_MACHINE`
+    /// * `HKEY_USERS`
+    /// * `HKEY_PERFORMANCE_DATA`
+    /// * `HKEY_PERFORMANCE_TEXT`
+    /// * `HKEY_PERFORMANCE_NLSTEXT`
+    /// * `HKEY_CURRENT_CONFIG`
+    /// * `HKEY_DYN_DATA`
+    /// * `HKEY_CURRENT_USER_LOCAL_SETTINGS`
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use winreg::RegKey;
+    /// # use winreg::enums::*;
+    /// let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    /// ```
+    pub const fn predef(hkey: HKEY) -> RegKey {
+        RegKey { hkey }
+    }
+
+    /// Load a registry hive from a file as an application hive.
+
+--- src/reg_value.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+use crate::enums::*;
+use crate::types::FromRegValue;
+use std::fmt;
+
+/// Raw registry value
+#[derive(PartialEq)]
+pub struct RegValue {
+    pub bytes: Vec<u8>,
+    pub vtype: RegType,
+}
+
+macro_rules! format_reg_value {
+    ($e:expr => $t:ident) => {
+        match $t::from_reg_value($e) {
+            Ok(val) => format!("{}", val),
+            Err(_) => return Err(fmt::Error),
+        }
+    };
+}
+
+impl fmt::Display for RegValue {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let f_val = match self.vtype {
+            REG_SZ | REG_EXPAND_SZ | REG_MULTI_SZ => format_reg_value!(self => String),
+            REG_DWORD => format_reg_value!(self => u32),
+            REG_QWORD => format_reg_value!(self => u64),
+            _ => format!("{:?}", self.bytes), //TODO: implement more types
+        };
+        write!(f, "{}", f_val)
+    }
+}
+
+impl fmt::Debug for RegValue {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "RegValue({:?}: {})", self.vtype, self)
+    }
+}
+
+
+--- src/transaction.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+#![allow(clippy::needless_doctest_main)]
+
+//! Structure for a registry transaction.
+//! Part of `transactions` feature.
+//!
+//!```no_run
+//!use std::io;
+//!use winreg::enums::*;
+//!use winreg::transaction::Transaction;
+//!use winreg::RegKey;
+//!
+//!fn main() -> io::Result<()> {
+//!    let t = Transaction::new()?;
+//!    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+//!    let (key, _disp) = hkcu.create_subkey_transacted("Software\\RustTransaction", &t)?;
+//!    key.set_value("TestQWORD", &1_234_567_891_011_121_314u64)?;
+//!    key.set_value("TestDWORD", &1_234_567_890u32)?;
+//!
+//!    println!("Commit transaction? [y/N]:");
+//!    let mut input = String::new();
+//!    io::stdin().read_line(&mut input)?;
+//!    input = input.trim_end().to_owned();
+//!    if input == "y" || input == "Y" {
+//!        t.commit()?;
+//!        println!("Transaction committed.");
+//!    } else {
+//!        // this is optional, if transaction wasn't committed,
+//!        // it will be rolled back on disposal
+//!        t.rollback()?;
+//!
+//!        println!("Transaction wasn't committed, it will be rolled back.");
+//!    }
+//!
+//!    Ok(())
+//!}
+//!```
+use std::io;
+use std::ptr;
+use windows_sys::Win32::Foundation;
+use windows_sys::Win32::Storage::FileSystem;
+
+#[derive(Debug)]
+pub struct Transaction {
+    pub handle: Foundation::HANDLE,
+}
+
+impl Transaction {
+    //TODO: add arguments
+    pub fn new() -> io::Result<Transaction> {
+        unsafe {
+
+--- src/types.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+
+//! Traits for loading/saving Registry values
+use crate::common::*;
+use crate::enums::*;
+use crate::RegValue;
+use std::convert::TryInto;
+use std::ffi::{OsStr, OsString};
+use std::io;
+use std::os::windows::ffi::OsStringExt;
+use std::slice;
+use windows_sys::Win32::Foundation;
+
+/// A trait for types that can be loaded from registry values.
+///
+/// **NOTE:** Uses `from_utf16_lossy` when converting to `String`.
+///
+/// **NOTE:** When converting to `String` or `OsString`, trailing `NULL` characters are trimmed
+/// and line separating `NULL` characters in `REG_MULTI_SZ` are replaced by `\n`
+/// effectively representing the value as a multiline string.
+/// When converting to `Vec<String>` or `Vec<OsString>` `NULL` is used as a strings separator.
+pub trait FromRegValue: Sized {
+    fn from_reg_value(val: &RegValue) -> io::Result<Self>;
+}
+
+impl FromRegValue for String {
+    fn from_reg_value(val: &RegValue) -> io::Result<String> {
+        match val.vtype {
+            REG_SZ | REG_EXPAND_SZ | REG_MULTI_SZ => {
+                let words = unsafe {
+                    #[allow(clippy::cast_ptr_alignment)]
+                    slice::from_raw_parts(val.bytes.as_ptr() as *const u16, val.bytes.len() / 2)
+                };
+                let mut s = String::from_utf16_lossy(words);
+                while s.ends_with('\u{0}') {
+                    s.pop();
+                }
+                if val.vtype == REG_MULTI_SZ {
+                    return Ok(s.replace('\u{0}', "\n"));
+                }
+                Ok(s)
+            }
+            _ => werr!(Foundation::ERROR_BAD_FILE_TYPE),
+        }
+    }
+}
+
+impl FromRegValue for Vec<String> {
+    fn from_reg_value(val: &RegValue) -> io::Result<Vec<String>> {
+        match val.vtype {
+            REG_MULTI_SZ => {
+
+--- tests/common/mod.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+#![macro_use]
+
+macro_rules! with_key {
+    ($k:ident, $path:expr => $b:block) => {{
+        let mut path = "Software\\WinRegRsTest".to_owned();
+        path.push_str($path);
+        let ($k, _disp) = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+            .create_subkey(&path).unwrap();
+        $b
+        winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+        .delete_subkey_all(path).unwrap();
+    }}
+}
+
+
+--- tests/reg_key.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+use rand::Rng;
+use std::collections::HashMap;
+use std::ffi::{OsStr, OsString};
+use tempfile::tempdir;
+use windows_sys::Win32::Foundation;
+use winreg::enums::*;
+use winreg::types::FromRegValue;
+use winreg::{RegKey, RegValue};
+
+mod common;
+
+#[test]
+fn test_raw_handle() {
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let handle = hklm.raw_handle();
+    assert_eq!(HKEY_LOCAL_MACHINE, handle);
+}
+
+#[test]
+fn test_load_appkey() {
+    let val_name = "LoadKeyTest";
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("RustLoadAppkeyTest.dat");
+    let val1 = "Test123".to_owned();
+    {
+        let key1 = RegKey::load_app_key(&file_path, true).unwrap();
+        key1.set_value(val_name, &val1).unwrap();
+        // this fails on Windows 7 with ERROR_ALREADY_EXISTS
+        let key_err = RegKey::load_app_key_with_flags(&file_path, KEY_READ, 0).unwrap_err();
+        assert_eq!(
+            key_err.raw_os_error(),
+            Some(Foundation::ERROR_SHARING_VIOLATION as i32)
+        );
+    }
+    let val2: String = {
+        // this fails on Windows 7 with ERROR_ALREADY_EXISTS
+        let key2 = RegKey::load_app_key_with_flags(&file_path, KEY_READ, 1).unwrap();
+        key2.get_value(val_name).unwrap()
+    };
+    assert_eq!(val1, val2);
+}
+
+#[test]
+fn test_open_subkey_with_flags_query_info() {
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let win = hklm
+        .open_subkey_with_flags("Software\\Microsoft\\Windows", KEY_READ)
+        .unwrap();
+
+    let info = win.query_info().unwrap();
+
+--- tests/serialization.rs ---
+// Copyright 2023, Igor Shaula
+// Licensed under the MIT License <LICENSE or
+// http://opensource.org/licenses/MIT>. This file
+// may not be copied, modified, or distributed
+// except according to those terms.
+#![cfg(feature = "serialization-serde")]
+use serde_derive::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+mod common;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Coords {
+    x: u32,
+    y: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Size {
+    w: u32,
+    h: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Rectangle {
+    coords: Option<Coords>,
+    size: Size,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+struct AllFields {
+    t_bool: bool,
+    t_u8: u8,
+    t_u16: u16,
+    t_u32: u32,
+    t_u64: u64,
+    t_usize: usize,
+    t_rect_no_coords: Rectangle,
+    t_rect_with_coords: Rectangle,
+    t_string: String,
+    t_map: HashMap<String, HashMap<String, u32>>,
+    t_optional_u32_none: Option<u32>,
+    t_optional_u32_some: Option<u32>,
+    t_optional_map_none: Option<HashMap<String, u32>>,
+    t_optional_map_some: Option<HashMap<String, u32>>,
+    t_i8: i8,
+    t_i16: i16,
+    t_i32: i32,
+    t_i64: i64,
+    t_isize: isize,
+    t_f64: f64,
+    t_f32: f32,
+    t_char: char,
+    #[serde(with = "serde_bytes")]
+    t_bytes: Vec<u8>,

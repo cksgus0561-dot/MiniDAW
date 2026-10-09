@@ -1,0 +1,56 @@
+--- src/enc/entropy_encode.rs ---
+/* Copyright 2010 Google Inc. All Rights Reserved.
+
+   Distributed under MIT license.
+   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
+*/
+
+/* Entropy encoding (Huffman) utilities. */
+use core::cmp::max;
+
+#[derive(Clone, Copy, Default)]
+pub struct HuffmanTree {
+    pub total_count_: u32,
+    pub index_left_: i16,
+    pub index_right_or_value_: i16,
+}
+
+impl HuffmanTree {
+    pub fn new(count: u32, left: i16, right: i16) -> Self {
+        Self {
+            total_count_: count,
+            index_left_: left,
+            index_right_or_value_: right,
+        }
+    }
+}
+
+pub fn BrotliSetDepth(p0: i32, pool: &mut [HuffmanTree], depth: &mut [u8], max_depth: i32) -> bool {
+    let mut stack: [i32; 16] = [0; 16];
+    let mut level: i32 = 0i32;
+    let mut p: i32 = p0;
+    stack[0] = -1i32;
+    loop {
+        if (pool[(p as usize)]).index_left_ as i32 >= 0i32 {
+            level += 1;
+            if level > max_depth {
+                return false;
+            }
+            stack[level as usize] = (pool[(p as usize)]).index_right_or_value_ as i32;
+            p = (pool[(p as usize)]).index_left_ as i32;
+            {
+                continue;
+            }
+        } else {
+            let pp = pool[(p as usize)];
+            depth[((pp).index_right_or_value_ as usize)] = level as u8;
+        }
+        while level >= 0i32 && (stack[level as usize] == -1i32) {
+            level -= 1;
+        }
+        if level < 0i32 {
+            return true;
+        }
+        p = stack[level as usize];
+        stack[level as usize] = -1i32;
+    }

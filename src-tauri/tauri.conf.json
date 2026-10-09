@@ -1,0 +1,53 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MiniDAW",
+  "version": "0.1.0",
+  "identifier": "local.minidaw.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run licenses:check && npm run build",
+    "beforeBundleCommand": "npm run licenses:check",
+    "frontendDist": "../dist",
+    "windows": { "staticVCRuntime": true }
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "MiniDAW",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 760,
+        "minHeight": 520,
+        "dragDropEnabled": true,
+        "backgroundColor": "#111419"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://127.0.0.1:1420"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "license": "GPL-3.0-only",
+    "licenseFile": "../LICENSE",
+    "shortDescription": "Audio and MIDI workstation",
+    "resources": {
+      "../licenses/components/": "licenses/components/",
+      "../licenses/supplemental/": "licenses/supplemental/",
+      "../licenses/texts/": "licenses/texts/",
+      "../licenses/sdk/": "licenses/sdk/",
+      "../licenses/tools/": "licenses/tools/",
+      "../licenses/reviewed-dependencies.json": "licenses/reviewed-dependencies.json",
+      "../LICENSE": "LICENSE", "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md", "../SOURCE_CODE.md": "SOURCE_CODE.md"
+    },
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "nsis": { "installMode": "currentUser", "languages": ["Korean", "English"], "displayLanguageSelector": true, "compression": "zlib" }
+    },
+    "icon": ["icons/icon.png", "icons/icon.ico"]
+  }
+}

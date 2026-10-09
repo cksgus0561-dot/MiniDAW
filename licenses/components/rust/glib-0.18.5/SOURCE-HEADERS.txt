@@ -1,0 +1,56 @@
+--- src/lib.rs ---
+// Take a look at the license at the top of the repository in the LICENSE file.
+
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![allow(clippy::missing_safety_doc)]
+#![allow(renamed_and_removed_lints)]
+#![doc = include_str!("../README.md")]
+
+pub use bitflags;
+pub use ffi;
+#[doc(hidden)]
+pub use glib_macros::cstr_bytes;
+pub use glib_macros::{
+    clone, closure, closure_local, derived_properties, flags, object_interface, object_subclass,
+    Boxed, Downgrade, Enum, ErrorDomain, Properties, SharedBoxed, ValueDelegate, Variant,
+};
+pub use gobject_ffi;
+pub use once_cell;
+
+pub use self::{
+    byte_array::ByteArray,
+    bytes::Bytes,
+    closure::{Closure, RustClosure},
+    enums::{EnumClass, EnumValue, FlagsBuilder, FlagsClass, FlagsValue, UserDirectory},
+    error::{BoolError, Error},
+    object::{
+        BorrowedObject, Cast, CastNone, Class, InitiallyUnowned, Interface, IsA, Object, ObjectExt,
+        ObjectType, SendWeakRef, WeakRef,
+    },
+    signal::{
+        signal_handler_block, signal_handler_disconnect, signal_handler_unblock,
+        signal_stop_emission_by_name, Propagation, SignalHandlerId,
+    },
+    types::{ILong, Pointer, StaticType, StaticTypeExt, Type, ULong},
+    value::{BoxedValue, SendValue, ToSendValue, ToValue, Value},
+    variant::{
+        FixedSizeVariantArray, FixedSizeVariantType, FromVariant, StaticVariantType, ToVariant,
+        Variant,
+    },
+    variant_dict::VariantDict,
+    variant_iter::{VariantIter, VariantStrIter},
+    variant_type::{VariantTy, VariantTyIterator, VariantType},
+    FileError,
+};
+
+// Hack for the time being to retrieve the current function's name as a string.
+// Based on the stdext cratelicensed under the MIT license.
+//
+// Copyright (c) 2020 Igor Aleksanov
+//
+// Previous attempts to get such a macro into std:
+// * https://github.com/rust-lang/rfcs/pull/466
+// * https://github.com/rust-lang/rfcs/pull/1719
+// * https://github.com/rust-lang/rfcs/issues/1743
+// * https://github.com/rust-lang/rfcs/pull/2818
+// * ...

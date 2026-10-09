@@ -1,0 +1,2130 @@
+--- build.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+#[cfg(target_os = "macos")]
+#[path = "src/wkwebview/util.rs"]
+mod util;
+
+fn main() {
+  let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+  if target_os == "macos" || target_os == "ios" {
+    println!("cargo:rustc-link-lib=framework=WebKit");
+  }
+
+  // TODO: Remove in objc2 0.7.0, ref <https://github.com/madsmtm/objc2/issues/645>
+  #[cfg(target_os = "macos")]
+  {
+    if std::env::var("CARGO_CFG_DEBUG_ASSERTIONS").is_ok() {
+      let os = util::operating_system_version();
+      if os.0 < 12 {
+        println!("cargo:rustc-cfg=macos_12_unavailable")
+      }
+    }
+  }
+
+  if target_os == "android" {
+    use std::{fs, path::PathBuf};
+
+    fn env_var(var: &str) -> String {
+      std::env::var(var).unwrap_or_else(|_| {
+        panic!("`{var}` is not set, which is needed to generate the kotlin files for android.")
+      })
+    }
+
+    println!("cargo:rerun-if-env-changed=WRY_ANDROID_PACKAGE");
+    println!("cargo:rerun-if-env-changed=WRY_ANDROID_LIBRARY");
+    println!("cargo:rerun-if-env-changed=WRY_ANDROID_KOTLIN_FILES_OUT_DIR");
+
+    if let Ok(kotlin_out_dir) = std::env::var("WRY_ANDROID_KOTLIN_FILES_OUT_DIR") {
+      let package = env_var("WRY_ANDROID_PACKAGE");
+      let library = env_var("WRY_ANDROID_LIBRARY");
+
+      let kotlin_out_dir = PathBuf::from(&kotlin_out_dir)
+        .canonicalize()
+        .unwrap_or_else(move |_| {
+          panic!("Failed to canonicalize `WRY_ANDROID_KOTLIN_FILES_OUT_DIR` path {kotlin_out_dir}")
+        });
+
+      let kotlin_files_path =
+        PathBuf::from(env_var("CARGO_MANIFEST_DIR")).join("src/android/kotlin");
+      println!("cargo:rerun-if-changed={}", kotlin_files_path.display());
+      let kotlin_files = fs::read_dir(kotlin_files_path).expect("failed to read kotlin directory");
+
+      for file in kotlin_files {
+        let file = file.unwrap();
+
+--- examples/async_custom_protocol.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::path::PathBuf;
+
+use tao::{
+  event::{Event, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  window::WindowBuilder,
+};
+use wry::{
+  http::{header::CONTENT_TYPE, Request, Response},
+  WebViewBuilder,
+};
+
+pub fn main() -> wry::Result<()> {
+  let event_loop = EventLoop::new();
+  let window = WindowBuilder::new().build(&event_loop).unwrap();
+
+  let builder = WebViewBuilder::new()
+    .with_asynchronous_custom_protocol("wry".into(), move |_webview_id, request, responder| {
+      match get_wry_response(request) {
+        Ok(http_response) => responder.respond(http_response),
+        Err(e) => responder.respond(
+          http::Response::builder()
+            .header(CONTENT_TYPE, "text/plain")
+            .status(500)
+            .body(e.to_string().as_bytes().to_vec())
+            .unwrap(),
+        ),
+      }
+    })
+    // tell the webview to load the custom protocol
+    .with_url("wry://localhost");
+
+  #[cfg(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "android"
+  ))]
+  let _webview = builder.build(&window)?;
+  #[cfg(not(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "android"
+  )))]
+  let _webview = {
+    use tao::platform::unix::WindowExtUnix;
+    use wry::WebViewBuilderExtUnix;
+    let vbox = window.default_vbox().unwrap();
+    builder.build_gtk(vbox)?
+  };
+
+--- examples/cookies.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use tao::{
+  event::{Event, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  window::WindowBuilder,
+};
+use wry::WebViewBuilder;
+
+fn main() -> wry::Result<()> {
+  let event_loop = EventLoop::new();
+  let window = WindowBuilder::new().build(&event_loop).unwrap();
+
+  let builder = WebViewBuilder::new().with_url("https://www.httpbin.org/cookies/set?foo=bar");
+
+  #[cfg(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "android"
+  ))]
+  let webview = builder.build(&window)?;
+  #[cfg(not(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "android"
+  )))]
+  let webview = {
+    use tao::platform::unix::WindowExtUnix;
+    use wry::WebViewBuilderExtUnix;
+    let vbox = window.default_vbox().unwrap();
+    builder.build_gtk(vbox)?
+  };
+
+  webview.set_cookie(
+    cookie::Cookie::build(("foo1", "bar1"))
+      .domain("www.httpbin.org")
+      .path("/")
+      .secure(true)
+      .http_only(true)
+      .max_age(cookie::time::Duration::seconds(10))
+      .inner(),
+  )?;
+
+  let cookie_deleted = cookie::Cookie::build(("will_be_deleted", "will_be_deleted"));
+
+  webview.set_cookie(cookie_deleted.inner())?;
+  println!("Setting Cookies:");
+  for cookie in webview.cookies()? {
+    println!("\t{cookie}");
+  }
+
+
+--- examples/custom_protocol.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::path::PathBuf;
+
+use tao::{
+  event::{Event, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  window::WindowBuilder,
+};
+use wry::{
+  http::{header::CONTENT_TYPE, Request, Response},
+  WebViewBuilder,
+};
+
+pub fn main() -> wry::Result<()> {
+  let event_loop = EventLoop::new();
+  let window = WindowBuilder::new().build(&event_loop).unwrap();
+
+  let builder = WebViewBuilder::new()
+    .with_custom_protocol(
+      "wry".into(),
+      move |_webview_id, request| match get_wry_response(request) {
+        Ok(r) => r.map(Into::into),
+        Err(e) => http::Response::builder()
+          .header(CONTENT_TYPE, "text/plain")
+          .status(500)
+          .body(e.to_string().as_bytes().to_vec())
+          .unwrap()
+          .map(Into::into),
+      },
+    )
+    // tell the webview to load the custom protocol
+    .with_url("wry://localhost");
+
+  #[cfg(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "android"
+  ))]
+  let _webview = builder.build(&window)?;
+  #[cfg(not(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "android"
+  )))]
+  let _webview = {
+    use tao::platform::unix::WindowExtUnix;
+    use wry::WebViewBuilderExtUnix;
+    let vbox = window.default_vbox().unwrap();
+    builder.build_gtk(vbox)?
+  };
+
+--- examples/custom_titlebar.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use tao::{
+  dpi::PhysicalSize,
+  event::{Event, StartCause, WindowEvent},
+  event_loop::{ControlFlow, EventLoopBuilder},
+  window::{CursorIcon, ResizeDirection, Window, WindowBuilder},
+};
+use wry::{http::Request, WebViewBuilder};
+
+#[derive(Debug)]
+enum HitTestResult {
+  Client,
+  Left,
+  Right,
+  Top,
+  Bottom,
+  TopLeft,
+  TopRight,
+  BottomLeft,
+  BottomRight,
+  NoWhere,
+}
+
+impl HitTestResult {
+  fn drag_resize_window(&self, window: &Window) {
+    let _ = window.drag_resize_window(match self {
+      HitTestResult::Left => ResizeDirection::West,
+      HitTestResult::Right => ResizeDirection::East,
+      HitTestResult::Top => ResizeDirection::North,
+      HitTestResult::Bottom => ResizeDirection::South,
+      HitTestResult::TopLeft => ResizeDirection::NorthWest,
+      HitTestResult::TopRight => ResizeDirection::NorthEast,
+      HitTestResult::BottomLeft => ResizeDirection::SouthWest,
+      HitTestResult::BottomRight => ResizeDirection::SouthEast,
+      _ => unreachable!(),
+    });
+  }
+
+  fn change_cursor(&self, window: &Window) {
+    window.set_cursor_icon(match self {
+      HitTestResult::Left => CursorIcon::WResize,
+      HitTestResult::Right => CursorIcon::EResize,
+      HitTestResult::Top => CursorIcon::NResize,
+      HitTestResult::Bottom => CursorIcon::SResize,
+      HitTestResult::TopLeft => CursorIcon::NwResize,
+      HitTestResult::TopRight => CursorIcon::NeResize,
+      HitTestResult::BottomLeft => CursorIcon::SwResize,
+      HitTestResult::BottomRight => CursorIcon::SeResize,
+      _ => CursorIcon::Default,
+    });
+  }
+}
+
+--- examples/gtk_multiwebview.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use tao::{
+  event::{Event, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  window::WindowBuilder,
+};
+use wry::{
+  dpi::{LogicalPosition, LogicalSize},
+  Rect, WebViewBuilder,
+};
+
+fn main() -> wry::Result<()> {
+  let event_loop = EventLoop::new();
+  let window = WindowBuilder::new().build(&event_loop).unwrap();
+
+  #[cfg(not(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "android"
+  )))]
+  let fixed = {
+    use gtk::prelude::*;
+    use tao::platform::unix::WindowExtUnix;
+    let fixed = gtk::Fixed::new();
+    let vbox = window.default_vbox().unwrap();
+    vbox.pack_start(&fixed, true, true, 0);
+    fixed.show_all();
+    fixed
+  };
+
+  let build_webview = |builder: WebViewBuilder<'_>| -> wry::Result<wry::WebView> {
+    #[cfg(any(
+      target_os = "windows",
+      target_os = "macos",
+      target_os = "ios",
+      target_os = "android"
+    ))]
+    let webview = builder.build(&window)?;
+
+    #[cfg(not(any(
+      target_os = "windows",
+      target_os = "macos",
+      target_os = "ios",
+      target_os = "android"
+    )))]
+    let webview = {
+      use wry::WebViewBuilderExtUnix;
+      builder.build_gtk(&fixed)?
+    };
+
+    Ok(webview)
+
+--- examples/gtk_opengl.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use tao::{
+  event::{Event, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  window::WindowBuilder,
+};
+use wry::{
+  dpi::{LogicalPosition, LogicalSize},
+  Rect, WebViewBuilder,
+};
+
+fn main() -> wry::Result<()> {
+  let event_loop = EventLoop::new();
+  let window = WindowBuilder::new()
+    .with_title("GTK OpenGL with Webview")
+    .with_inner_size(LogicalSize::new(800, 600))
+    .build(&event_loop)
+    .unwrap();
+
+  #[cfg(not(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "android"
+  )))]
+  let (fixed, _) = {
+    use gtk::prelude::*;
+    use std::{cell::RefCell, rc::Rc};
+    use tao::platform::unix::WindowExtUnix;
+
+    let overlay = gtk::Overlay::new();
+    let vbox = window.default_vbox().unwrap();
+    vbox.pack_start(&overlay, true, true, 0);
+
+    let gl_area = gtk::GLArea::new();
+    gl_area.set_has_alpha(true);
+    gl_area.set_auto_render(true);
+
+    struct AppState {
+      gl: glow::Context,
+      program: glow::Program,
+      vertex_array: glow::VertexArray,
+    }
+
+    let state: Rc<RefCell<Option<AppState>>> = Rc::new(RefCell::new(None));
+    let state_realize = state.clone();
+
+    gl_area.connect_realize(move |gl_area| {
+      gl_area.make_current();
+      if gl_area.error().is_some() {
+        println!("Error creating GLArea context");
+        return;
+
+--- examples/multiwindow.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::collections::HashMap;
+use tao::{
+  event::{Event, WindowEvent},
+  event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget},
+  window::{Window, WindowBuilder, WindowId},
+};
+use wry::{http::Request, WebView, WebViewBuilder};
+
+enum UserEvent {
+  CloseWindow(WindowId),
+  NewTitle(WindowId, String),
+  NewWindow,
+}
+
+fn main() -> wry::Result<()> {
+  let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
+  let mut webviews = HashMap::new();
+  let proxy = event_loop.create_proxy();
+
+  let (window, webview) = create_new_window(
+    format!("Window {}", webviews.len() + 1),
+    &event_loop,
+    proxy.clone(),
+  );
+  webviews.insert(window.id(), (window, webview));
+
+  event_loop.run(move |event, event_loop, control_flow| {
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::WindowEvent {
+        event: WindowEvent::CloseRequested,
+        window_id,
+        ..
+      } => {
+        webviews.remove(&window_id);
+        if webviews.is_empty() {
+          *control_flow = ControlFlow::Exit
+        }
+      }
+      Event::UserEvent(UserEvent::NewWindow) => {
+        let (window, webview) = create_new_window(
+          format!("Window {}", webviews.len() + 1),
+          event_loop,
+          proxy.clone(),
+        );
+        webviews.insert(window.id(), (window, webview));
+      }
+      Event::UserEvent(UserEvent::CloseWindow(id)) => {
+        webviews.remove(&id);
+        if webviews.is_empty() {
+
+--- examples/permission_handler.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! Example demonstrating the permission handler API.
+//!
+//! Run:  cargo run --example permission_handler
+//! Then click the buttons and watch the terminal output.
+
+fn main() -> wry::Result<()> {
+  use tao::{
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowBuilder,
+  };
+  use wry::{PermissionKind, PermissionResponse, WebViewBuilder};
+
+  let event_loop = EventLoop::new();
+  let window = WindowBuilder::new()
+    .with_title("Permission Handler Example")
+    .with_inner_size(tao::dpi::LogicalSize::new(800, 600))
+    .build(&event_loop)
+    .unwrap();
+
+  let builder = WebViewBuilder::new()
+    .with_url("https://permission.site/")
+    .with_permission_handler(|kind| {
+      let response = match kind {
+        PermissionKind::Geolocation => PermissionResponse::Default,
+        _ => PermissionResponse::Allow,
+      };
+      println!("[permission] {kind} → {response}");
+      response
+    });
+
+  #[cfg(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "android"
+  ))]
+  let _webview = builder.build(&window)?;
+  #[cfg(not(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "android"
+  )))]
+  let _webview = {
+    use tao::platform::unix::WindowExtUnix;
+    use wry::WebViewBuilderExtUnix;
+    let vbox = window.default_vbox().unwrap();
+    builder.build_gtk(vbox)?
+  };
+
+
+--- examples/reparent.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use tao::{
+  event::{ElementState, Event, KeyEvent, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  keyboard::Key,
+  window::WindowBuilder,
+};
+use wry::WebViewBuilder;
+
+#[cfg(target_os = "macos")]
+use {objc2_app_kit::NSWindow, tao::platform::macos::WindowExtMacOS, wry::WebViewExtMacOS};
+#[cfg(target_os = "windows")]
+use {tao::platform::windows::WindowExtWindows, wry::WebViewExtWindows};
+
+#[cfg(not(any(
+  target_os = "windows",
+  target_os = "macos",
+  target_os = "ios",
+  target_os = "android"
+)))]
+#[cfg(not(any(
+  target_os = "windows",
+  target_os = "macos",
+  target_os = "ios",
+  target_os = "android"
+)))]
+use {
+  tao::platform::unix::WindowExtUnix,
+  wry::{WebViewBuilderExtUnix, WebViewExtUnix},
+};
+
+fn main() -> wry::Result<()> {
+  let event_loop = EventLoop::new();
+  let window = WindowBuilder::new().build(&event_loop).unwrap();
+  let window2 = WindowBuilder::new().build(&event_loop).unwrap();
+
+  let builder = WebViewBuilder::new().with_url("https://tauri.app");
+
+  #[cfg(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "android"
+  ))]
+  let webview = builder.build(&window)?;
+  #[cfg(not(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "android"
+  )))]
+  let webview = {
+
+--- examples/simple.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use tao::{
+  event::{Event, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  window::WindowBuilder,
+};
+use wry::WebViewBuilder;
+
+fn main() -> wry::Result<()> {
+  let event_loop = EventLoop::new();
+  let window = WindowBuilder::new().build(&event_loop).unwrap();
+
+  let builder = WebViewBuilder::new()
+    .with_url("http://tauri.app")
+    .with_new_window_req_handler(|url, features| {
+      println!("new window req: {url} {features:?}");
+      wry::NewWindowResponse::Allow
+    });
+
+  let builder = builder.with_drag_drop_handler(|e| {
+    match e {
+      wry::DragDropEvent::Enter { paths, position } => {
+        println!("DragEnter: {position:?} {paths:?} ")
+      }
+      wry::DragDropEvent::Over { position } => println!("DragOver: {position:?} "),
+      wry::DragDropEvent::Drop { paths, position } => {
+        println!("DragDrop: {position:?} {paths:?} ")
+      }
+      wry::DragDropEvent::Leave => println!("DragLeave"),
+      _ => {}
+    }
+
+    true
+  });
+
+  #[cfg(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "android"
+  ))]
+  let _webview = builder.build(&window)?;
+  #[cfg(not(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "android"
+  )))]
+  let _webview = {
+    use tao::platform::unix::WindowExtUnix;
+    use wry::WebViewBuilderExtUnix;
+    let vbox = window.default_vbox().unwrap();
+
+--- examples/streaming.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{
+  io::{Read, Seek, SeekFrom, Write},
+  path::PathBuf,
+};
+
+use http::{header, StatusCode};
+use http_range::HttpRange;
+use tao::{
+  event::{Event, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  window::WindowBuilder,
+};
+use wry::{
+  http::{header::*, Request, Response},
+  WebViewBuilder,
+};
+
+pub fn main() -> wry::Result<()> {
+  let event_loop = EventLoop::new();
+  let window = WindowBuilder::new().build(&event_loop).unwrap();
+
+  let builder = WebViewBuilder::new()
+    .with_custom_protocol(
+      "wry".into(),
+      move |_webview_id, request| match wry_protocol(request) {
+        Ok(r) => r.map(Into::into),
+        Err(e) => http::Response::builder()
+          .header(CONTENT_TYPE, "text/plain")
+          .status(500)
+          .body(e.to_string().as_bytes().to_vec())
+          .unwrap()
+          .map(Into::into),
+      },
+    )
+    .with_custom_protocol(
+      "stream".into(),
+      move |_webview_id, request| match stream_protocol(request) {
+        Ok(r) => r.map(Into::into),
+        Err(e) => http::Response::builder()
+          .header(CONTENT_TYPE, "text/plain")
+          .status(500)
+          .body(e.to_string().as_bytes().to_vec())
+          .unwrap()
+          .map(Into::into),
+      },
+    )
+    // tell the webview to load the custom protocol
+    .with_url("wry://localhost");
+
+  #[cfg(any(
+    target_os = "windows",
+
+--- examples/transparent.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use tao::{
+  event::{Event, WindowEvent},
+  event_loop::{ControlFlow, EventLoop},
+  window::WindowBuilder,
+};
+use wry::WebViewBuilder;
+
+fn main() -> wry::Result<()> {
+  let event_loop = EventLoop::new();
+  #[allow(unused_mut)]
+  let mut builder = WindowBuilder::new()
+    .with_decorations(false)
+    // There are actually three layer of background color when creating webview window.
+    // The first is window background...
+    .with_transparent(true);
+  #[cfg(target_os = "windows")]
+  {
+    use tao::platform::windows::WindowBuilderExtWindows;
+    builder = builder.with_undecorated_shadow(false);
+  }
+  let window = builder.build(&event_loop).unwrap();
+
+  #[cfg(target_os = "windows")]
+  {
+    use tao::platform::windows::WindowExtWindows;
+    window.set_undecorated_shadow(true);
+  }
+
+  let builder = WebViewBuilder::new()
+    // The second is on webview...
+    .with_transparent(true)
+    // And the last is in html.
+    .with_html(
+      r#"<html>
+          <body style="background-color:rgba(87,87,87,0.5);"></body>
+          <script>
+            window.onload = function() {
+              document.body.innerText = `hello, ${navigator.userAgent}`;
+            };
+          </script>
+        </html>"#,
+    );
+
+  #[cfg(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "android"
+  ))]
+  let _webview = builder.build(&window)?;
+  #[cfg(not(any(
+
+--- examples/window_border.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use dpi::LogicalSize;
+use tao::{
+  event::{Event, StartCause, WindowEvent},
+  event_loop::{ControlFlow, EventLoopBuilder},
+  window::WindowBuilder,
+};
+use wry::{http::Request, WebViewBuilder};
+
+#[derive(Debug)]
+enum UserEvent {
+  TogglShadows,
+}
+
+fn main() -> wry::Result<()> {
+  let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
+  let window = WindowBuilder::new()
+    .with_inner_size(LogicalSize::new(500, 500))
+    .with_decorations(false)
+    .build(&event_loop)
+    .unwrap();
+
+  const HTML: &str = r#"
+  <html>
+
+  <head>
+      <style>
+          html {
+            font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+            width: 100vw;
+            height: 100vh;
+            background-color: #1f1f1f;
+            border: 1px solid rgb(148, 231, 155);
+          }
+
+          * {
+              padding: 0;
+              margin: 0;
+              box-sizing: border-box;
+          }
+      </style>
+  </head>
+
+  <body>
+    <p>
+      Click the window to toggle shadows.
+    </p>
+
+    <script>
+      window.addEventListener('click', () => window.ipc.postMessage('toggleShadows'))
+    </script>
+  </body>
+
+--- src/android/binding.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use http::{
+  header::{HeaderName, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE},
+  Request,
+};
+use jni::errors::Result as JniResult;
+pub use jni::{
+  self,
+  objects::{GlobalRef, JClass, JMap, JObject, JString},
+  sys::{jboolean, jint, jobject, jstring},
+  JNIEnv,
+};
+pub use ndk;
+use ndk::looper::{FdEvent, ThreadLooper};
+use std::os::fd::{AsFd, AsRawFd};
+
+use super::{
+  main_pipe::{MainPipe, MAIN_PIPE},
+  ASSET_LOADER_DOMAIN, EVAL_CALLBACKS, IPC, ON_LOAD_HANDLER, PERMISSION_HANDLER, REQUEST_HANDLER,
+  TITLE_CHANGE_HANDLER, URL_LOADING_OVERRIDE,
+};
+
+use crate::{PageLoadEvent, PermissionKind, PermissionResponse};
+
+#[macro_export]
+macro_rules! android_binding {
+  ($domain:ident, $package:ident) => {
+    ::wry::android_binding!($domain, $package, ::wry)
+  };
+  // use imported `android_setup` just to force the import path to use `wry::{}`
+  // as the macro breaks without braces
+  ($domain:ident, $package:ident, $wry:path) => {{
+    use $wry::{android_setup as _, prelude::*};
+
+    android_fn!($domain, $package, Rust, onFirstActivityCreateWry, []);
+    android_fn!(
+      $domain,
+      $package,
+      Rust,
+      onWebviewDestroy,
+      [JObject, JString]
+    );
+
+    android_fn!(
+      $domain,
+      $package,
+      Rust,
+      handleRequest,
+      [JString, JObject, jboolean],
+      jobject
+    );
+    android_fn!(
+
+--- src/android/main_pipe.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::{Error, InitializationScript, RGBA};
+use crossbeam_channel::*;
+use jni::{
+  errors::Result as JniResult,
+  objects::{GlobalRef, JMap, JObject, JString},
+  JNIEnv, JavaVM,
+};
+use once_cell::sync::Lazy;
+use std::{
+  collections::BTreeMap,
+  ffi::c_void,
+  os::unix::prelude::*,
+  sync::{Arc, Mutex},
+};
+
+use super::{find_class, EvalCallback, WebviewId, EVAL_CALLBACKS, EVAL_ID_GENERATOR};
+
+pub type ActivityId = i32;
+
+static CHANNEL: Lazy<(
+  Sender<(ActivityId, WebViewMessage)>,
+  Receiver<(ActivityId, WebViewMessage)>,
+)> = Lazy::new(|| bounded(8));
+pub static MAIN_PIPE: Lazy<[OwnedFd; 2]> = Lazy::new(|| {
+  let mut pipe: [RawFd; 2] = Default::default();
+  unsafe { libc::pipe(pipe.as_mut_ptr()) };
+  unsafe { pipe.map(|fd| OwnedFd::from_raw_fd(fd)) }
+});
+
+#[derive(Clone)]
+pub struct ActivityProxy {
+  pub activity: GlobalRef,
+  pub window_manager: GlobalRef,
+  pub webview: Option<GlobalRef>,
+  pub java_vm: *mut c_void,
+}
+
+unsafe impl Send for ActivityProxy {}
+
+impl ActivityProxy {
+  pub fn new(vm: JavaVM, activity: GlobalRef, window_manager: GlobalRef) -> Self {
+    Self {
+      activity,
+      window_manager,
+      webview: None,
+      java_vm: vm.get_java_vm_pointer() as *mut _,
+    }
+  }
+}
+
+static ACTIVITY_PROXY: once_cell::sync::Lazy<Mutex<BTreeMap<ActivityId, ActivityProxy>>> =
+
+--- src/android/mod.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use super::{PageLoadEvent, WebViewAttributes, RGBA};
+use crate::{
+  custom_protocol_workaround, inject_initialization_scripts::inject_scripts_into_html, Error,
+  PermissionKind, PermissionResponse, RequestAsyncResponder, Result,
+};
+use crossbeam_channel::*;
+
+use http::{Request, Response as HttpResponse};
+use jni::{
+  errors::Result as JniResult,
+  objects::{GlobalRef, JClass, JObject},
+  JNIEnv,
+};
+use ndk::looper::ThreadLooper;
+use once_cell::sync::{Lazy, OnceCell};
+use raw_window_handle::HasWindowHandle;
+use std::{
+  borrow::Cow,
+  collections::HashMap,
+  sync::{mpsc::channel, Arc, Mutex},
+  time::Duration,
+};
+
+pub(crate) mod binding;
+mod main_pipe;
+use main_pipe::{
+  activity_id_for_window_manager, first_activity_id, register_activity_proxy, ActivityId,
+  CreateWebViewAttributes, MainPipe, WebViewMessage,
+};
+
+use crate::util::Counter;
+
+static COUNTER: Counter = Counter::new();
+const MAIN_PIPE_TIMEOUT: Duration = Duration::from_secs(10);
+
+pub struct Context<'a, 'b> {
+  pub env: &'a mut JNIEnv<'b>,
+  pub activity: &'a JObject<'b>,
+  pub webview: &'a JObject<'b>,
+}
+
+type WebviewId = String;
+
+macro_rules! define_static_handlers {
+  ($($key: ident, $var:ident = $type_name:ident);+ $(;)?) => {
+    $(static $var: Lazy<Mutex<HashMap<$key, $type_name>>> = Lazy::new(||Mutex::new(HashMap::new()));)*
+  };
+
+  ($($var:ident = $type_name:ident { $($fields:ident:$types:ty),+ $(,)? });+ $(;)?) => {
+    $(
+    static $var: Lazy<Mutex<HashMap<WebviewId, $type_name>>> = Lazy::new(||Mutex::new(HashMap::new()));
+
+--- src/inject_initialization_scripts.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! This is an internal implementation detail used by the Android backend to inject
+//! initialization scripts when `addDocumentStartJavaScript` is not supported.
+
+use base64::{prelude::BASE64_STANDARD, Engine};
+use dom_query::Document;
+use http::{
+  header::{HeaderValue, CONTENT_SECURITY_POLICY, CONTENT_TYPE},
+  Response as HttpResponse,
+};
+use sha2::{Digest, Sha256};
+use std::borrow::Cow;
+
+use crate::InitializationScript;
+
+pub fn inject_scripts_into_html(
+  mut response: HttpResponse<Cow<'static, [u8]>>,
+  scripts: &[InitializationScript],
+) -> HttpResponse<Cow<'static, [u8]>> {
+  if scripts.is_empty() {
+    return response;
+  }
+
+  let should_inject_scripts = response
+    .headers()
+    .get(CONTENT_TYPE)
+    // Content-Type must begin with the media type, but is case-insensitive.
+    // It may also be followed by any number of semicolon-delimited key value pairs.
+    // We don't care about these here.
+    // source: https://httpwg.org/specs/rfc9110.html#rfc.section.8.3.1
+    .and_then(|content_type| content_type.to_str().ok())
+    .map(|content_type_str| content_type_str.to_lowercase().starts_with("text/html"))
+    .unwrap_or_default();
+
+  if !should_inject_scripts {
+    return response;
+  }
+
+  let document = Document::from(String::from_utf8_lossy(response.body()).as_ref());
+  let csp = response.headers_mut().get_mut(CONTENT_SECURITY_POLICY);
+
+  // Get or create head element
+  let head = document.head().unwrap_or_else(|| {
+    let html = document.html_root();
+    let head = document.tree.new_element("head");
+    html.prepend_child(&head);
+    head
+  });
+
+  // Iterate in reverse order since we are prepending each script to the head tag
+  let mut hashes = Vec::new();
+  for script in scripts.iter().rev().map(|s| &s.script) {
+
+--- src/lib.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! <p align="center"><img height="100" src="https://raw.githubusercontent.com/tauri-apps/wry/refs/heads/dev/.github/splash.png" alt="WRY Webview Rendering library" /></p>
+//!
+//! [![](https://img.shields.io/crates/v/wry?style=flat-square)](https://crates.io/crates/wry) [![](https://img.shields.io/docsrs/wry?style=flat-square)](https://docs.rs/wry/)
+//! [![License](https://img.shields.io/badge/License-MIT%20or%20Apache%202-green.svg)](https://opencollective.com/tauri)
+//! [![Chat Server](https://img.shields.io/badge/chat-discord-7289da.svg)](https://discord.gg/SpmNs4S)
+//! [![website](https://img.shields.io/badge/website-tauri.app-purple.svg)](https://tauri.app)
+//! [![https://good-labs.github.io/greater-good-affirmation/assets/images/badge.svg](https://good-labs.github.io/greater-good-affirmation/assets/images/badge.svg)](https://good-labs.github.io/greater-good-affirmation)
+//! [![support](https://img.shields.io/badge/sponsor-Open%20Collective-blue.svg)](https://opencollective.com/tauri)
+//!
+//! Wry is a cross-platform WebView rendering library.
+//!
+//! The webview requires a running event loop and a window type that implements [`HasWindowHandle`],
+//! or a gtk container widget if you need to support X11 and Wayland.
+//! You can use a windowing library like [`tao`] or [`winit`].
+//!
+//! ## Examples
+//!
+//! This example leverages the [`HasWindowHandle`] and supports Windows, macOS, iOS, Android and Linux (X11 Only).
+//! See the following example using [`winit`]:
+//!
+//! ```no_run
+//! # use wry::{WebViewBuilder, raw_window_handle};
+//! # use winit::{application::ApplicationHandler, event::WindowEvent, event_loop::{ActiveEventLoop, EventLoop}, window::{Window, WindowId}};
+//! #[derive(Default)]
+//! struct App {
+//!   window: Option<Window>,
+//!   webview: Option<wry::WebView>,
+//! }
+//!
+//! impl ApplicationHandler for App {
+//!   fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+//!     let window = event_loop.create_window(Window::default_attributes()).unwrap();
+//!     let webview = WebViewBuilder::new()
+//!       .with_url("https://tauri.app")
+//!       .build(&window)
+//!       .unwrap();
+//!
+//!     self.window = Some(window);
+//!     self.webview = Some(webview);
+//!   }
+//!
+//!   fn window_event(&mut self, _event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {}
+//! }
+//!
+//! let event_loop = EventLoop::new().unwrap();
+//! let mut app = App::default();
+//! event_loop.run_app(&mut app).unwrap();
+//! ```
+//!
+//! If you also want to support Wayland too, then we recommend you use [`WebViewBuilderExtUnix::build_gtk`] on Linux.
+//! See the following example using [`tao`]:
+
+--- src/web_context.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+#[cfg(gtk)]
+use crate::webkitgtk::WebContextImpl;
+
+use std::{
+  collections::HashSet,
+  path::{Path, PathBuf},
+};
+
+/// A context that is shared between multiple [`WebView`]s.
+///
+/// A browser would have a context for all the normal tabs and a different context for all the
+/// private/incognito tabs.
+///
+/// # Warning
+///
+/// If [`WebView`] is created by a WebContext. Dropping `WebContext` will cause [`WebView`] lose
+/// some actions like custom protocol on Mac. Please keep both instances when you still wish to
+/// interact with them.
+///
+/// [`WebView`]: crate::WebView
+#[derive(Debug)]
+pub struct WebContext {
+  data_directory: Option<PathBuf>,
+  #[allow(dead_code)] // It's not needed on Windows and macOS.
+  pub(crate) os: WebContextImpl,
+  #[allow(dead_code)] // It's not needed on Windows and macOS.
+  pub(crate) custom_protocols: HashSet<String>,
+}
+
+impl WebContext {
+  /// Create a new [`WebContext`].
+  ///
+  /// - `data_directory`: Whether the WebView window should have a custom user data path.
+  ///   This is useful in Windows when a bundled application can't have the webview data inside `Program Files`.
+  ///
+  /// ## Platform-specific:
+  ///
+  /// - **Windows**: Webview instances with different `CoreWebView2EnvironmentOptions` must have different `data_directory`s [^1]
+  ///
+  /// [^1]: <https://learn.microsoft.com/en-us/dotnet/api/microsoft.web.webview2.core.corewebview2environment.createcorewebview2controllerasync?view=webview2-dotnet-1.0.3719.77#:~:text=WebView%20creation%20fails%20if%20a%20running%20instance%20using%20the%20same%20user%20data%20folder%20exists%2C%20and%20the%20Environment%20objects%20have%20different%20CoreWebView2EnvironmentOptions.>
+  pub fn new(data_directory: Option<PathBuf>) -> Self {
+    Self {
+      os: WebContextImpl::new(data_directory.as_deref()),
+      data_directory,
+      custom_protocols: Default::default(),
+    }
+  }
+
+  #[cfg(gtk)]
+  pub(crate) fn new_ephemeral() -> Self {
+    Self {
+
+--- src/webkitgtk/drag_drop.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{
+  cell::{Cell, UnsafeCell},
+  path::PathBuf,
+  rc::Rc,
+};
+
+use gtk::{glib::GString, prelude::*};
+use webkit2gtk::WebView;
+
+use crate::DragDropEvent;
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
+enum DragControllerState {
+  Entered,
+  Leaving,
+  Left,
+}
+
+struct DragDropController {
+  paths: UnsafeCell<Option<Vec<PathBuf>>>,
+  state: Cell<DragControllerState>,
+  position: Cell<(i32, i32)>,
+  handler: Box<dyn Fn(DragDropEvent) -> bool>,
+}
+
+impl DragDropController {
+  fn new(handler: Box<dyn Fn(DragDropEvent) -> bool>) -> Self {
+    Self {
+      handler,
+      paths: UnsafeCell::new(None),
+      state: Cell::new(DragControllerState::Left),
+      position: Cell::new((0, 0)),
+    }
+  }
+
+  fn store_paths(&self, paths: Vec<PathBuf>) {
+    unsafe { *self.paths.get() = Some(paths) };
+  }
+
+  fn take_paths(&self) -> Option<Vec<PathBuf>> {
+    unsafe { &mut *self.paths.get() }.take()
+  }
+
+  fn store_position(&self, position: (i32, i32)) {
+    self.position.replace(position);
+  }
+
+  fn enter(&self) {
+    self.state.set(DragControllerState::Entered);
+  }
+
+
+--- src/webkitgtk/mod.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+#[cfg(feature = "x11")]
+use dpi::LogicalPosition;
+use dpi::LogicalSize;
+use ffi::CookieManageExt;
+#[cfg(feature = "x11")]
+use gdkx11::{
+  ffi::{gdk_x11_window_foreign_new_for_display, GdkX11Display},
+  X11Display,
+};
+#[cfg(feature = "x11")]
+use gtk::glib::{self, translate::FromGlibPtrFull};
+use gtk::{
+  gdk::{self},
+  gio::Cancellable,
+  glib::{Cast, IsA},
+  prelude::*,
+};
+use http::Request;
+use javascriptcore::ValueExt;
+use raw_window_handle::HasWindowHandle;
+#[cfg(feature = "x11")]
+use raw_window_handle::RawWindowHandle;
+#[cfg(feature = "x11")]
+use std::ffi::c_ulong;
+#[cfg(any(debug_assertions, feature = "devtools"))]
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+  collections::HashMap,
+  rc::Rc,
+  sync::{Arc, Mutex},
+};
+#[cfg(any(debug_assertions, feature = "devtools"))]
+use webkit2gtk::WebInspectorExt;
+use webkit2gtk::{
+  AutoplayPolicy, CookieManagerExt, GeolocationPermissionRequest, InputMethodContextExt, LoadEvent,
+  NavigationPolicyDecision, NavigationPolicyDecisionExt, NetworkProxyMode, NetworkProxySettings,
+  NotificationPermissionRequest, PermissionRequestExt, PointerLockPermissionRequest,
+  PolicyDecisionType, PrintOperationExt, SettingsExt, URIRequest, URIRequestExt,
+  UserContentInjectedFrames, UserContentManager, UserContentManagerExt, UserMediaPermissionRequest,
+  UserMediaPermissionRequestExt, UserScript, UserScriptInjectionTime,
+  WebContextExt as Webkit2gtkWeContextExt, WebView, WebViewExt, WebsiteDataManagerExt,
+  WebsiteDataManagerExtManual, WebsitePolicies,
+};
+use webkit2gtk_sys::{
+  webkit_get_major_version, webkit_get_micro_version, webkit_get_minor_version,
+  webkit_policy_decision_ignore, webkit_policy_decision_use,
+};
+#[cfg(feature = "x11")]
+use x11_dl::xlib::*;
+
+pub use web_context::WebContextImpl;
+
+--- src/webkitgtk/web_context.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! Unix platform extensions for [`WebContext`](super::WebContext).
+
+use crate::{Error, RequestAsyncResponder};
+use gtk::glib::{self, MainContext, ObjectExt};
+use http::{header::CONTENT_TYPE, HeaderName, HeaderValue, Request, Response as HttpResponse};
+use soup::{MessageHeaders, MessageHeadersType};
+use std::{
+  borrow::Cow,
+  cell::RefCell,
+  env::current_dir,
+  path::{Path, PathBuf},
+  rc::Rc,
+};
+use webkit2gtk::{
+  ApplicationInfo, AutomationSessionExt, CookiePersistentStorage, DownloadExt, SecurityManagerExt,
+  URIRequest, URIRequestExt, URISchemeRequest, URISchemeRequestExt, URISchemeResponse,
+  URISchemeResponseExt, WebContext, WebContextExt as Webkit2gtkContextExt, WebView, WebViewExt,
+};
+
+#[derive(Debug)]
+pub struct WebContextImpl {
+  context: WebContext,
+  automation: bool,
+  app_info: Option<ApplicationInfo>,
+}
+
+impl WebContextImpl {
+  pub fn new(data_directory: Option<&Path>) -> Self {
+    use webkit2gtk::{CookieManagerExt, WebsiteDataManager, WebsiteDataManagerExt};
+    let mut context_builder = WebContext::builder();
+    if let Some(data_directory) = data_directory {
+      let data_manager = WebsiteDataManager::builder()
+        // TODO: Consider taking a cache_directory so this can be in XDG_CACHE_HOME.
+        .base_cache_directory(data_directory.to_string_lossy())
+        .base_data_directory(data_directory.to_string_lossy())
+        .build();
+      if let Some(cookie_manager) = data_manager.cookie_manager() {
+        cookie_manager.set_persistent_storage(
+          &data_directory.join("cookies").to_string_lossy(),
+          CookiePersistentStorage::Text,
+        );
+      }
+      context_builder = context_builder.website_data_manager(&data_manager);
+    }
+    let context = context_builder.build();
+
+    Self::create_context(context)
+  }
+
+  pub fn new_ephemeral() -> Self {
+    let context = WebContext::new_ephemeral();
+
+--- src/webview2/drag_drop.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+// A silly implementation of file drop handling for Windows!
+
+use crate::DragDropEvent;
+
+use std::{
+  cell::UnsafeCell,
+  ffi::OsString,
+  os::{raw::c_void, windows::ffi::OsStringExt},
+  path::PathBuf,
+  ptr,
+  rc::Rc,
+};
+
+use windows::{
+  core::{implement, BOOL},
+  Win32::{
+    Foundation::{DRAGDROP_E_INVALIDHWND, HWND, LPARAM, POINT, POINTL},
+    Graphics::Gdi::ScreenToClient,
+    System::{
+      Com::{IDataObject, DVASPECT_CONTENT, FORMATETC, TYMED_HGLOBAL},
+      Ole::{
+        IDropTarget, IDropTarget_Impl, RegisterDragDrop, RevokeDragDrop, CF_HDROP, DROPEFFECT,
+        DROPEFFECT_COPY, DROPEFFECT_NONE,
+      },
+      SystemServices::MODIFIERKEYS_FLAGS,
+    },
+    UI::{
+      Shell::{DragFinish, DragQueryFileW, HDROP},
+      WindowsAndMessaging::EnumChildWindows,
+    },
+  },
+};
+
+#[derive(Default)]
+pub(crate) struct DragDropController {
+  drop_targets: Vec<IDropTarget>,
+}
+
+impl DragDropController {
+  #[inline]
+  pub(crate) fn new(hwnd: HWND, handler: Box<dyn Fn(DragDropEvent) -> bool>) -> Self {
+    let mut controller = DragDropController::default();
+
+    let handler = Rc::new(handler);
+
+    // Enumerate child windows to find the WebView2 "window" and override!
+    {
+      let mut callback = |hwnd| controller.inject_in_hwnd(hwnd, handler.clone());
+      let mut trait_obj: &mut dyn FnMut(HWND) -> bool = &mut callback;
+      let closure_pointer_pointer: *mut c_void = unsafe { std::mem::transmute(&mut trait_obj) };
+      let lparam = LPARAM(closure_pointer_pointer as _);
+
+--- src/webview2/mod.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+mod drag_drop;
+mod util;
+
+use std::{
+  borrow::Cow, cell::RefCell, collections::HashSet, fmt::Write, fs, path::PathBuf, rc::Rc,
+  sync::mpsc,
+};
+
+use dpi::{PhysicalPosition, PhysicalSize};
+use http::{Request, Response as HttpResponse, StatusCode};
+use once_cell::sync::Lazy;
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use webview2_com::{Microsoft::Web::WebView2::Win32::*, *};
+use windows::{
+  core::{s, w, Interface, BOOL, HSTRING, PCWSTR, PWSTR},
+  Win32::{
+    Foundation::*,
+    Globalization::*,
+    Graphics::Gdi::*,
+    System::{Com::*, LibraryLoader::GetModuleHandleW},
+    UI::{Input::KeyboardAndMouse::SetFocus, Shell::*, WindowsAndMessaging::*},
+  },
+};
+
+use self::drag_drop::DragDropController;
+use super::Theme;
+use crate::{
+  custom_protocol_workaround, proxy::ProxyConfig, Error, MemoryUsageLevel, NewWindowFeatures,
+  NewWindowOpener, NewWindowResponse, PageLoadEvent, PermissionKind, PermissionResponse, Rect,
+  RequestAsyncResponder, Result, WebViewAttributes, RGBA,
+};
+
+type EventRegistrationToken = i64;
+
+const PARENT_SUBCLASS_ID: u32 = WM_USER + 0x64;
+const PARENT_DESTROY_MESSAGE: u32 = WM_USER + 0x65;
+const MAIN_THREAD_DISPATCHER_SUBCLASS_ID: u32 = WM_USER + 0x66;
+static EXEC_MSG_ID: Lazy<u32> = Lazy::new(|| unsafe { RegisterWindowMessageA(s!("Wry::ExecMsg")) });
+
+impl From<webview2_com::Error> for Error {
+  fn from(err: webview2_com::Error) -> Self {
+    Error::WebView2Error(err)
+  }
+}
+
+impl From<windows::core::Error> for Error {
+  fn from(err: windows::core::Error) -> Self {
+    Error::WebView2Error(webview2_com::Error::WindowsError(err))
+  }
+}
+
+
+--- src/webview2/util.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use once_cell::sync::Lazy;
+use windows::{
+  core::{HRESULT, HSTRING, PCSTR},
+  Win32::{
+    Foundation::{FARPROC, HWND, S_OK},
+    Graphics::Gdi::{
+      GetDC, GetDeviceCaps, MonitorFromWindow, HMONITOR, LOGPIXELSX, MONITOR_DEFAULTTONEAREST,
+    },
+    System::LibraryLoader::{GetProcAddress, LoadLibraryW},
+    UI::{
+      HiDpi::{MDT_EFFECTIVE_DPI, MONITOR_DPI_TYPE},
+      WindowsAndMessaging::IsProcessDPIAware,
+    },
+  },
+};
+
+fn get_function_impl(library: &str, function: &str) -> FARPROC {
+  let library = HSTRING::from(library);
+  assert_eq!(function.chars().last(), Some('\0'));
+
+  // Library names we will use are ASCII so we can use the A version to avoid string conversion.
+  let module = unsafe { LoadLibraryW(&library) }.unwrap_or_default();
+  if module.is_invalid() {
+    return None;
+  }
+
+  unsafe { GetProcAddress(module, PCSTR::from_raw(function.as_ptr())) }
+}
+
+macro_rules! get_function {
+  ($lib:expr, $func:ident) => {
+    crate::webview2::util::get_function_impl($lib, concat!(stringify!($func), '\0'))
+      .map(|f| unsafe { std::mem::transmute::<_, $func>(f) })
+  };
+}
+
+pub type GetDpiForWindow = unsafe extern "system" fn(hwnd: HWND) -> u32;
+pub type GetDpiForMonitor = unsafe extern "system" fn(
+  hmonitor: HMONITOR,
+  dpi_type: MONITOR_DPI_TYPE,
+  dpi_x: *mut u32,
+  dpi_y: *mut u32,
+) -> HRESULT;
+
+static GET_DPI_FOR_WINDOW: Lazy<Option<GetDpiForWindow>> =
+  Lazy::new(|| get_function!("user32.dll", GetDpiForWindow));
+static GET_DPI_FOR_MONITOR: Lazy<Option<GetDpiForMonitor>> =
+  Lazy::new(|| get_function!("shcore.dll", GetDpiForMonitor));
+
+pub const BASE_DPI: u32 = 96;
+pub fn dpi_to_scale_factor(dpi: u32) -> f64 {
+
+--- src/wkwebview/class/document_title_changed_observer.rs ---
+// Copyright 2020-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{ffi::c_void, ptr::null_mut};
+
+use objc2::{
+  define_class, msg_send,
+  rc::Retained,
+  runtime::{AnyObject, NSObject},
+  AllocAnyThread, DefinedClass,
+};
+use objc2_foundation::{
+  ns_string, NSDictionary, NSKeyValueChangeKey, NSKeyValueObservingOptions,
+  NSObjectNSKeyValueObserverRegistration, NSObjectProtocol, NSString,
+};
+
+use crate::WryWebView;
+pub struct DocumentTitleChangedObserverIvars {
+  pub object: Retained<WryWebView>,
+  pub handler: Box<dyn Fn(String)>,
+}
+
+define_class!(
+  #[unsafe(super(NSObject))]
+  #[ivars = DocumentTitleChangedObserverIvars]
+  pub struct DocumentTitleChangedObserver;
+
+  /// NSKeyValueObserving.
+  impl DocumentTitleChangedObserver {
+    #[unsafe(method(observeValueForKeyPath:ofObject:change:context:))]
+    fn observe_value_for_key_path(
+      &self,
+      key_path: Option<&NSString>,
+      of_object: Option<&AnyObject>,
+      _change: Option<&NSDictionary<NSKeyValueChangeKey, AnyObject>>,
+      _context: *mut c_void,
+    ) {
+      if let (Some(key_path), Some(object)) = (key_path, of_object) {
+        unsafe {
+          if key_path.isEqualToString(ns_string!("title")) {
+            let handler = &self.ivars().handler;
+            // if !handler.is_null() {
+            let title: *const NSString = msg_send![object, title];
+            handler((*title).to_string());
+            // }
+          }
+        }
+      }
+    }
+  }
+
+  unsafe impl NSObjectProtocol for DocumentTitleChangedObserver {}
+);
+
+
+--- src/wkwebview/class/mod.rs ---
+// Copyright 2020-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+pub mod document_title_changed_observer;
+pub mod url_scheme_handler;
+pub mod wry_download_delegate;
+pub mod wry_navigation_delegate;
+pub mod wry_web_view;
+pub mod wry_web_view_delegate;
+pub mod wry_web_view_parent;
+pub mod wry_web_view_ui_delegate;
+
+
+--- src/wkwebview/class/url_scheme_handler.rs ---
+// Copyright 2020-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{
+  borrow::Cow,
+  ffi::{c_char, CStr},
+  panic::AssertUnwindSafe,
+  ptr::NonNull,
+};
+
+use http::{
+  header::{CONTENT_LENGTH, CONTENT_TYPE},
+  Request, Response as HttpResponse, StatusCode, Version,
+};
+use objc2::{
+  rc::Retained,
+  runtime::{AnyClass, AnyObject, ClassBuilder, ProtocolObject},
+  AllocAnyThread, ClassType, Message,
+};
+use objc2_foundation::{
+  NSData, NSHTTPURLResponse, NSMutableDictionary, NSObject, NSObjectProtocol, NSString, NSURL,
+  NSUUID,
+};
+use objc2_web_kit::{WKURLSchemeHandler, WKURLSchemeTask};
+
+use crate::{wkwebview::WEBVIEW_STATE, RequestAsyncResponder, WryWebView};
+
+pub fn create(name: &str) -> &AnyClass {
+  unsafe {
+    // Include the address of WEBVIEW_STATE in the class name so that each dylib in the process
+    // gets its own ObjC class with method pointers into its own code and data segments.
+    let unique_id = std::ptr::addr_of!(WEBVIEW_STATE) as usize;
+    let scheme_name = format!("{name}URLSchemeHandler_{unique_id:x}\0");
+    let scheme_name = CStr::from_bytes_with_nul(scheme_name.as_bytes()).unwrap();
+    let cls = ClassBuilder::new(scheme_name, NSObject::class());
+    match cls {
+      Some(mut cls) => {
+        cls.add_ivar::<*mut c_char>(c"webview_id");
+        cls.add_ivar::<usize>(c"protocol_index");
+        cls.add_method(
+          objc2::sel!(webView:startURLSchemeTask:),
+          start_task as extern "C" fn(_, _, _, _),
+        );
+        cls.add_method(
+          objc2::sel!(webView:stopURLSchemeTask:),
+          stop_task as extern "C" fn(_, _, _, _),
+        );
+        cls.register()
+      }
+      None => AnyClass::get(scheme_name).expect("Failed to get the class definition"),
+    }
+  }
+}
+
+
+--- src/wkwebview/class/wry_download_delegate.rs ---
+// Copyright 2020-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{cell::RefCell, path::PathBuf, rc::Rc};
+
+use objc2::{define_class, msg_send, rc::Retained, runtime::NSObject, MainThreadOnly};
+use objc2_foundation::{
+  MainThreadMarker, NSData, NSError, NSObjectProtocol, NSString, NSURLResponse, NSURL,
+};
+use objc2_web_kit::{WKDownload, WKDownloadDelegate};
+
+use crate::wkwebview::download::{download_did_fail, download_did_finish, download_policy};
+
+pub struct WryDownloadDelegateIvars {
+  pub started: Option<RefCell<Box<dyn FnMut(String, &mut PathBuf) -> bool + 'static>>>,
+  pub completed: Option<Rc<dyn Fn(String, Option<PathBuf>, bool) + 'static>>,
+}
+
+define_class!(
+  #[unsafe(super(NSObject))]
+  #[thread_kind = MainThreadOnly]
+  #[ivars = WryDownloadDelegateIvars]
+  pub struct WryDownloadDelegate;
+
+  unsafe impl NSObjectProtocol for WryDownloadDelegate {}
+
+  unsafe impl WKDownloadDelegate for WryDownloadDelegate {
+    #[unsafe(method(download:decideDestinationUsingResponse:suggestedFilename:completionHandler:))]
+    fn download_policy(
+      &self,
+      download: &WKDownload,
+      response: &NSURLResponse,
+      suggested_filename: &NSString,
+      handler: &block2::Block<dyn Fn(*const NSURL)>,
+    ) {
+      download_policy(self, download, response, suggested_filename, handler);
+    }
+
+    #[unsafe(method(downloadDidFinish:))]
+    fn download_did_finish(&self, download: &WKDownload) {
+      download_did_finish(self, download);
+    }
+
+    #[unsafe(method(download:didFailWithError:resumeData:))]
+    fn download_did_fail(&self, download: &WKDownload, error: &NSError, resume_data: &NSData) {
+      download_did_fail(self, download, error, resume_data);
+    }
+  }
+);
+
+impl WryDownloadDelegate {
+  pub fn new(
+    download_started_handler: Option<Box<dyn FnMut(String, &mut PathBuf) -> bool + 'static>>,
+    download_completed_handler: Option<Rc<dyn Fn(String, Option<PathBuf>, bool) + 'static>>,
+
+--- src/wkwebview/class/wry_navigation_delegate.rs ---
+// Copyright 2020-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::sync::{Arc, Mutex};
+
+use objc2::{define_class, msg_send, rc::Retained, runtime::NSObject, MainThreadOnly};
+use objc2_foundation::{MainThreadMarker, NSObjectProtocol};
+use objc2_web_kit::{
+  WKDownload, WKNavigation, WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate,
+  WKNavigationResponse, WKNavigationResponsePolicy,
+};
+
+#[cfg(target_os = "ios")]
+use crate::wkwebview::ios::WKWebView::WKWebView;
+#[cfg(target_os = "macos")]
+use objc2_web_kit::WKWebView;
+
+use crate::{
+  url_from_webview,
+  wkwebview::{
+    download::{navigation_download_action, navigation_download_response},
+    navigation::{
+      did_commit_navigation, did_finish_navigation, navigation_policy, navigation_policy_response,
+      web_content_process_did_terminate,
+    },
+  },
+  PageLoadEvent, WryWebView,
+};
+
+use super::wry_download_delegate::WryDownloadDelegate;
+
+pub struct WryNavigationDelegateIvars {
+  pub pending_scripts: Arc<Mutex<Option<Vec<String>>>>,
+  pub has_download_handler: bool,
+  pub navigation_policy_function: Box<dyn Fn(String) -> bool>,
+  pub download_delegate: Option<Retained<WryDownloadDelegate>>,
+  pub on_page_load_handler: Option<Box<dyn Fn(PageLoadEvent)>>,
+  pub on_web_content_process_terminate_handler: Option<Box<dyn Fn()>>,
+}
+
+define_class!(
+  #[unsafe(super(NSObject))]
+  #[thread_kind = MainThreadOnly]
+  #[ivars = WryNavigationDelegateIvars]
+  pub struct WryNavigationDelegate;
+
+  unsafe impl NSObjectProtocol for WryNavigationDelegate {}
+
+  unsafe impl WKNavigationDelegate for WryNavigationDelegate {
+    #[unsafe(method(webView:decidePolicyForNavigationAction:decisionHandler:))]
+    fn navigation_policy(
+      &self,
+      webview: &WKWebView,
+      action: &WKNavigationAction,
+
+--- src/wkwebview/class/wry_web_view_delegate.rs ---
+// Copyright 2020-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{ffi::CStr, panic::AssertUnwindSafe};
+
+use http::Request;
+use objc2::{
+  define_class, msg_send,
+  rc::Retained,
+  runtime::{NSObject, ProtocolObject},
+  DeclaredClass, MainThreadOnly,
+};
+use objc2_foundation::{ns_string, MainThreadMarker, NSObjectProtocol, NSString};
+use objc2_web_kit::{WKScriptMessage, WKScriptMessageHandler, WKUserContentController};
+
+pub const IPC_MESSAGE_HANDLER_NAME: &str = "ipc";
+
+pub struct WryWebViewDelegateIvars {
+  pub controller: Retained<WKUserContentController>,
+  pub ipc_handler: Box<dyn Fn(Request<String>)>,
+}
+
+define_class!(
+  #[unsafe(super(NSObject))]
+  #[thread_kind = MainThreadOnly]
+  #[ivars = WryWebViewDelegateIvars]
+  pub struct WryWebViewDelegate;
+
+  unsafe impl NSObjectProtocol for WryWebViewDelegate {}
+
+  unsafe impl WKScriptMessageHandler for WryWebViewDelegate {
+    // Function for ipc handler
+    #[unsafe(method(userContentController:didReceiveScriptMessage:))]
+    fn did_receive(
+      this: &WryWebViewDelegate,
+      _controller: &WKUserContentController,
+      msg: &WKScriptMessage,
+    ) {
+      // Safety: objc runtime calls are unsafe
+      unsafe {
+        #[cfg(feature = "tracing")]
+        let _span = tracing::info_span!(parent: None, "wry::ipc::handle").entered();
+
+        let ipc_handler = &this.ivars().ipc_handler;
+        let body = msg.body();
+        if let Ok(body) = body.downcast::<NSString>() {
+          let js_utf8 = body.UTF8String();
+
+          let frame_info = msg.frameInfo();
+          let request = frame_info.request();
+          let url = request.URL().unwrap();
+          let absolute_url = url.absoluteString().unwrap();
+          let url_utf8 = absolute_url.UTF8String();
+
+
+--- src/wkwebview/class/wry_web_view_parent.rs ---
+// Copyright 2020-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+#[cfg(target_os = "macos")]
+use objc2::DefinedClass;
+use objc2::{define_class, msg_send, rc::Retained, MainThreadOnly};
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{NSApplication, NSEvent, NSView, NSWindow, NSWindowButton};
+use objc2_foundation::MainThreadMarker;
+#[cfg(target_os = "macos")]
+use objc2_foundation::NSRect;
+#[cfg(target_os = "ios")]
+use objc2_ui_kit::UIView as NSView;
+
+pub struct WryWebViewParentIvars {
+  #[cfg(target_os = "macos")]
+  traffic_light_inset: std::cell::Cell<Option<(f64, f64)>>,
+}
+
+define_class!(
+  #[unsafe(super(NSView))]
+  #[ivars = WryWebViewParentIvars]
+  pub struct WryWebViewParent;
+
+  /// Overridden NSView methods.
+  impl WryWebViewParent {
+    #[cfg(target_os = "macos")]
+    #[unsafe(method(keyDown:))]
+    fn key_down(&self, event: &NSEvent) {
+      let mtm = MainThreadMarker::new().unwrap();
+      let app = NSApplication::sharedApplication(mtm);
+      unsafe {
+        if let Some(menu) = app.mainMenu() {
+          menu.performKeyEquivalent(event);
+        }
+      }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[unsafe(method(drawRect:))]
+    fn draw(&self, _dirty_rect: NSRect) {
+      if let Some((x, y)) = self.ivars().traffic_light_inset.get() {
+        unsafe { inset_traffic_lights(&self.window().unwrap(), x, y) };
+      }
+    }
+  }
+);
+
+impl WryWebViewParent {
+  #[allow(dead_code)]
+  pub fn new(mtm: MainThreadMarker) -> Retained<Self> {
+    let delegate = WryWebViewParent::alloc(mtm).set_ivars(WryWebViewParentIvars {
+      #[cfg(target_os = "macos")]
+      traffic_light_inset: Default::default(),
+
+--- src/wkwebview/class/wry_web_view_ui_delegate.rs ---
+// Copyright 2020-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+#[cfg(target_os = "macos")]
+use std::{cell::RefCell, ptr::null_mut, rc::Rc};
+
+use block2::Block;
+use objc2::{
+  define_class, msg_send, rc::Retained, runtime::NSObject, DefinedClass, MainThreadOnly,
+};
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{NSModalResponse, NSModalResponseOK, NSOpenPanel, NSWindowDelegate};
+use objc2_foundation::{MainThreadMarker, NSObjectProtocol};
+#[cfg(target_os = "macos")]
+use objc2_foundation::{NSArray, NSURL};
+
+#[cfg(target_os = "macos")]
+use objc2_web_kit::WKOpenPanelParameters;
+use objc2_web_kit::{
+  WKFrameInfo, WKMediaCaptureType, WKPermissionDecision, WKSecurityOrigin, WKUIDelegate,
+};
+
+use crate::{NewWindowFeatures, NewWindowResponse, PermissionKind, PermissionResponse, WryWebView};
+
+#[cfg(target_os = "macos")]
+struct NewWindow {
+  #[allow(dead_code)]
+  ns_window: Retained<objc2_app_kit::NSWindow>,
+  #[allow(dead_code)]
+  webview: Retained<objc2_web_kit::WKWebView>,
+  #[allow(dead_code)]
+  delegate: Retained<WryNSWindowDelegate>,
+}
+
+// SAFETY: we are not using the new window at all, just dropping it on another thread
+#[cfg(target_os = "macos")]
+unsafe impl Send for NewWindow {}
+
+#[cfg(target_os = "macos")]
+impl Drop for NewWindow {
+  fn drop(&mut self) {
+    unsafe {
+      self.webview.removeFromSuperview();
+    }
+  }
+}
+
+#[cfg(target_os = "macos")]
+struct WryNSWindowDelegateIvars {
+  on_close: Box<dyn Fn()>,
+}
+
+#[cfg(target_os = "macos")]
+define_class!(
+
+--- src/wkwebview/class/wry_web_view.rs ---
+// Copyright 2020-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{collections::HashMap, sync::Mutex};
+
+#[cfg(target_os = "macos")]
+use objc2::runtime::ProtocolObject;
+use objc2::{define_class, rc::Retained, runtime::Bool, DeclaredClass};
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{NSDraggingDestination, NSEvent};
+use objc2_foundation::{NSObjectProtocol, NSUUID};
+
+#[cfg(target_os = "ios")]
+use crate::wkwebview::ios::WKWebView::WKWebView;
+#[cfg(target_os = "macos")]
+use crate::{
+  wkwebview::{drag_drop, synthetic_mouse_events},
+  DragDropEvent,
+};
+#[cfg(target_os = "ios")]
+use objc2_ui_kit::UIEvent as NSEvent;
+#[cfg(target_os = "macos")]
+use objc2_web_kit::WKWebView;
+
+pub struct WryWebViewIvars {
+  pub(crate) is_child: bool,
+  #[cfg(target_os = "macos")]
+  pub(crate) drag_drop_handler: Box<dyn Fn(DragDropEvent) -> bool>,
+  #[cfg(target_os = "macos")]
+  pub(crate) accept_first_mouse: objc2::runtime::Bool,
+  #[cfg(target_os = "ios")]
+  pub(crate) input_accessory_view_builder: Option<Box<crate::InputAccessoryViewBuilder>>,
+  pub(crate) custom_protocol_task_ids: Mutex<HashMap<usize, Retained<NSUUID>>>,
+}
+
+define_class!(
+  #[unsafe(super(WKWebView))]
+  #[ivars = WryWebViewIvars]
+  pub struct WryWebView;
+
+  /// Overridden NSView methods.
+  impl WryWebView {
+    #[unsafe(method(performKeyEquivalent:))]
+    fn perform_key_equivalent(&self, event: &NSEvent) -> Bool {
+      // This is a temporary workaround for https://github.com/tauri-apps/tauri/issues/9426
+      // FIXME: When the webview is a child webview, performKeyEquivalent always return YES
+      // and stop propagating the event to the window, hence the menu shortcut won't be
+      // triggered. However, overriding this method also means the cmd+key event won't be
+      // handled in webview, which means the key cannot be listened by JavaScript.
+      if self.ivars().is_child {
+        Bool::NO
+      } else {
+        unsafe { objc2::msg_send![super(self), performKeyEquivalent: event] }
+      }
+
+--- src/wkwebview/drag_drop.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{ffi::CStr, path::PathBuf};
+
+use objc2::{
+  runtime::{Bool, ProtocolObject},
+  DeclaredClass,
+};
+use objc2_app_kit::{NSDragOperation, NSDraggingInfo, NSFilenamesPboardType};
+use objc2_foundation::{NSArray, NSPoint, NSRect, NSString};
+
+use crate::DragDropEvent;
+
+use super::WryWebView;
+
+pub(crate) unsafe fn collect_paths(drag_info: &ProtocolObject<dyn NSDraggingInfo>) -> Vec<PathBuf> {
+  let pb = drag_info.draggingPasteboard();
+  let mut drag_drop_paths = Vec::new();
+  let types = NSArray::arrayWithObject(NSFilenamesPboardType);
+
+  if pb.availableTypeFromArray(&types).is_some() {
+    let paths = pb.propertyListForType(NSFilenamesPboardType).unwrap();
+    let paths = paths.downcast::<NSArray>().unwrap();
+    for path in paths {
+      let path = path.downcast::<NSString>().unwrap();
+      let path = CStr::from_ptr(path.UTF8String()).to_string_lossy();
+      drag_drop_paths.push(PathBuf::from(path.into_owned()));
+    }
+  }
+  drag_drop_paths
+}
+
+pub(crate) fn dragging_entered(
+  this: &WryWebView,
+  drag_info: &ProtocolObject<dyn NSDraggingInfo>,
+) -> NSDragOperation {
+  let paths = unsafe { collect_paths(drag_info) };
+  let dl: NSPoint = unsafe { drag_info.draggingLocation() };
+  let frame: NSRect = this.frame();
+  let position = (dl.x as i32, (frame.size.height - dl.y) as i32);
+
+  let listener = &this.ivars().drag_drop_handler;
+  if !listener(DragDropEvent::Enter { paths, position }) {
+    // Reject the Wry file drop (invoke the OS default behaviour)
+    unsafe { objc2::msg_send![super(this), draggingEntered: drag_info] }
+  } else {
+    NSDragOperation::Copy
+  }
+}
+
+pub(crate) fn dragging_updated(
+  this: &WryWebView,
+  drag_info: &ProtocolObject<dyn NSDraggingInfo>,
+
+--- src/wkwebview/mod.rs ---
+// Copyright 2020-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+mod download;
+#[cfg(target_os = "macos")]
+mod drag_drop;
+mod navigation;
+#[cfg(feature = "mac-proxy")]
+mod proxy;
+#[cfg(target_os = "macos")]
+mod synthetic_mouse_events;
+mod util;
+
+#[cfg(target_os = "ios")]
+mod ios;
+
+mod class;
+pub use class::wry_web_view::WryWebView;
+#[cfg(target_os = "macos")]
+use class::wry_web_view_parent::WryWebViewParent;
+use class::{
+  document_title_changed_observer::*,
+  url_scheme_handler,
+  wry_download_delegate::WryDownloadDelegate,
+  wry_navigation_delegate::WryNavigationDelegate,
+  wry_web_view::WryWebViewIvars,
+  wry_web_view_delegate::{WryWebViewDelegate, IPC_MESSAGE_HANDLER_NAME},
+  wry_web_view_ui_delegate::WryWebViewUIDelegate,
+};
+
+use dpi::{LogicalPosition, LogicalSize};
+#[cfg(target_os = "macos")]
+use objc2::runtime::Bool;
+use objc2::{
+  rc::Retained,
+  runtime::{AnyObject, NSObject, ProtocolObject},
+  AllocAnyThread, DeclaredClass, MainThreadOnly, Message,
+};
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{NSApplication, NSAutoresizingMaskOptions, NSTitlebarSeparatorStyle, NSView};
+#[cfg(target_os = "macos")]
+use objc2_core_foundation::CGSize;
+use objc2_core_foundation::{CGPoint, CGRect};
+use objc2_foundation::{
+  ns_string, MainThreadMarker, NSArray, NSBundle, NSDate, NSError, NSHTTPCookie,
+  NSHTTPCookieDomain, NSHTTPCookieExpires, NSHTTPCookieMaximumAge, NSHTTPCookieName,
+  NSHTTPCookiePath, NSHTTPCookiePropertyKey, NSHTTPCookieSecure, NSHTTPCookieValue,
+  NSHTTPCookieVersion, NSJSONSerialization, NSMutableDictionary, NSMutableURLRequest, NSNumber,
+  NSObjectNSKeyValueCoding, NSObjectProtocol, NSString, NSUTF8StringEncoding, NSURL, NSUUID,
+};
+#[cfg(target_os = "ios")]
+use objc2_ui_kit::{UIScrollView, UIViewAutoresizing};
+
+#[cfg(target_os = "macos")]
+
+--- src/wkwebview/proxy.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use objc2_foundation::NSObject;
+use std::ffi::{c_char, CString};
+
+use crate::{proxy::ProxyEndpoint, Error};
+
+#[allow(non_camel_case_types)]
+pub type nw_endpoint_t = *mut NSObject;
+#[allow(non_camel_case_types)]
+pub type nw_protocol_options_t = *mut NSObject;
+#[allow(non_camel_case_types)]
+pub type nw_proxy_config_t = *mut NSObject;
+
+#[link(name = "Network", kind = "framework")]
+extern "C" {
+  fn nw_endpoint_create_host(host: *const c_char, port: *const c_char) -> nw_endpoint_t;
+  pub fn nw_proxy_config_create_socksv5(proxy_endpoint: nw_endpoint_t) -> nw_proxy_config_t;
+  pub fn nw_proxy_config_create_http_connect(
+    proxy_endpoint: nw_endpoint_t,
+    proxy_tls_options: nw_protocol_options_t,
+  ) -> nw_proxy_config_t;
+}
+
+impl TryFrom<ProxyEndpoint> for nw_endpoint_t {
+  type Error = Error;
+  fn try_from(endpoint: ProxyEndpoint) -> Result<Self, Error> {
+    unsafe {
+      let endpoint_host =
+        CString::new(endpoint.host).map_err(|_| Error::ProxyEndpointCreationFailed)?;
+      let endpoint_port =
+        CString::new(endpoint.port).map_err(|_| Error::ProxyEndpointCreationFailed)?;
+      let endpoint = nw_endpoint_create_host(endpoint_host.as_ptr(), endpoint_port.as_ptr());
+
+      if endpoint.is_null() {
+        Err(Error::ProxyEndpointCreationFailed)
+      } else {
+        Ok(endpoint)
+      }
+    }
+  }
+}
+
+
+--- src/wkwebview/util.rs ---
+// Copyright 2020-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use objc2_foundation::NSProcessInfo;
+
+pub fn operating_system_version() -> (isize, isize, isize) {
+  let process_info = NSProcessInfo::processInfo();
+  let version = process_info.operatingSystemVersion();
+  (
+    version.majorVersion,
+    version.minorVersion,
+    version.patchVersion,
+  )
+}

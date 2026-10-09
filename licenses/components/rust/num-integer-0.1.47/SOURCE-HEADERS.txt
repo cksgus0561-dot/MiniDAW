@@ -1,0 +1,56 @@
+--- src/lib.rs ---
+// Copyright 2013-2014 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! Integer trait and functions.
+//!
+//! ## Compatibility
+//!
+//! The `num-integer` crate is tested for rustc 1.31 and greater.
+
+#![doc(html_root_url = "https://docs.rs/num-integer/0.1")]
+#![no_std]
+
+use core::mem;
+use core::ops::Add;
+
+use num_traits::{Num, Signed, Zero};
+
+mod roots;
+pub use crate::roots::Roots;
+pub use crate::roots::{cbrt, nth_root, sqrt};
+
+mod average;
+pub use crate::average::Average;
+pub use crate::average::{average_ceil, average_floor};
+
+pub trait Integer: Sized + Num + PartialOrd + Ord + Eq {
+    /// Floored integer division.
+    ///
+    /// # Examples
+    ///
+    /// ~~~
+    /// # use num_integer::Integer;
+    /// assert!(( 8).div_floor(& 3) ==  2);
+    /// assert!(( 8).div_floor(&-3) == -3);
+    /// assert!((-8).div_floor(& 3) == -3);
+    /// assert!((-8).div_floor(&-3) ==  2);
+    ///
+    /// assert!(( 1).div_floor(& 2) ==  0);
+    /// assert!(( 1).div_floor(&-2) == -1);
+    /// assert!((-1).div_floor(& 2) == -1);
+    /// assert!((-1).div_floor(&-2) ==  0);
+    /// ~~~
+    fn div_floor(&self, other: &Self) -> Self;
+
+    /// Floored integer modulo, satisfying:
+    ///
+    /// ~~~
+    /// # use num_integer::Integer;

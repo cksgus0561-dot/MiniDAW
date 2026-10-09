@@ -1,0 +1,564 @@
+--- build.rs ---
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{
+    fs::create_dir_all,
+    path::{Path, PathBuf},
+};
+
+use tauri_utils::acl::manifest::PermissionFile;
+
+#[path = "src/scope.rs"]
+#[allow(dead_code)]
+mod scope;
+
+/// FS scope entry.
+#[derive(schemars::JsonSchema)]
+#[serde(untagged)]
+#[allow(unused)]
+enum FsScopeEntry {
+    /// A path that can be accessed by the webview when using the fs APIs.
+    /// FS scope path pattern.
+    ///
+    /// The pattern can start with a variable that resolves to a system base directory.
+    /// The variables are: `$AUDIO`, `$CACHE`, `$CONFIG`, `$DATA`, `$LOCALDATA`, `$DESKTOP`,
+    /// `$DOCUMENT`, `$DOWNLOAD`, `$EXE`, `$FONT`, `$HOME`, `$PICTURE`, `$PUBLIC`, `$RUNTIME`,
+    /// `$TEMPLATE`, `$VIDEO`, `$RESOURCE`, `$APP`, `$LOG`, `$TEMP`, `$APPCONFIG`, `$APPDATA`,
+    /// `$APPLOCALDATA`, `$APPCACHE`, `$APPLOG`.
+    Value(PathBuf),
+    Object {
+        /// A path that can be accessed by the webview when using the fs APIs.
+        ///
+        /// The pattern can start with a variable that resolves to a system base directory.
+        /// The variables are: `$AUDIO`, `$CACHE`, `$CONFIG`, `$DATA`, `$LOCALDATA`, `$DESKTOP`,
+        /// `$DOCUMENT`, `$DOWNLOAD`, `$EXE`, `$FONT`, `$HOME`, `$PICTURE`, `$PUBLIC`, `$RUNTIME`,
+        /// `$TEMPLATE`, `$VIDEO`, `$RESOURCE`, `$APP`, `$LOG`, `$TEMP`, `$APPCONFIG`, `$APPDATA`,
+        /// `$APPLOCALDATA`, `$APPCACHE`, `$APPLOG`.
+        path: PathBuf,
+    },
+}
+
+// Ensure `FsScopeEntry` and `scope::EntryRaw` is kept in sync
+fn _f() {
+    match scope::EntryRaw::Value(PathBuf::new()) {
+        scope::EntryRaw::Value(path) => FsScopeEntry::Value(path),
+        scope::EntryRaw::Object { path } => FsScopeEntry::Object { path },
+    };
+    match FsScopeEntry::Value(PathBuf::new()) {
+        FsScopeEntry::Value(path) => scope::EntryRaw::Value(path),
+        FsScopeEntry::Object { path } => scope::EntryRaw::Object { path },
+    };
+}
+
+const BASE_DIR_VARS: &[&str] = &[
+    "AUDIO",
+
+--- src/android.rs ---
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use serde::de::DeserializeOwned;
+use tauri::{AppHandle, Runtime, plugin::PluginApi};
+
+use crate::{FilePath, OpenOptions, models::*};
+
+const PLUGIN_IDENTIFIER: &str = "com.plugin.fs";
+
+/// Access to the file system APIs on Android.
+///
+/// In addition to regular file system paths, it can read `content://` URIs
+/// and Android asset paths by resolving them with the Android plugin implementation.
+///
+/// Retrieved with [`crate::FsExt::fs`].
+pub struct Fs<R: Runtime>(tauri::plugin::PluginHandle<R>);
+
+pub fn init<R: Runtime, C: DeserializeOwned>(
+    _app: &AppHandle<R>,
+    api: PluginApi<R, C>,
+) -> crate::Result<Fs<R>> {
+    let handle = api
+        .register_android_plugin(PLUGIN_IDENTIFIER, "FsPlugin")
+        .unwrap();
+    Ok(Fs(handle))
+}
+
+impl<R: Runtime> Fs<R> {
+    /// Open a file.
+    ///
+    /// # Platform-specific
+    ///
+    /// - **iOS**: This method will automatically start accessing a security-scoped resource if the path is a file URL.
+    ///   You must call `stop_accessing_security_scoped_resource` when you're done accessing the file.
+    pub fn open<P: Into<FilePath>>(
+        &self,
+        path: P,
+        opts: OpenOptions,
+    ) -> std::io::Result<std::fs::File> {
+        match path.into() {
+            FilePath::Url(u) => self
+                .resolve_content_uri(u.to_string(), opts.android_mode())
+                .map_err(|e| std::io::Error::other(format!("failed to open file: {e}"))),
+            FilePath::Path(p) => {
+                // tauri::utils::platform::resources_dir() returns a PathBuf with the Android asset URI prefix
+                // we must resolve that file with the Android API
+                if p.strip_prefix(tauri::utils::platform::ANDROID_ASSET_PROTOCOL_URI_PREFIX)
+                    .is_ok()
+                {
+                    self.resolve_content_uri(p.to_string_lossy(), opts.android_mode())
+                        .map_err(|e| std::io::Error::other(format!("failed to open file: {e}")))
+                } else {
+                    std::fs::OpenOptions::from(opts).open(p)
+
+--- src/commands.rs ---
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// Copyright 2018-2023 the Deno authors.
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use serde::{Deserialize, Serialize, Serializer};
+use serde_repr::{Deserialize_repr, Serialize_repr};
+use tauri::{
+    Manager, Resource, ResourceId, Runtime, Webview,
+    ipc::{CommandScope, GlobalScope},
+    path::BaseDirectory,
+    utils::config::FsScope,
+};
+
+use std::{
+    borrow::Cow,
+    fs::File,
+    io::{BufRead, BufReader, Read, Write},
+    ops::{Deref, DerefMut},
+    path::{Path, PathBuf},
+    str::FromStr,
+    sync::Mutex,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use crate::{Error, SafeFilePath, scope::Entry};
+
+#[derive(Debug, thiserror::Error)]
+pub enum CommandError {
+    #[error(transparent)]
+    Anyhow(#[from] anyhow::Error),
+    #[error(transparent)]
+    Plugin(#[from] Error),
+    #[error(transparent)]
+    Tauri(#[from] tauri::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    UrlParseError(#[from] url::ParseError),
+    #[cfg(feature = "watch")]
+    #[error(transparent)]
+    Watcher(#[from] notify::Error),
+}
+
+impl From<String> for CommandError {
+    fn from(value: String) -> Self {
+        Self::Anyhow(anyhow::anyhow!(value))
+    }
+}
+
+impl From<&str> for CommandError {
+    fn from(value: &str) -> Self {
+        Self::Anyhow(anyhow::anyhow!(value.to_string()))
+
+--- src/config.rs ---
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Config {
+    /// Whether or not paths that contain components that start with a `.`
+    /// will require that `.` appears literally in the pattern; `*`, `?`, `**`,
+    /// or `[...]` will not match. This is useful because such files are
+    /// conventionally considered hidden on Unix systems and it might be
+    /// desirable to skip them when listing files.
+    ///
+    /// Defaults to `true` on Unix systems and `false` on Windows
+    // dotfiles are not supposed to be exposed by default on unix
+    pub require_literal_leading_dot: Option<bool>,
+}
+
+
+--- src/desktop.rs ---
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::path::PathBuf;
+
+use tauri::{AppHandle, Runtime};
+
+use crate::{FilePath, OpenOptions};
+
+/// Access to the file system APIs on desktop.
+///
+/// Retrieved with [`crate::FsExt::fs`].
+pub struct Fs<R: Runtime>(pub(crate) AppHandle<R>);
+
+fn path_or_err<P: Into<FilePath>>(p: P) -> std::io::Result<PathBuf> {
+    match p.into() {
+        FilePath::Path(p) => Ok(p),
+        FilePath::Url(u) if u.scheme() == "file" => u
+            .to_file_path()
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file URL")),
+        FilePath::Url(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "cannot use a URL to load files on desktop and iOS",
+        )),
+    }
+}
+
+impl<R: Runtime> Fs<R> {
+    /// Open a file.
+    ///
+    /// # Platform-specific
+    ///
+    /// - **iOS**: This method will automatically start accessing a security-scoped resource if the path is a file URL.
+    ///   You must call `stop_accessing_security_scoped_resource` when you're done accessing the file.
+    pub fn open<P: Into<FilePath>>(
+        &self,
+        path: P,
+        opts: OpenOptions,
+    ) -> std::io::Result<std::fs::File> {
+        let path = path_or_err(path)?;
+        std::fs::OpenOptions::from(opts).open(path)
+    }
+}
+
+
+--- src/error.rs ---
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::path::PathBuf;
+
+use serde::{Serialize, Serializer};
+
+/// Errors that can happen while using the file system plugin.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Error {
+    /// JSON serialization or deserialization error.
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    /// Error from the Tauri APIs, usually raised while resolving a path or a scope entry.
+    #[error(transparent)]
+    Tauri(#[from] tauri::Error),
+    /// Error from the underlying file system operation.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    /// The path is denied by the plugin scope or is not allowed by it.
+    #[error("forbidden path: {0}")]
+    PathForbidden(PathBuf),
+    /// Invalid glob pattern.
+    #[error("invalid glob pattern: {0}")]
+    GlobPattern(#[from] glob::PatternError),
+    /// Watcher error.
+    #[cfg(feature = "watch")]
+    #[error(transparent)]
+    Watch(#[from] notify::Error),
+    /// Error invoking the Android plugin implementation.
+    #[cfg(target_os = "android")]
+    #[error(transparent)]
+    PluginInvoke(#[from] tauri::plugin::mobile::PluginInvokeError),
+    /// The URL cannot be converted to a file system path.
+    #[error("URL is not a valid path")]
+    InvalidPathUrl,
+    /// The path is not safe to use, for instance because it traverses parent directories.
+    #[error("Unsafe PathBuf: {0}")]
+    UnsafePathBuf(&'static str),
+}
+
+impl Serialize for Error {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.to_string().as_ref())
+    }
+}
+
+
+--- src/file_path.rs ---
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{
+    convert::Infallible,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
+
+use serde::Serialize;
+use tauri::path::SafePathBuf;
+
+use crate::{Error, Result};
+
+/// Represents either a filesystem path or a URI pointing to a file
+/// such as `file://` URIs or Android `content://` URIs.
+#[derive(Debug, Serialize, Clone)]
+#[serde(untagged)]
+pub enum FilePath {
+    /// `file://` URIs or Android `content://` URIs.
+    Url(url::Url),
+    /// Regular [`PathBuf`]
+    Path(PathBuf),
+}
+
+/// Represents either a safe filesystem path or a URI pointing to a file
+/// such as `file://` URIs or Android `content://` URIs.
+#[derive(Debug, Clone, Serialize)]
+pub enum SafeFilePath {
+    /// `file://` URIs or Android `content://` URIs.
+    Url(url::Url),
+    /// Safe [`PathBuf`], see [`SafePathBuf``].
+    Path(SafePathBuf),
+}
+
+impl FilePath {
+    /// Get a reference to the contained [`Path`] if the variant is [`FilePath::Path`].
+    ///
+    /// Use [`FilePath::into_path`] to try to convert the [`FilePath::Url`] variant as well.
+    #[inline]
+    pub fn as_path(&self) -> Option<&Path> {
+        match self {
+            Self::Url(_) => None,
+            Self::Path(p) => Some(p),
+        }
+    }
+
+    /// Try to convert into [`PathBuf`] if possible.
+    ///
+    /// This calls [`Url::to_file_path`](url::Url::to_file_path) if the variant is [`FilePath::Url`],
+    /// otherwise returns the contained [PathBuf] as is.
+    #[inline]
+    pub fn into_path(self) -> Result<PathBuf> {
+        match self {
+
+--- src/ios.rs ---
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use serde::de::DeserializeOwned;
+use tauri::{AppHandle, Runtime, plugin::PluginApi};
+
+use crate::{FilePath, OpenOptions};
+
+/// Access to the file system APIs on iOS.
+///
+/// Opening a `file://` URL automatically starts accessing the matching security-scoped resource.
+///
+/// Retrieved with [`crate::FsExt::fs`].
+pub struct Fs<R: Runtime> {
+    _phantom: std::marker::PhantomData<fn() -> R>,
+}
+
+pub fn init<R: Runtime, C: DeserializeOwned>(
+    _app: &AppHandle<R>,
+    _api: PluginApi<R, C>,
+) -> crate::Result<Fs<R>> {
+    Ok(Fs {
+        _phantom: std::marker::PhantomData,
+    })
+}
+
+impl<R: Runtime> Fs<R> {
+    /// Open a file.
+    ///
+    /// # Platform-specific
+    ///
+    /// - **iOS**: This method will automatically start accessing a security-scoped resource if the path is a file URL.
+    ///   You must call [`Self::stop_accessing_security_scoped_resource`] when you're done accessing the file.
+    pub fn open<P: Into<FilePath>>(
+        &self,
+        path: P,
+        opts: OpenOptions,
+    ) -> std::io::Result<std::fs::File> {
+        use objc2_foundation::{NSString, NSURL};
+
+        match path.into() {
+            FilePath::Url(url) if url.scheme() == "file" => {
+                // Handle security-scoped URLs on iOS
+                let url_string = url.as_str();
+                let url_nsstring = NSString::from_str(url_string);
+
+                // Create NSURL from the URL string
+                // URLWithString may return None for invalid URLs, but file:// URLs should be valid
+                let ns_url = NSURL::URLWithString(&url_nsstring);
+                if let Some(ns_url) = ns_url {
+                    // Start accessing the security-scoped resource
+                    // This is required for files outside the app's sandbox (e.g., from file picker)
+                    // Note: We don't call stopAccessingSecurityScopedResource here because
+                    // the file handle needs to remain accessible while the File is in use.
+
+--- src/lib.rs ---
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! Access the file system.
+//!
+//! ## Cargo features
+//!
+//! - **watch**: Enables the `watch` command backed by [`notify`](http://crates.io/crates/notify).
+
+// TODO(v3): consider redesign the API to implement automatic stopAccessingSecurityScopedResource on iOS
+// this likely requires returning a handle to a resource so we can impl Drop for it
+
+#![doc(
+    html_logo_url = "https://github.com/tauri-apps/tauri/raw/dev/app-icon.png",
+    html_favicon_url = "https://github.com/tauri-apps/tauri/raw/dev/app-icon.png"
+)]
+
+use std::io::Read;
+#[cfg(target_os = "ios")]
+use std::sync::Mutex;
+
+use serde::Deserialize;
+use tauri::{
+    AppHandle, DragDropEvent, Manager, RunEvent, Runtime, WindowEvent,
+    ipc::ScopeObject,
+    plugin::{Builder as PluginBuilder, TauriPlugin},
+    utils::{acl::Value, config::FsScope},
+};
+
+#[cfg(target_os = "android")]
+mod android;
+mod commands;
+mod config;
+#[cfg(desktop)]
+mod desktop;
+mod error;
+mod file_path;
+#[cfg(target_os = "ios")]
+mod ios;
+#[cfg(target_os = "android")]
+mod models;
+mod scope;
+#[cfg(feature = "watch")]
+mod watcher;
+
+#[cfg(target_os = "android")]
+pub use android::Fs;
+#[cfg(desktop)]
+pub use desktop::Fs;
+#[cfg(target_os = "ios")]
+pub use ios::Fs;
+
+pub use error::Error;
+
+
+--- src/models.rs ---
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetFileDescriptorPayload {
+    pub uri: String,
+    pub mode: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetFileDescriptorResponse {
+    pub fd: Option<i32>,
+}
+
+
+--- src/scope.rs ---
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::path::PathBuf;
+
+use serde::Deserialize;
+
+#[derive(Debug)]
+pub struct Entry {
+    pub path: Option<PathBuf>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub(crate) enum EntryRaw {
+    Value(PathBuf),
+    Object { path: PathBuf },
+}
+
+
+--- src/watcher.rs ---
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+use notify_debouncer_full::{DebouncedEvent, Debouncer, RecommendedCache, new_debouncer};
+use serde::Deserialize;
+use tauri::{
+    Manager, Resource, ResourceId, Runtime, Webview,
+    ipc::{Channel, CommandScope, GlobalScope},
+    path::BaseDirectory,
+};
+
+use std::time::Duration;
+
+use crate::{
+    SafeFilePath,
+    commands::{CommandResult, resolve_path},
+    scope::Entry,
+};
+
+#[allow(unused)]
+enum WatcherKind {
+    Debouncer(Debouncer<RecommendedWatcher, RecommendedCache>),
+    Watcher(RecommendedWatcher),
+}
+
+impl Resource for WatcherKind {}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WatchOptions {
+    base_dir: Option<BaseDirectory>,
+    #[serde(default)]
+    recursive: bool,
+    delay_ms: Option<u64>,
+}
+
+#[tauri::command]
+pub fn watch<R: Runtime>(
+    webview: Webview<R>,
+    paths: Vec<SafeFilePath>,
+    options: WatchOptions,
+    on_event: Channel<notify::Event>,
+    global_scope: GlobalScope<Entry>,
+    command_scope: CommandScope<Entry>,
+) -> CommandResult<ResourceId> {
+    let resolved_paths = paths
+        .into_iter()
+        .map(|path| {
+            resolve_path(
+                "watch",
+                &webview,
+                &global_scope,
+                &command_scope,

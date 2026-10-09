@@ -1,0 +1,142 @@
+--- src/core_lazy.rs ---
+// Copyright 2016 lazy-static.rs Developers
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// https://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// https://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+extern crate spin;
+
+use self::spin::Once;
+
+pub struct Lazy<T: Sync>(Once<T>);
+
+impl<T: Sync> Lazy<T> {
+    pub const INIT: Self = Lazy(Once::INIT);
+
+    #[inline(always)]
+    pub fn get<F>(&'static self, builder: F) -> &T
+    where
+        F: FnOnce() -> T,
+    {
+        self.0.call_once(builder)
+    }
+}
+
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __lazy_static_create {
+    ($NAME:ident, $T:ty) => {
+        static $NAME: $crate::lazy::Lazy<$T> = $crate::lazy::Lazy::INIT;
+    };
+}
+
+
+--- src/inline_lazy.rs ---
+// Copyright 2016 lazy-static.rs Developers
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// https://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// https://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+extern crate core;
+extern crate std;
+
+use self::std::cell::Cell;
+use self::std::mem::MaybeUninit;
+use self::std::prelude::v1::*;
+use self::std::sync::Once;
+#[allow(deprecated)]
+pub use self::std::sync::ONCE_INIT;
+
+#[allow(dead_code)] // Used in macros
+pub struct Lazy<T: Sync>(Cell<MaybeUninit<T>>, Once);
+
+impl<T: Sync> Lazy<T> {
+    #[allow(deprecated)]
+    pub const INIT: Self = Lazy(Cell::new(MaybeUninit::uninit()), ONCE_INIT);
+
+    #[inline(always)]
+    pub fn get<F>(&'static self, f: F) -> &T
+    where
+        F: FnOnce() -> T,
+    {
+        self.1.call_once(|| {
+            self.0.set(MaybeUninit::new(f()));
+        });
+
+        // `self.0` is guaranteed to be initialized by this point
+        // The `Once` will catch and propagate panics
+        unsafe { &*(*self.0.as_ptr()).as_ptr() }
+    }
+}
+
+unsafe impl<T: Sync> Sync for Lazy<T> {}
+
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __lazy_static_create {
+    ($NAME:ident, $T:ty) => {
+        static $NAME: $crate::lazy::Lazy<$T> = $crate::lazy::Lazy::INIT;
+    };
+}
+
+
+--- src/lib.rs ---
+// Copyright 2016 lazy-static.rs Developers
+//
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// https://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// https://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+/*!
+<div class="warning">
+
+This crate has been replaced by the [`LazyLock`] type, which is stable since Rust 1.80.0 with a slightly different syntax. Barring breakages and security fixes, this crate will no longer be updated.
+
+[`LazyLock`]: https://doc.rust-lang.org/std/sync/struct.LazyLock.html
+
+</div>
+
+A macro for declaring lazily evaluated statics.
+
+Using this macro, it is possible to have `static`s that require code to be
+executed at runtime in order to be initialized.
+This includes anything requiring heap allocations, like vectors or hash maps,
+as well as anything that requires function calls to be computed.
+
+# Syntax
+
+```ignore
+lazy_static! {
+    [pub] static ref NAME_1: TYPE_1 = EXPR_1;
+    [pub] static ref NAME_2: TYPE_2 = EXPR_2;
+    ...
+    [pub] static ref NAME_N: TYPE_N = EXPR_N;
+}
+```
+
+Attributes (including doc comments) are supported as well:
+
+```rust
+use lazy_static::lazy_static;
+
+# fn main() {
+lazy_static! {
+    /// This is an example of using doc comment attributes
+    static ref EXAMPLE: u8 = 42;
+}
+# }
+```
+
+# Semantics
+
+For a given `static ref NAME: TYPE = EXPR;`, the macro generates a unique type that
+implements `Deref<TYPE>` and stores it in a static with name `NAME`. (Attributes end up
+attaching to this type.)
+
+On first deref, `EXPR` gets evaluated and stored internally, such that all further derefs
+can return a reference to the same object. Note that this can lead to deadlocks

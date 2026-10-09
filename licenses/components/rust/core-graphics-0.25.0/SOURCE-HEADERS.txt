@@ -1,0 +1,606 @@
+--- src/base.rs ---
+// Copyright 2013 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+// this file defines CGFloat, as well as stubbed data types.
+
+#![allow(non_camel_case_types)]
+#![allow(non_upper_case_globals)]
+
+pub use core_graphics_types::base::*;
+
+pub const kCGImageAlphaNone: u32 = 0;
+pub const kCGImageAlphaPremultipliedLast: u32 = 1;
+pub const kCGImageAlphaPremultipliedFirst: u32 = 2;
+pub const kCGImageAlphaLast: u32 = 3;
+pub const kCGImageAlphaFirst: u32 = 4;
+pub const kCGImageAlphaNoneSkipLast: u32 = 5;
+pub const kCGImageAlphaNoneSkipFirst: u32 = 6;
+
+pub const kCGBitmapByteOrderDefault: u32 = 0 << 12;
+pub const kCGBitmapByteOrder16Little: u32 = 1 << 12;
+pub const kCGBitmapByteOrder32Little: u32 = 2 << 12;
+pub const kCGBitmapByteOrder16Big: u32 = 3 << 12;
+pub const kCGBitmapByteOrder32Big: u32 = 4 << 12;
+
+pub const kCGRenderingIntentDefault: u32 = 0;
+pub const kCGRenderingIntentAbsoluteColorimetric: u32 = 1;
+pub const kCGRenderingIntentRelativeColorimetric: u32 = 2;
+pub const kCGRenderingIntentPerceptual: u32 = 3;
+pub const kCGRenderingIntentSaturation: u32 = 4;
+
+#[cfg(target_endian = "big")]
+pub const kCGBitmapByteOrder16Host: u32 = kCGBitmapByteOrder16Big;
+#[cfg(target_endian = "big")]
+pub const kCGBitmapByteOrder32Host: u32 = kCGBitmapByteOrder32Big;
+
+#[cfg(target_endian = "little")]
+pub const kCGBitmapByteOrder16Host: u32 = kCGBitmapByteOrder16Little;
+#[cfg(target_endian = "little")]
+pub const kCGBitmapByteOrder32Host: u32 = kCGBitmapByteOrder32Little;
+
+
+--- src/color_space.rs ---
+// Copyright 2015 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use core_foundation::base::{CFRelease, CFRetain, CFTypeID};
+use core_foundation::string::CFStringRef;
+use foreign_types::{foreign_type, ForeignType};
+
+foreign_type! {
+    #[doc(hidden)]
+    pub unsafe type CGColorSpace {
+        type CType = crate::sys::CGColorSpace;
+        fn drop = |p| CFRelease(p as *mut _);
+        fn clone = |p| CFRetain(p as *const _) as *mut _;
+    }
+}
+
+impl CGColorSpace {
+    pub fn type_id() -> CFTypeID {
+        unsafe { CGColorSpaceGetTypeID() }
+    }
+
+    pub fn create_with_name(name: CFStringRef) -> Option<CGColorSpace> {
+        unsafe {
+            let p = CGColorSpaceCreateWithName(name);
+            if !p.is_null() {
+                Some(CGColorSpace::from_ptr(p))
+            } else {
+                None
+            }
+        }
+    }
+
+    #[inline]
+    pub fn create_device_rgb() -> CGColorSpace {
+        unsafe {
+            let result = CGColorSpaceCreateDeviceRGB();
+            CGColorSpace::from_ptr(result)
+        }
+    }
+
+    #[inline]
+    pub fn create_device_gray() -> CGColorSpace {
+        unsafe {
+            let result = CGColorSpaceCreateDeviceGray();
+            CGColorSpace::from_ptr(result)
+        }
+    }
+}
+
+
+--- src/color.rs ---
+// Copyright 2013 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use super::sys::CGColorRef;
+use crate::base::CGFloat;
+use core_foundation::base::CFTypeID;
+use core_foundation::base::TCFType;
+use core_foundation::{declare_TCFType, impl_TCFType};
+
+pub use super::sys::CGColorRef as SysCGColorRef;
+
+declare_TCFType! {
+    CGColor, CGColorRef
+}
+impl_TCFType!(CGColor, CGColorRef, CGColorGetTypeID);
+
+impl CGColor {
+    pub fn rgb(red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) -> Self {
+        unsafe {
+            let ptr = CGColorCreateGenericRGB(red, green, blue, alpha);
+            CGColor::wrap_under_create_rule(ptr)
+        }
+    }
+
+    #[cfg(feature = "catalina")]
+    pub fn srgb(red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) -> Self {
+        unsafe {
+            let ptr = CGColorCreateSRGB(red, green, blue, alpha);
+            CGColor::wrap_under_create_rule(ptr)
+        }
+    }
+}
+
+#[cfg_attr(feature = "link", link(name = "CoreGraphics", kind = "framework"))]
+extern "C" {
+    fn CGColorCreateGenericRGB(
+        red: CGFloat,
+        green: CGFloat,
+        blue: CGFloat,
+        alpha: CGFloat,
+    ) -> crate::sys::CGColorRef;
+
+    #[cfg(feature = "catalina")]
+    fn CGColorCreateSRGB(
+        red: CGFloat,
+        green: CGFloat,
+        blue: CGFloat,
+        alpha: CGFloat,
+    ) -> crate::sys::CGColorRef;
+
+--- src/context.rs ---
+// Copyright 2015 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::base::CGFloat;
+use crate::color::CGColor;
+use crate::color_space::CGColorSpace;
+use crate::font::{CGFont, CGGlyph};
+use crate::geometry::{CGPoint, CGSize};
+use crate::gradient::{CGGradient, CGGradientDrawingOptions};
+use crate::path::CGPathRef;
+use core::ffi::c_void;
+use core_foundation::base::{CFTypeID, TCFType};
+
+use crate::geometry::{CGAffineTransform, CGRect};
+use crate::image::CGImage;
+use foreign_types::{foreign_type, ForeignType, ForeignTypeRef};
+use std::cmp;
+use std::ptr;
+use std::slice;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub enum CGBlendMode {
+    Normal = 0,
+    Multiply,
+    Screen,
+    Overlay,
+    Darken,
+    Lighten,
+    ColorDodge,
+    ColorBurn,
+    SoftLight,
+    HardLight,
+    Difference,
+    Exclusion,
+    Hue,
+    Saturation,
+    Color,
+    Luminosity,
+    // 10.5 and up:
+    Clear,
+    Copy,
+    SourceIn,
+    SourceOut,
+    SourceAtop,
+    DestinationOver,
+    DestinationIn,
+    DestinationOut,
+    DestinationAtop,
+
+--- src/data_provider.rs ---
+// Copyright 2013 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use core_foundation::base::{CFRelease, CFRetain, CFTypeID, TCFType};
+use core_foundation::data::{CFData, CFDataRef};
+
+use core::ffi::c_void;
+use libc::off_t;
+use std::mem;
+use std::ptr;
+use std::sync::Arc;
+
+use foreign_types::{foreign_type, ForeignType, ForeignTypeRef};
+
+pub type CGDataProviderGetBytesCallback =
+    Option<unsafe extern "C" fn(*mut c_void, *mut c_void, usize) -> usize>;
+pub type CGDataProviderReleaseInfoCallback = Option<unsafe extern "C" fn(*mut c_void)>;
+pub type CGDataProviderRewindCallback = Option<unsafe extern "C" fn(*mut c_void)>;
+pub type CGDataProviderSkipBytesCallback = Option<unsafe extern "C" fn(*mut c_void, usize)>;
+pub type CGDataProviderSkipForwardCallback =
+    Option<unsafe extern "C" fn(*mut c_void, off_t) -> off_t>;
+
+pub type CGDataProviderGetBytePointerCallback =
+    Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>;
+pub type CGDataProviderGetBytesAtOffsetCallback =
+    Option<unsafe extern "C" fn(*mut c_void, *mut c_void, usize, usize)>;
+pub type CGDataProviderReleaseBytePointerCallback =
+    Option<unsafe extern "C" fn(*mut c_void, *const c_void)>;
+pub type CGDataProviderReleaseDataCallback =
+    Option<unsafe extern "C" fn(*mut c_void, *const c_void, usize)>;
+pub type CGDataProviderGetBytesAtPositionCallback =
+    Option<unsafe extern "C" fn(*mut c_void, *mut c_void, off_t, usize)>;
+
+foreign_type! {
+    #[doc(hidden)]
+    pub unsafe type CGDataProvider {
+        type CType = crate::sys::CGDataProvider;
+        fn drop = |cs| CFRelease(cs as *mut _);
+        fn clone = |p| CFRetain(p as *const _) as *mut _;
+    }
+}
+
+impl CGDataProvider {
+    pub fn type_id() -> CFTypeID {
+        unsafe { CGDataProviderGetTypeID() }
+    }
+
+    /// Creates a data provider from the given reference-counted buffer.
+    ///
+
+--- src/display.rs ---
+// Copyright 2013 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+#![allow(non_upper_case_globals)]
+
+use bitflags::bitflags;
+use core::ffi::{c_double, c_void};
+use std::ops::Deref;
+use std::ptr;
+
+pub use crate::base::{boolean_t, CGError};
+pub use crate::geometry::{CGPoint, CGRect, CGSize};
+
+use crate::image::CGImage;
+use crate::window::{
+    kCGNullWindowID, CGWindowID, CGWindowImageOption, CGWindowLevel, CGWindowListOption,
+};
+use core_foundation::base::{CFRetain, TCFType};
+use core_foundation::string::{CFString, CFStringRef};
+use core_graphics_types::base::kCGErrorSuccess;
+use foreign_types::{foreign_type, ForeignType};
+
+pub type CGDirectDisplayID = u32;
+
+pub const kCGNullDirectDisplayID: CGDirectDisplayID = 0 as CGDirectDisplayID;
+
+pub const kDisplayModeValidFlag: u32 = 0x00000001;
+pub const kDisplayModeSafeFlag: u32 = 0x00000002;
+pub const kDisplayModeDefaultFlag: u32 = 0x00000004;
+pub const kDisplayModeAlwaysShowFlag: u32 = 0x00000008;
+pub const kDisplayModeNeverShowFlag: u32 = 0x00000080;
+pub const kDisplayModeNotResizeFlag: u32 = 0x00000010;
+pub const kDisplayModeRequiresPanFlag: u32 = 0x00000020;
+pub const kDisplayModeInterlacedFlag: u32 = 0x00000040;
+pub const kDisplayModeSimulscanFlag: u32 = 0x00000100;
+pub const kDisplayModeBuiltInFlag: u32 = 0x00000400;
+pub const kDisplayModeNotPresetFlag: u32 = 0x00000200;
+pub const kDisplayModeStretchedFlag: u32 = 0x00000800;
+pub const kDisplayModeNotGraphicsQualityFlag: u32 = 0x00001000;
+pub const kDisplayModeValidateAgainstDisplay: u32 = 0x00002000;
+pub const kDisplayModeTelevisionFlag: u32 = 0x00100000;
+pub const kDisplayModeValidForMirroringFlag: u32 = 0x00200000;
+pub const kDisplayModeAcceleratorBackedFlag: u32 = 0x00400000;
+pub const kDisplayModeValidForHiResFlag: u32 = 0x00800000;
+pub const kDisplayModeValidForAirPlayFlag: u32 = 0x01000000;
+pub const kDisplayModeNativeFlag: u32 = 0x02000000;
+
+pub const kDisplayModeSafetyFlags: u32 = 0x00000007;
+
+
+--- src/font.rs ---
+// Copyright 2013 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::data_provider::CGDataProvider;
+use crate::geometry::CGRect;
+use core_foundation::array::{CFArray, CFArrayRef};
+use core_foundation::base::{CFRelease, CFRetain, CFType, CFTypeID, TCFType};
+use core_foundation::data::{CFData, CFDataRef};
+use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
+use core_foundation::number::CFNumber;
+use core_foundation::string::{CFString, CFStringRef};
+use std::ptr::NonNull;
+
+use foreign_types::{foreign_type, ForeignType};
+
+use core::ffi::c_int;
+
+pub use core_graphics_types::base::CGGlyph;
+
+foreign_type! {
+    #[doc(hidden)]
+    pub unsafe type CGFont: Send + Sync {
+        type CType = crate::sys::CGFont;
+        fn drop = |p| CFRelease(p as *mut _);
+        fn clone = |p| CFRetain(p as *const _) as *mut _;
+    }
+}
+
+impl CGFont {
+    pub fn type_id() -> CFTypeID {
+        unsafe { CGFontGetTypeID() }
+    }
+
+    pub fn from_data_provider(provider: CGDataProvider) -> Result<CGFont, ()> {
+        unsafe {
+            let font_ref = CGFontCreateWithDataProvider(provider.as_ptr());
+            match NonNull::new(font_ref) {
+                Some(font_ref) => Ok(CGFont(font_ref)),
+                None => Err(()),
+            }
+        }
+    }
+
+    pub fn from_name(name: &CFString) -> Result<CGFont, ()> {
+        unsafe {
+            let font_ref = CGFontCreateWithFontName(name.as_concrete_TypeRef());
+            match NonNull::new(font_ref) {
+                Some(font_ref) => Ok(CGFont(font_ref)),
+                None => Err(()),
+
+--- src/geometry.rs ---
+// Copyright 2013 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+pub use core_graphics_types::geometry::*;
+
+
+--- src/gradient.rs ---
+// Copyright 2013 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+#![allow(non_upper_case_globals)]
+
+use crate::base::CGFloat;
+use crate::color::CGColor;
+use crate::color_space::CGColorSpace;
+
+use bitflags::bitflags;
+use core_foundation::array::{CFArray, CFArrayRef};
+use core_foundation::base::{CFRelease, CFRetain, TCFType};
+use foreign_types::{foreign_type, ForeignType};
+
+bitflags! {
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    pub struct CGGradientDrawingOptions: u32 {
+        const CGGradientDrawsBeforeStartLocation = (1 << 0);
+        const CGGradientDrawsAfterEndLocation = (1 << 1);
+    }
+}
+
+foreign_type! {
+    #[doc(hidden)]
+    pub unsafe type CGGradient {
+        type CType = crate::sys::CGGradient;
+        fn drop = |p| CFRelease(p as *mut _);
+        fn clone = |p| CFRetain(p as *const _) as *mut _;
+    }
+}
+
+impl CGGradient {
+    pub fn create_with_color_components(
+        color_space: &CGColorSpace,
+        components: &[CGFloat],
+        locations: &[CGFloat],
+        count: usize,
+    ) -> CGGradient {
+        unsafe {
+            let result = CGGradientCreateWithColorComponents(
+                color_space.as_ptr(),
+                components.as_ptr(),
+                locations.as_ptr(),
+                count,
+            );
+            assert!(!result.is_null());
+            Self::from_ptr(result)
+        }
+
+--- src/lib.rs ---
+// Copyright 2013 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+#[cfg(target_os = "macos")]
+pub mod access;
+pub mod base;
+pub mod color;
+pub mod color_space;
+pub mod context;
+pub mod data_provider;
+#[cfg(target_os = "macos")]
+pub mod display;
+#[cfg(target_os = "macos")]
+pub mod event;
+#[cfg(target_os = "macos")]
+pub mod event_source;
+pub mod font;
+pub mod geometry;
+pub mod gradient;
+pub mod image;
+pub mod path;
+pub mod sys;
+#[cfg(target_os = "macos")]
+pub mod window;
+
+
+--- src/path.rs ---
+// Copyright 2017 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+pub use crate::sys::CGPathRef as SysCGPathRef;
+
+use crate::geometry::{CGAffineTransform, CGPoint, CGRect};
+use core::ffi::c_void;
+use core_foundation::base::{CFRelease, CFRetain, CFTypeID};
+use foreign_types::{foreign_type, ForeignType};
+use std::fmt::{self, Debug, Formatter};
+use std::marker::PhantomData;
+use std::ops::Deref;
+use std::ptr;
+use std::slice;
+
+foreign_type! {
+    #[doc(hidden)]
+    pub unsafe type CGPath {
+        type CType = crate::sys::CGPath;
+        fn drop = |p| CFRelease(p as *mut _);
+        fn clone = |p| CFRetain(p as *const _) as *mut _;
+    }
+}
+
+impl CGPath {
+    pub fn from_rect(rect: CGRect, transform: Option<&CGAffineTransform>) -> CGPath {
+        unsafe {
+            let transform = match transform {
+                None => ptr::null(),
+                Some(transform) => transform as *const CGAffineTransform,
+            };
+            CGPath::from_ptr(CGPathCreateWithRect(rect, transform))
+        }
+    }
+
+    pub fn type_id() -> CFTypeID {
+        unsafe { CGPathGetTypeID() }
+    }
+
+    pub fn apply<'a, F>(&'a self, mut closure: &'a F)
+    where
+        F: FnMut(CGPathElementRef<'a>),
+    {
+        unsafe {
+            CGPathApply(
+                self.as_ptr(),
+                &mut closure as *mut _ as *mut c_void,
+                do_apply::<F>,
+            );
+
+--- src/window.rs ---
+// Copyright 2018 The Servo Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+#![allow(non_upper_case_globals)]
+
+use core_foundation::array::{CFArray, CFArrayRef};
+use core_foundation::base::{CFType, TCFType};
+use core_foundation::dictionary::CFDictionary;
+use core_foundation::string::{CFString, CFStringRef};
+use foreign_types::ForeignType;
+
+use crate::geometry::CGRect;
+use crate::image::CGImage;
+use crate::sys;
+
+pub type CGWindowID = u32;
+pub type CGWindowLevel = i32;
+
+pub const kCGNullWindowID: CGWindowID = 0;
+
+// https://developer.apple.com/documentation/coregraphics/cgwindowsharingtype?language=objc
+pub type CGWindowSharingType = u32;
+pub const kCGWindowSharingNone: CGWindowSharingType = 0;
+pub const kCGWindowSharingReadOnly: CGWindowSharingType = 1;
+pub const kCGWindowSharingReadWrite: CGWindowSharingType = 2;
+
+pub type CGWindowBackingType = u32;
+pub const kCGWindowBackingStoreRetained: CGWindowBackingType = 0;
+pub const kCGWindowBackingStoreNonretained: CGWindowBackingType = 1;
+pub const kCGWindowBackingStoreBuffered: CGWindowBackingType = 2;
+
+// https://developer.apple.com/documentation/coregraphics/quartz_window_services/window_list_option_constants?language=objc
+pub type CGWindowListOption = u32;
+pub const kCGWindowListOptionAll: CGWindowListOption = 0;
+pub const kCGWindowListOptionOnScreenOnly: CGWindowListOption = 1 << 0;
+pub const kCGWindowListOptionOnScreenAboveWindow: CGWindowListOption = 1 << 1;
+pub const kCGWindowListOptionOnScreenBelowWindow: CGWindowListOption = 1 << 2;
+pub const kCGWindowListOptionIncludingWindow: CGWindowListOption = 1 << 3;
+pub const kCGWindowListExcludeDesktopElements: CGWindowListOption = 1 << 4;
+
+pub type CGWindowImageOption = u32;
+pub const kCGWindowImageDefault: CGWindowImageOption = 0;
+pub const kCGWindowImageBoundsIgnoreFraming: CGWindowImageOption = 1 << 0;
+pub const kCGWindowImageShouldBeOpaque: CGWindowImageOption = 1 << 1;
+pub const kCGWindowImageOnlyShadows: CGWindowImageOption = 1 << 2;
+pub const kCGWindowImageBestResolution: CGWindowImageOption = 1 << 3;
+pub const kCGWindowImageNominalResolution: CGWindowImageOption = 1 << 4;
+
+pub fn copy_window_info(

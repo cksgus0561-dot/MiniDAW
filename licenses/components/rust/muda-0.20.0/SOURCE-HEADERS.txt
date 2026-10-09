@@ -1,0 +1,2262 @@
+--- src/about_metadata.rs ---
+//! Types and functions to create [`AboutMetadata`] for the [`PredefinedMenuItem::about`](crate::PredefinedMenuItem::about) dialog.
+
+use crate::icon::Icon;
+
+/// Application metadata for the [`PredefinedMenuItem::about`](crate::PredefinedMenuItem::about) dialog.
+#[derive(Debug, Clone, Default)]
+pub struct AboutMetadata {
+    /// Sets the application name.
+    pub name: Option<String>,
+    /// The application version.
+    pub version: Option<String>,
+    /// The short version, e.g. "1.0".
+    ///
+    /// ## Platform-specific
+    ///
+    /// - **Windows / GTK 3 / GTK 4:** Appended to the end of `version` in parentheses.
+    pub short_version: Option<String>,
+    /// The authors of the application.
+    ///
+    /// ## Platform-specific
+    ///
+    /// - **macOS:** Unsupported.
+    pub authors: Option<Vec<String>>,
+    /// Application comments.
+    ///
+    /// ## Platform-specific
+    ///
+    /// - **macOS:** Unsupported.
+    pub comments: Option<String>,
+    /// The copyright of the application.
+    pub copyright: Option<String>,
+    /// The license of the application.
+    ///
+    /// ## Platform-specific
+    ///
+    /// - **macOS:** Unsupported.
+    pub license: Option<String>,
+    /// The application website.
+    ///
+    /// ## Platform-specific
+    ///
+    /// - **macOS:** Unsupported.
+    pub website: Option<String>,
+    /// The website label.
+    ///
+    /// ## Platform-specific
+    ///
+    /// - **macOS:** Unsupported.
+    pub website_label: Option<String>,
+    /// The credits.
+    ///
+    /// ## Platform-specific
+    ///
+    /// - **Windows / GTK 3 / GTK 4:** Unsupported.
+    pub credits: Option<String>,
+
+--- src/accelerator/gtk.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use gtk::gdk;
+use keyboard_types::{Code, Key, Modifiers, NamedKey};
+
+use crate::accelerator::{Accelerator, AcceleratorParseError, KeyAccelerator, MenuAccelerator};
+
+impl MenuAccelerator {
+    pub(crate) fn to_gtk(&self) -> Result<(gdk::ModifierType, u32), AcceleratorParseError> {
+        match self {
+            MenuAccelerator::Physical(accelerator) => accelerator.to_gtk(),
+            MenuAccelerator::Logical(accelerator) => accelerator.to_gtk(),
+        }
+    }
+}
+
+impl Accelerator {
+    pub(crate) fn to_gtk(self) -> Result<(gdk::ModifierType, u32), AcceleratorParseError> {
+        let mods = modifiers_to_gdk_modifier_type(self.mods);
+        let key = code_to_gdk_key(&self.key)?;
+        Ok((mods, key))
+    }
+}
+
+impl KeyAccelerator {
+    pub(crate) fn to_gtk(&self) -> Result<(gdk::ModifierType, u32), AcceleratorParseError> {
+        let mods = modifiers_to_gdk_modifier_type(self.mods);
+        let key = key_to_gdk_key(&self.key)?;
+        Ok((mods, key))
+    }
+}
+
+fn modifiers_to_gdk_modifier_type(modifiers: Modifiers) -> gdk::ModifierType {
+    let mut result = gdk::ModifierType::empty();
+
+    result.set(
+        gdk::ModifierType::SHIFT_MASK,
+        modifiers.contains(Modifiers::SHIFT),
+    );
+    result.set(
+        gdk::ModifierType::CONTROL_MASK,
+        modifiers.contains(Modifiers::CONTROL),
+    );
+    result.set(
+        gdk::ModifierType::MOD1_MASK,
+        modifiers.contains(Modifiers::ALT),
+    );
+    result.set(
+        gdk::ModifierType::META_MASK,
+        modifiers.contains(Modifiers::META),
+    );
+    #[allow(deprecated)]
+    result.set(
+
+--- src/accelerator/gtk4.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use gtk4::gdk;
+use keyboard_types::{Code, Key, Modifiers, NamedKey};
+
+use crate::accelerator::{Accelerator, KeyAccelerator, MenuAccelerator};
+
+impl MenuAccelerator {
+    /// Builds a GTK accelerator string (e.g. `<Shift><Control>a`) that can be
+    /// passed to `gtk::Application::set_accels_for_action`.
+    pub(crate) fn to_gtk(&self) -> Option<String> {
+        match self {
+            MenuAccelerator::Physical(accelerator) => accelerator.to_gtk(),
+            MenuAccelerator::Logical(accelerator) => accelerator.to_gtk(),
+        }
+    }
+}
+
+impl Accelerator {
+    /// Builds a GTK accelerator string (e.g. `<Shift><Control>a`) that can be
+    /// passed to `gtk::Application::set_accels_for_action`.
+    pub(crate) fn to_gtk(self) -> Option<String> {
+        let mut gtk = modifiers_to_gtk(self.mods);
+        gtk.push_str(&code_to_gtk(&self.key)?);
+        Some(gtk)
+    }
+}
+
+impl KeyAccelerator {
+    /// Builds a GTK accelerator string (e.g. `<Shift><Control>a`) that can be
+    /// passed to `gtk::Application::set_accels_for_action`.
+    pub fn to_gtk(&self) -> Option<String> {
+        let mut gtk = modifiers_to_gtk(self.mods);
+        gtk.push_str(&key_to_gtk(&self.key)?);
+        Some(gtk)
+    }
+}
+
+fn modifiers_to_gtk(mods: Modifiers) -> String {
+    let mut gtk = String::new();
+
+    if mods.shift() {
+        gtk.push_str("<Shift>");
+    }
+    if mods.ctrl() {
+        gtk.push_str("<Control>");
+    }
+    if mods.alt() {
+        gtk.push_str("<Alt>");
+    }
+    if mods.meta() {
+        gtk.push_str("<Meta>");
+    }
+
+--- src/accelerator/macos.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use keyboard_types::{Code, Key, Modifiers, NamedKey};
+use objc2_app_kit::NSEventModifierFlags;
+
+use crate::accelerator::{Accelerator, AcceleratorParseError, KeyAccelerator, MenuAccelerator};
+
+impl MenuAccelerator {
+    /// Return the string value of this hotkey, without modifiers.
+    pub(crate) fn key_equivalent(&self) -> Result<String, AcceleratorParseError> {
+        match self {
+            MenuAccelerator::Physical(accelerator) => accelerator.key_equivalent(),
+            MenuAccelerator::Logical(accelerator) => accelerator.key_equivalent(),
+        }
+    }
+
+    /// Return the modifiers of this hotkey, as an NSEventModifierFlags bitflag.
+    pub(crate) fn modifier_mask(&self) -> NSEventModifierFlags {
+        match self {
+            MenuAccelerator::Physical(accelerator) => accelerator.modifier_mask(),
+            MenuAccelerator::Logical(accelerator) => accelerator.modifier_mask(),
+        }
+    }
+}
+
+impl Accelerator {
+    pub(crate) fn key_equivalent(&self) -> Result<String, AcceleratorParseError> {
+        code_key_equivalent(&self.key)
+    }
+
+    pub(crate) fn modifier_mask(&self) -> NSEventModifierFlags {
+        let mut flags = modifiers_to_mask(self.mods);
+        if code_is_numpad(self.key) {
+            flags.insert(NSEventModifierFlags::NumericPad);
+        }
+        flags
+    }
+}
+
+impl KeyAccelerator {
+    pub(crate) fn key_equivalent(&self) -> Result<String, AcceleratorParseError> {
+        key_key_equivalent(&self.key)
+    }
+
+    pub(crate) fn modifier_mask(&self) -> NSEventModifierFlags {
+        modifiers_to_mask(self.mods)
+    }
+}
+
+fn modifiers_to_mask(modifiers: Modifiers) -> NSEventModifierFlags {
+    let mut flags = NSEventModifierFlags::empty();
+    if modifiers.contains(Modifiers::SHIFT) {
+        flags.insert(NSEventModifierFlags::Shift);
+
+--- src/accelerator/mod.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! Accelerators describe keyboard shortcuts for menu items.
+//!
+//! [`KeyAccelerator`s](crate::accelerator::KeyAccelerator) are used to define a keyboard
+//! shortcut based on logical keys, which allows expressing shortcuts like `Ctrl++` or `Ctrl+€`
+//! that physical key codes cannot represent.
+//! For this reason, prefer to use [`KeyAccelerator`s](crate::accelerator::KeyAccelerator) over the older [`Accelerator`s](crate::accelerator::Accelerator).
+//!
+//! # Examples
+//! They can be created directly
+//! ```no_run
+//! # use muda::accelerator::*;
+//! let key_accelerator = KeyAccelerator::new(Modifiers::SHIFT, Key::Character("q".to_owned()));
+//! let key_accelerator_without_mods = KeyAccelerator::new(Modifiers::empty(), Key::Character("q".to_owned()));
+//!
+//! let accelerator = Accelerator::new(Modifiers::SHIFT, Code::KeyQ);
+//! let accelerator_without_mods = Accelerator::new(Modifiers::empty(), Code::KeyQ);
+//! ```
+//! or from `&str`, note that all modifiers
+//! have to be listed before the non-modifier key, `shift+alt+KeyQ` is legal,
+//! whereas `shift+q+alt` is not.
+//! ```no_run
+//! # use muda::accelerator::*;
+//! let key_accelerator: KeyAccelerator = "shift+alt+q".parse().unwrap();
+//!
+//! // Or to parse Accelerator
+//! let accelerator: Accelerator = "shift+alt+KeyQ".parse().unwrap();
+//! let accelerator: Accelerator = "shift+alt+q".parse().unwrap();
+//! # // This assert exists to ensure a test breaks once the
+//! # // statement above about ordering is no longer valid.
+//! # assert!("shift+KeyQ+alt".parse::<KeyAccelerator>().is_err());
+//! # assert!("shift+KeyQ+alt".parse::<Accelerator>().is_err());
+//! ```
+
+pub use keyboard_types::{Code, Key, Modifiers, NamedKey};
+use std::{borrow::Borrow, hash::Hash, str::FromStr};
+
+#[cfg(all(
+    any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ),
+    feature = "gtk3",
+    not(feature = "gtk4")
+))]
+pub(crate) mod gtk;
+#[cfg(all(
+    any(
+        target_os = "linux",
+
+--- src/accelerator/windows.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::fmt;
+
+use keyboard_types::{Code, Key, Modifiers, NamedKey};
+use windows_sys::Win32::UI::{
+    Input::KeyboardAndMouse::*,
+    WindowsAndMessaging::{ACCEL, FALT, FCONTROL, FSHIFT, FVIRTKEY},
+};
+
+use crate::accelerator::{Accelerator, AcceleratorParseError, KeyAccelerator, MenuAccelerator};
+
+// VkKeyScanW packs the virtual key in the low byte and a shift-state bitset
+// in the high byte: 1 = Shift, 2 = Ctrl, 4 = Alt.
+const VK_KEY_SCAN_KEY_MASK: VIRTUAL_KEY = 0x00ff;
+const VK_KEY_SCAN_SHIFT: VIRTUAL_KEY = 0x01;
+const VK_KEY_SCAN_CONTROL: VIRTUAL_KEY = 0x02;
+const VK_KEY_SCAN_ALT: VIRTUAL_KEY = 0x04;
+
+impl MenuAccelerator {
+    pub fn to_accel(&self, menu_id: u16) -> crate::Result<ACCEL> {
+        match self {
+            MenuAccelerator::Physical(accelerator) => accelerator.to_accel(menu_id),
+            MenuAccelerator::Logical(accelerator) => accelerator.to_accel(menu_id),
+        }
+    }
+}
+
+impl Accelerator {
+    pub fn to_accel(self, menu_id: u16) -> crate::Result<ACCEL> {
+        let vk = code_to_vk(&self.key)?;
+        accelerator_to_accel(self.mods, vk, menu_id)
+    }
+}
+
+impl KeyAccelerator {
+    pub fn to_accel(&self, menu_id: u16) -> crate::Result<ACCEL> {
+        let vk = key_to_vk(&self.key)?;
+        accelerator_to_accel(self.mods, vk, menu_id)
+    }
+}
+
+fn accelerator_to_accel(
+    modifiers: Modifiers,
+    vk_code: VIRTUAL_KEY,
+    menu_id: u16,
+) -> crate::Result<ACCEL> {
+    let supported_modifiers = Modifiers::SHIFT | Modifiers::CONTROL | Modifiers::ALT;
+    let unsupported_modifiers = modifiers & !supported_modifiers;
+    if !unsupported_modifiers.is_empty() {
+        return Err(AcceleratorParseError::UnsupportedKey(format!(
+            "Windows accelerator modifier: {unsupported_modifiers:?}"
+        ))
+
+--- src/builders/check.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::{
+    accelerator::{Accelerator, KeyAccelerator, MenuAccelerator},
+    CheckMenuItem, MenuId, TextStyle,
+};
+
+/// A builder type for [`CheckMenuItem`]
+#[derive(Clone, Debug)]
+pub struct CheckMenuItemBuilder {
+    text: String,
+    enabled: bool,
+    checked: bool,
+    accelerator: Option<MenuAccelerator>,
+    id: Option<MenuId>,
+    styled_text: Option<Vec<(String, TextStyle)>>,
+}
+
+impl Default for CheckMenuItemBuilder {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            enabled: true,
+            checked: false,
+            accelerator: None,
+            id: None,
+            styled_text: None,
+        }
+    }
+}
+
+impl CheckMenuItemBuilder {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    /// Set the id this check menu item.
+    pub fn id(mut self, id: MenuId) -> Self {
+        self.id.replace(id);
+        self
+    }
+
+    /// Set the text for this check menu item.
+    ///
+    /// See [`CheckMenuItem::set_text`] for more info.
+    pub fn text<S: Into<String>>(mut self, text: S) -> Self {
+        self.text = text.into();
+        self
+    }
+
+    /// Enable or disable this menu item.
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+
+--- src/builders/icon.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::{
+    accelerator::{Accelerator, KeyAccelerator, MenuAccelerator},
+    icon::{Icon, NativeIcon},
+    IconMenuItem, MenuId, TextStyle,
+};
+
+/// A builder type for [`IconMenuItem`]
+#[derive(Clone, Debug)]
+pub struct IconMenuItemBuilder {
+    text: String,
+    enabled: bool,
+    id: Option<MenuId>,
+    accelerator: Option<MenuAccelerator>,
+    icon: Option<Icon>,
+    native_icon: Option<NativeIcon>,
+    styled_text: Option<Vec<(String, TextStyle)>>,
+}
+
+impl Default for IconMenuItemBuilder {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            enabled: true,
+            id: None,
+            accelerator: None,
+            icon: None,
+            native_icon: None,
+            styled_text: None,
+        }
+    }
+}
+
+impl IconMenuItemBuilder {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    /// Set the id this icon menu item.
+    pub fn id(mut self, id: MenuId) -> Self {
+        self.id.replace(id);
+        self
+    }
+
+    /// Set the text for this icon menu item.
+    ///
+    /// See [`IconMenuItem::set_text`] for more info.
+    pub fn text<S: Into<String>>(mut self, text: S) -> Self {
+        self.text = text.into();
+        self
+    }
+
+
+--- src/builders/mod.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+//! A module containing builder types
+
+mod check;
+mod icon;
+mod normal;
+mod submenu;
+
+pub use crate::about_metadata::AboutMetadataBuilder;
+pub use check::*;
+pub use icon::*;
+pub use normal::*;
+pub use submenu::*;
+
+
+--- src/builders/normal.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::{
+    accelerator::{Accelerator, KeyAccelerator, MenuAccelerator},
+    MenuId, MenuItem, TextStyle,
+};
+
+/// A builder type for [`MenuItem`]
+#[derive(Clone, Debug)]
+pub struct MenuItemBuilder {
+    text: String,
+    enabled: bool,
+    id: Option<MenuId>,
+    accelerator: Option<MenuAccelerator>,
+    styled_text: Option<Vec<(String, TextStyle)>>,
+}
+
+impl Default for MenuItemBuilder {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            enabled: true,
+            id: None,
+            accelerator: None,
+            styled_text: None,
+        }
+    }
+}
+
+impl MenuItemBuilder {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    /// Set the id this menu item.
+    pub fn id(mut self, id: MenuId) -> Self {
+        self.id.replace(id);
+        self
+    }
+
+    /// Set the text for this menu item.
+    ///
+    /// See [`MenuItem::set_text`] for more info.
+    pub fn text<S: Into<String>>(mut self, text: S) -> Self {
+        self.text = text.into();
+        self
+    }
+
+    /// Enable or disable this menu item.
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+--- src/builders/submenu.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::{Icon, IsMenuItem, MenuId, NativeIcon, Submenu, TextStyle};
+
+/// A builder type for [`Submenu`]
+#[derive(Clone)]
+pub struct SubmenuBuilder<'a> {
+    text: String,
+    enabled: bool,
+    id: Option<MenuId>,
+    items: Vec<&'a dyn IsMenuItem>,
+    icon: Option<Icon>,
+    native_icon: Option<NativeIcon>,
+    styled_text: Option<Vec<(String, TextStyle)>>,
+}
+
+impl Default for SubmenuBuilder<'_> {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            enabled: true,
+            id: None,
+            items: Vec::new(),
+            icon: None,
+            native_icon: None,
+            styled_text: None,
+        }
+    }
+}
+
+impl std::fmt::Debug for SubmenuBuilder<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SubmenuBuilder")
+            .field("text", &self.text)
+            .field("enabled", &self.enabled)
+            .finish()
+    }
+}
+
+impl<'a> SubmenuBuilder<'a> {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    /// Set the id this submenu.
+    pub fn id(mut self, id: MenuId) -> Self {
+        self.id.replace(id);
+        self
+    }
+
+    /// Set the text for this submenu.
+    ///
+    /// See [`Submenu::set_text`] for more info.
+
+--- src/context_menu.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::{dpi, sealed, Menu, Submenu};
+
+#[cfg(feature = "snapshot")]
+use crate::MenuSnapshotHandle;
+
+/// A trait that defines the behavior and interface for context menus across different platforms.
+pub trait ContextMenu: sealed::Sealed {
+    /// Get the popup [`HMENU`] for this menu.
+    ///
+    /// The returned [`HMENU`] is valid as long as the `ContextMenu` is.
+    ///
+    /// [`HMENU`]: windows_sys::Win32::UI::WindowsAndMessaging::HMENU
+    #[cfg(target_os = "windows")]
+    fn hpopupmenu(&self) -> isize;
+
+    /// Shows this menu as a context menu inside a win32 window.
+    ///
+    /// - `position` is relative to the window top-left corner, if `None`, the cursor position is used.
+    ///
+    /// Returns `true` if menu tracking ended because an item was selected, and `false` if menu tracking was cancelled for any reason.
+    ///
+    /// # Safety
+    ///
+    /// The `hwnd` must be a valid window HWND.
+    #[cfg(target_os = "windows")]
+    unsafe fn show_context_menu_for_hwnd(
+        &self,
+        hwnd: isize,
+        position: Option<dpi::Position>,
+    ) -> bool;
+
+    /// Attach the menu subclass handler to the given hwnd
+    /// so you can receive events from that window using [`crate::MenuEvent::receiver`]
+    ///
+    /// This can be used along with [`ContextMenu::hpopupmenu`] when implementing a tray icon menu.
+    ///
+    /// # Safety
+    ///
+    /// The `hwnd` must be a valid window HWND.
+    #[cfg(target_os = "windows")]
+    unsafe fn attach_menu_subclass_for_hwnd(&self, hwnd: isize);
+
+    /// Remove the menu subclass handler from the given hwnd
+    ///
+    /// The view must be a pointer to a valid `NSView`.
+    ///
+    /// # Safety
+    ///
+    /// The `hwnd` must be a valid window HWND.
+    #[cfg(target_os = "windows")]
+    unsafe fn detach_menu_subclass_from_hwnd(&self, hwnd: isize);
+
+--- src/error.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use thiserror::Error;
+
+pub use crate::accelerator::AcceleratorParseError;
+
+/// Errors returned by muda.
+#[non_exhaustive]
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("This menu item is not a child of this `Menu` or `Submenu`")]
+    NotAChildOfThisMenu,
+    #[error("Adding this submenu would create a cycle; a submenu cannot contain itself")]
+    WouldCreateCycle,
+    #[cfg(any(
+        windows,
+        all(
+            any(
+                target_os = "linux",
+                target_os = "dragonfly",
+                target_os = "freebsd",
+                target_os = "netbsd",
+                target_os = "openbsd"
+            ),
+            any(feature = "gtk3", feature = "gtk4")
+        )
+    ))]
+    #[error("This menu has not been initialized")]
+    NotInitialized,
+    #[cfg(any(
+        windows,
+        all(
+            any(
+                target_os = "linux",
+                target_os = "dragonfly",
+                target_os = "freebsd",
+                target_os = "netbsd",
+                target_os = "openbsd"
+            ),
+            any(feature = "gtk3", feature = "gtk4")
+        )
+    ))]
+    #[error("This menu has already been initialized")]
+    AlreadyInitialized,
+    #[error(transparent)]
+    AcceleratorParseError(#[from] AcceleratorParseError),
+    #[cfg(all(
+        any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd"
+
+--- src/icon.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+// taken from https://github.com/rust-windowing/winit/blob/92fdf5ba85f920262a61cee4590f4a11ad5738d1/src/icon.rs
+
+use crate::platform_impl::PlatformIcon;
+use std::{error::Error, fmt, io, mem};
+
+#[repr(C)]
+#[derive(Debug)]
+pub(crate) struct Pixel {
+    pub(crate) r: u8,
+    pub(crate) g: u8,
+    pub(crate) b: u8,
+    pub(crate) a: u8,
+}
+
+pub(crate) const PIXEL_SIZE: usize = mem::size_of::<Pixel>();
+
+#[derive(Debug)]
+/// An error produced when using [`Icon::from_rgba`] with invalid arguments.
+pub enum BadIcon {
+    /// Produced when the length of the `rgba` argument isn't divisible by 4, thus `rgba` can't be
+    /// safely interpreted as 32bpp RGBA pixels.
+    ByteCountNotDivisibleBy4 { byte_count: usize },
+    /// Produced when the number of pixels (`rgba.len() / 4`) isn't equal to `width * height`.
+    /// At least one of your arguments is incorrect.
+    DimensionsVsPixelCount {
+        width: u32,
+        height: u32,
+        width_x_height: usize,
+        pixel_count: usize,
+    },
+    /// Produced when underlying OS functionality failed to create the icon
+    OsError(io::Error),
+}
+
+impl fmt::Display for BadIcon {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BadIcon::ByteCountNotDivisibleBy4 { byte_count } => write!(f,
+                "The length of the `rgba` argument ({:?}) isn't divisible by 4, making it impossible to interpret as 32bpp RGBA pixels.",
+                byte_count,
+            ),
+            BadIcon::DimensionsVsPixelCount {
+                width,
+                height,
+                width_x_height,
+                pixel_count,
+            } => write!(f,
+                "The specified dimensions ({:?}x{:?}) don't match the number of pixels supplied by the `rgba` argument ({:?}). For those dimensions, the expected pixel count is {:?}.",
+                width, height, pixel_count, width_x_height,
+            ),
+            BadIcon::OsError(e) => write!(f, "OS error when instantiating the icon: {:?}", e),
+
+--- src/items/check.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{cell::RefCell, mem, rc::Rc, sync::Arc};
+
+use crate::{
+    accelerator::{Accelerator, KeyAccelerator, MenuAccelerator},
+    platform_impl::PlatformMenuItem,
+    util, CheckMenuItemBuilder, IsMenuItem, MenuId, MenuItemAction, MenuItemKind, StateCell,
+    TextStyle,
+};
+
+/// A check menu item inside a [`Menu`] or [`Submenu`]
+/// and usually contains a text and a check mark or a similar toggle
+/// that corresponds to a checked and unchecked states.
+///
+/// [`Menu`]: crate::Menu
+/// [`Submenu`]: crate::Submenu
+#[derive(Clone)]
+pub struct CheckMenuItem {
+    pub(crate) id: Arc<MenuId>,
+    pub(crate) state: StateCell<CheckMenuItemState>,
+    pub(crate) platform: Rc<RefCell<PlatformMenuItem>>,
+}
+
+/// Shared state of a [`CheckMenuItem`].
+#[derive(Debug, Clone)]
+pub(crate) struct CheckMenuItemState {
+    pub text: String,
+    pub enabled: bool,
+    pub checked: bool,
+    pub accelerator: Option<MenuAccelerator>,
+    pub styled_text: Option<Vec<(String, TextStyle)>>,
+}
+
+impl crate::sealed::Sealed for CheckMenuItem {}
+impl IsMenuItem for CheckMenuItem {
+    fn kind(&self) -> MenuItemKind {
+        MenuItemKind::Check(self.clone())
+    }
+
+    fn id(&self) -> &MenuId {
+        self.id()
+    }
+
+    fn into_id(self) -> MenuId {
+        self.into_id()
+    }
+}
+
+impl CheckMenuItem {
+    /// Returns a new [`CheckMenuItemBuilder`].
+    pub fn builder() -> CheckMenuItemBuilder {
+        CheckMenuItemBuilder::new()
+
+--- src/items/icon.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{cell::RefCell, mem, rc::Rc, sync::Arc};
+
+use crate::{
+    accelerator::{Accelerator, KeyAccelerator, MenuAccelerator},
+    icon::{Icon, NativeIcon},
+    platform_impl::PlatformMenuItem,
+    util, IconMenuItemBuilder, IconType, IsMenuItem, MenuId, MenuItemAction, MenuItemKind,
+    StateCell, TextStyle,
+};
+
+/// An icon menu item inside a [`Menu`] or [`Submenu`]
+/// and usually contains an icon and a text.
+///
+/// [`Menu`]: crate::Menu
+/// [`Submenu`]: crate::Submenu
+#[derive(Clone)]
+pub struct IconMenuItem {
+    pub(crate) id: Arc<MenuId>,
+    pub(crate) state: StateCell<IconMenuItemState>,
+    pub(crate) platform: Rc<RefCell<PlatformMenuItem>>,
+}
+
+/// Shared state of an [`IconMenuItem`].
+#[derive(Debug, Clone)]
+pub(crate) struct IconMenuItemState {
+    pub text: String,
+    pub enabled: bool,
+    pub icon: Option<IconType>,
+    pub accelerator: Option<MenuAccelerator>,
+    pub styled_text: Option<Vec<(String, TextStyle)>>,
+}
+
+impl crate::sealed::Sealed for IconMenuItem {}
+impl IsMenuItem for IconMenuItem {
+    fn kind(&self) -> MenuItemKind {
+        MenuItemKind::Icon(self.clone())
+    }
+
+    fn id(&self) -> &MenuId {
+        self.id()
+    }
+
+    fn into_id(self) -> MenuId {
+        self.into_id()
+    }
+}
+
+impl IconMenuItem {
+    /// Returns a new [`IconMenuItemBuilder`].
+    pub fn builder() -> IconMenuItemBuilder {
+        IconMenuItemBuilder::new()
+
+--- src/items/menu.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{cell::RefCell, rc::Rc};
+
+use crate::{
+    platform_impl::PlatformMenu,
+    util::{self, AddOp},
+    ContextMenu, IsMenuItem, MenuId, MenuItemKind, StateCell, UnsafeMenuItemKind,
+};
+
+#[cfg(feature = "snapshot")]
+use crate::MenuSnapshotHandle;
+
+#[cfg(any(
+    target_os = "windows",
+    target_os = "macos",
+    all(
+        any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd"
+        ),
+        any(all(feature = "gtk3", not(feature = "gtk4")), feature = "gtk4")
+    )
+))]
+use crate::dpi::Position;
+
+/// A root menu that can be added to a window on Windows, GTK 3, or GTK 4
+/// and used as the app global menu on macOS.
+#[derive(Clone)]
+pub struct Menu {
+    id: Rc<MenuId>,
+    state: StateCell<MenuState>,
+    platform: Rc<RefCell<PlatformMenu>>,
+}
+
+/// Shared state of a root [`Menu`].
+pub(crate) struct MenuState {
+    pub children: Vec<UnsafeMenuItemKind>,
+}
+
+impl Drop for Menu {
+    fn drop(&mut self) {
+        if Rc::strong_count(&self.id) == 1 {
+            let children: Vec<MenuItemKind> = std::mem::take(&mut self.state.borrow_mut().children)
+                .into_iter()
+                .map(|child| {
+                    // SAFETY: the last thread-bound `Menu` is being dropped on the thread where
+                    // its children were wrapped, so they can be recovered and destroyed here.
+                    unsafe { child.unwrap() }
+                })
+
+--- src/items/mod.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::{sealed, Icon, MenuId, NativeIcon, WeakStateCell};
+
+mod check;
+mod icon;
+mod menu;
+mod normal;
+mod predefined;
+mod submenu;
+
+pub use check::*;
+pub use icon::*;
+pub use menu::*;
+pub use normal::*;
+pub use predefined::*;
+pub use submenu::*;
+
+// ---------------
+// Public types
+// ---------------
+
+/// A trait that defines a generic item in a menu, which may be one of [`MenuItemKind`]
+pub trait IsMenuItem: sealed::Sealed {
+    /// Returns a [`MenuItemKind`] associated with this item.
+    fn kind(&self) -> MenuItemKind;
+    /// Returns a unique identifier associated with this menu item.
+    fn id(&self) -> &MenuId;
+    /// Convert this menu item into its menu ID.
+    fn into_id(self) -> MenuId;
+}
+
+/// An enumeration of all available menu types, useful to match against
+/// the items returned from [`crate::Menu::items`] or [`Submenu::items`]
+#[derive(Clone)]
+pub enum MenuItemKind {
+    MenuItem(MenuItem),
+    Submenu(Submenu),
+    Predefined(PredefinedMenuItem),
+    Check(CheckMenuItem),
+    Icon(IconMenuItem),
+}
+
+/// How one part of a menu item's label is rendered.
+///
+/// Styles are semantic, so each platform maps them to its own conventions instead of
+/// the caller picking colors or fonts. That keeps labels correct in light and dark
+/// modes, under increased contrast, and when the system menu font changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
+pub enum TextStyle {
+    /// The platform's default menu label treatment.
+    #[default]
+
+--- src/items/predefined.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{cell::RefCell, mem, rc::Rc};
+
+use crate::{
+    accelerator::{Accelerator, Code, MenuAccelerator, Modifiers, CMD_OR_CTRL},
+    platform_impl::PlatformMenuItem,
+    util, AboutMetadata, IsMenuItem, MenuId, MenuItemAction, MenuItemKind, StateCell,
+};
+
+/// A predefined (native) menu item which has a predefined behavior by the OS or by this crate.
+#[derive(Clone)]
+pub struct PredefinedMenuItem {
+    pub(crate) id: Rc<MenuId>,
+    pub(crate) state: StateCell<PredefinedMenuItemState>,
+    pub(crate) platform: Rc<RefCell<PlatformMenuItem>>,
+}
+
+/// Shared state of a [`PredefinedMenuItem`].
+#[derive(Debug, Clone)]
+pub(crate) struct PredefinedMenuItemState {
+    pub text: String,
+    pub predefined_item_type: PredefinedMenuItemType,
+    pub enabled: bool,
+}
+
+impl crate::sealed::Sealed for PredefinedMenuItem {}
+impl IsMenuItem for PredefinedMenuItem {
+    fn kind(&self) -> MenuItemKind {
+        MenuItemKind::Predefined(self.clone())
+    }
+
+    fn id(&self) -> &MenuId {
+        self.id()
+    }
+
+    fn into_id(self) -> MenuId {
+        self.into_id()
+    }
+}
+
+impl PredefinedMenuItem {
+    /// Separator menu item
+    pub fn separator() -> PredefinedMenuItem {
+        PredefinedMenuItem::new::<&str>(PredefinedMenuItemType::Separator, None)
+    }
+
+    /// Non-interactive section header menu item.
+    ///
+    /// ## Platform-specific:
+    ///
+    /// - **macOS:** Uses the native section-header appearance on macOS 14 and later. The item is
+    ///   rendered as a disabled menu item on older versions.
+
+--- src/items/submenu.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{cell::RefCell, mem, rc::Rc};
+
+use crate::{
+    platform_impl::PlatformMenuItem,
+    util::{self, AddOp},
+    ContextMenu, Icon, IconType, IsMenuItem, MenuId, MenuItemAction, MenuItemKind, NativeIcon,
+    StateCell, SubmenuBuilder, TextStyle, UnsafeMenuItemKind,
+};
+
+use super::menu::positions_of;
+
+#[cfg(feature = "snapshot")]
+use crate::MenuSnapshotHandle;
+
+#[cfg(any(
+    target_os = "windows",
+    target_os = "macos",
+    all(
+        any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd"
+        ),
+        any(all(feature = "gtk3", not(feature = "gtk4")), feature = "gtk4")
+    )
+))]
+use crate::dpi::Position;
+
+/// A menu that can be added to a [`Menu`] or another [`Submenu`].
+///
+/// [`Menu`]: crate::Menu
+#[derive(Clone)]
+pub struct Submenu {
+    pub(crate) id: Rc<MenuId>,
+    pub(crate) state: StateCell<SubmenuState>,
+    pub(crate) platform: Rc<RefCell<PlatformMenuItem>>,
+}
+
+/// Shared state of a [`Submenu`].
+pub(crate) struct SubmenuState {
+    pub text: String,
+    pub enabled: bool,
+    pub icon: Option<IconType>,
+    pub children: Vec<UnsafeMenuItemKind>,
+    pub styled_text: Option<Vec<(String, TextStyle)>>,
+}
+
+impl Drop for Submenu {
+    fn drop(&mut self) {
+
+--- src/lib.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+#![allow(clippy::uninlined_format_args)]
+
+//! muda is a Menu Utilities library for Desktop Applications.
+//!
+//! # Platforms supported:
+//!
+//! - Windows
+//! - macOS
+//! - Linux/BSD with GTK 3 or GTK 4
+//!
+//! # Platform-specific notes:
+//!
+//! - On macOS, menus can only be used from the main thread, and most
+//!   functionality will panic if you try to use it from any other thread.
+//!
+//! - On Windows, accelerators don't work unless the win32 message loop calls
+//!   [`TranslateAcceleratorW`](https://docs.rs/windows-sys/latest/windows_sys/Win32/UI/WindowsAndMessaging/fn.TranslateAcceleratorW.html).
+//!   See [`Menu::init_for_hwnd`](https://docs.rs/muda/latest/x86_64-pc-windows-msvc/muda/struct.Menu.html#method.init_for_hwnd) for more details
+//!
+//! # Cargo features
+//!
+//! The Win32 and AppKit backends are always enabled on Windows and macOS, respectively.
+//!
+//! - `gtk3`: Enables the GTK 3 backend on Linux and BSD platforms. This is enabled by default.
+//! - `gtk4`: Enables the GTK 4 backend on Linux and BSD platforms. Disable default features when
+//!   enabling this feature because the defaults include `gtk3`.
+//! - `libxdo`: Enables linking to `libxdo` for the GTK 3 backend. This is used by the predefined
+//!   `Copy`, `Cut`, `Paste` and `SelectAll` menu items, and is enabled by default. It is not used
+//!   by GTK 4.
+//! - `snapshot`: Enables thread-safe menu snapshot types and methods, switching shared menu state
+//!   to thread-safe synchronization.
+//!
+//! When both `gtk3` and `gtk4` features are enabled, Muda uses the GTK 4 backend.
+//!
+//! # Dependencies (Linux/BSD)
+//!
+//! The `gtk3` feature uses GTK 3 for menus. The `gtk4` feature uses GTK 4 for menus. `libxdo` is
+//! only used by the GTK 3 backend to make the predefined `Copy`, `Cut`, `Paste` and `SelectAll`
+//! menu items work when the `libxdo` feature is enabled. Be sure to install the packages for the
+//! GTK backend you enabled before building:
+//!
+//! #### Arch Linux / Manjaro:
+//!
+//! ```sh
+//! # GTK 3 backend
+//! pacman -S gtk3 xdotool
+//!
+//! # GTK 4 backend
+//! pacman -S gtk4
+//! ```
+//!
+
+--- src/menu_event.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crossbeam_channel::{unbounded, Receiver, Sender};
+use once_cell::sync::{Lazy, OnceCell};
+
+use crate::MenuId;
+
+/// Describes a menu event emitted when a menu item is activated
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct MenuEvent {
+    /// Id of the menu item which triggered this event
+    pub id: MenuId,
+}
+
+/// A receiver that could be used to listen to menu events.
+pub type MenuEventReceiver = Receiver<MenuEvent>;
+type MenuEventHandler = Box<dyn Fn(MenuEvent) + Send + Sync + 'static>;
+
+static MENU_CHANNEL: Lazy<(Sender<MenuEvent>, MenuEventReceiver)> = Lazy::new(unbounded);
+static MENU_EVENT_HANDLER: OnceCell<Option<MenuEventHandler>> = OnceCell::new();
+
+impl MenuEvent {
+    /// Returns the id of the menu item which triggered this event
+    pub fn id(&self) -> &MenuId {
+        &self.id
+    }
+
+    /// Gets a reference to the event channel's [`MenuEventReceiver`]
+    /// which can be used to listen for menu events.
+    ///
+    /// ## Note
+    ///
+    /// This will not receive any events if [`MenuEvent::set_event_handler`] has been called with a `Some` value.
+    pub fn receiver<'a>() -> &'a MenuEventReceiver {
+        &MENU_CHANNEL.1
+    }
+
+    /// Set a handler to be called for new events. Useful for implementing custom event sender.
+    ///
+    /// ## Note
+    ///
+    /// Calling this function with a `Some` value,
+    /// will not send new events to the channel associated with [`MenuEvent::receiver`]
+    pub fn set_event_handler<F: Fn(MenuEvent) + Send + Sync + 'static>(f: Option<F>) {
+        if let Some(f) = f {
+            let _ = MENU_EVENT_HANDLER.set(Some(Box::new(f)));
+        } else {
+            let _ = MENU_EVENT_HANDLER.set(None);
+        }
+    }
+
+    pub(crate) fn send(event: MenuEvent) {
+
+--- src/platform_impl/gtk/icon.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use gtk::gdk_pixbuf::{Colorspace, Pixbuf};
+
+use crate::icon::BadIcon;
+
+/// An icon used for the window titlebar, taskbar, etc.
+#[derive(Debug, Clone)]
+pub struct PlatformIcon {
+    raw: Vec<u8>,
+    width: i32,
+    height: i32,
+    row_stride: i32,
+}
+
+impl From<PlatformIcon> for Pixbuf {
+    fn from(icon: PlatformIcon) -> Self {
+        Pixbuf::from_mut_slice(
+            icon.raw,
+            gtk::gdk_pixbuf::Colorspace::Rgb,
+            true,
+            8,
+            icon.width,
+            icon.height,
+            icon.row_stride,
+        )
+    }
+}
+
+impl PlatformIcon {
+    /// Creates an `Icon` from 32bpp RGBA data.
+    ///
+    /// The length of `rgba` must be divisible by 4, and `width * height` must equal
+    /// `rgba.len() / 4`. Otherwise, this will return a `BadIcon` error.
+    pub fn from_rgba(rgba: Vec<u8>, width: u32, height: u32) -> Result<Self, BadIcon> {
+        let row_stride =
+            Pixbuf::calculate_rowstride(Colorspace::Rgb, true, 8, width as i32, height as i32);
+        Ok(Self {
+            raw: rgba,
+            width: width as i32,
+            height: height as i32,
+            row_stride,
+        })
+    }
+
+    pub fn to_pixbuf(&self) -> Pixbuf {
+        Pixbuf::from_mut_slice(
+            self.raw.clone(),
+            gtk::gdk_pixbuf::Colorspace::Rgb,
+            true,
+            8,
+            self.width,
+            self.height,
+
+--- src/platform_impl/gtk/mnemonic.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+/// Converts from muda mnemonic to gtk mnemonic.
+///
+/// gtk uses underline (_) for mnemonic and two underlines (__) to escape it
+/// into a single underline, while muda uses (&) and (&&).
+pub fn to_gtk_mnemonic<S: AsRef<str>>(string: S) -> String {
+    let string = string.as_ref();
+    let mut converted = String::with_capacity(string.len());
+    let mut characters = string.chars().peekable();
+
+    while let Some(character) = characters.next() {
+        match character {
+            '_' => converted.push_str("__"),
+            '&' if characters.peek() == Some(&'&') => {
+                characters.next();
+                converted.push('&');
+            }
+            '&' => converted.push('_'),
+            _ => converted.push(character),
+        }
+    }
+
+    converted
+}
+
+pub fn from_gtk_mnemonic<S: AsRef<str>>(string: S) -> String {
+    let string = string.as_ref();
+    let mut converted = String::with_capacity(string.len());
+    let mut characters = string.chars().peekable();
+
+    while let Some(character) = characters.next() {
+        match character {
+            '&' => converted.push_str("&&"),
+            '_' if characters.peek() == Some(&'_') => {
+                characters.next();
+                converted.push('_');
+            }
+            '_' => converted.push('&'),
+            _ => converted.push(character),
+        }
+    }
+
+    converted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{from_gtk_mnemonic, to_gtk_mnemonic};
+
+    #[test]
+    fn converts_mnemonics() {
+        assert_eq!(to_gtk_mnemonic("H&ello"), "H_ello");
+
+--- src/platform_impl/gtk/mod.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+mod icon;
+mod mnemonic;
+
+pub(crate) use icon::PlatformIcon;
+
+use crate::{
+    accelerator::MenuAccelerator,
+    dpi::Position,
+    items::*,
+    platform_impl::PlatformAttachArgs,
+    util::{AddOp, Counter},
+    MenuEvent, MenuItemAction, MenuItemKind,
+};
+use glib::translate::ToGlibPtr;
+use gtk::{gdk, glib, prelude::*, AboutDialog, Container, Orientation};
+use mnemonic::{from_gtk_mnemonic, to_gtk_mnemonic};
+use std::{
+    cell::RefCell,
+    collections::{hash_map::Entry, HashMap},
+    rc::Rc,
+    sync::atomic::{AtomicBool, Ordering},
+};
+
+static COUNTER: Counter = Counter::new();
+
+#[cfg(feature = "snapshot")]
+pub(crate) fn dispatch_on_main_thread<F>(f: F)
+where
+    F: FnOnce() + Send + 'static,
+{
+    glib::idle_add_once(f);
+}
+
+pub struct PlatformMenu {
+    gtk_menubars: HashMap<u32, gtk::MenuBar>,
+    gtk_windows: HashMap<u32, glib::WeakRef<gtk::Window>>,
+    accel_group: Option<gtk::AccelGroup>,
+    /// dedicated menu for tray or context menus
+    gtk_menu: (u32, Option<gtk::Menu>),
+}
+
+impl PlatformMenu {
+    pub fn new() -> Self {
+        Self {
+            gtk_menubars: HashMap::new(),
+            gtk_windows: HashMap::new(),
+            accel_group: None,
+            gtk_menu: (COUNTER.next(), None),
+        }
+    }
+
+
+--- src/platform_impl/gtk4/icon_menu_item.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::cell::OnceCell;
+
+use gtk::{glib, prelude::*, subclass::prelude::*};
+
+use crate::{accelerator::MenuAccelerator, items::IconType};
+
+use super::mnemonic::to_gtk_mnemonic;
+
+const MENU_ICON_SIZE: i32 = 16;
+
+mod imp {
+    use super::*;
+
+    #[derive(Default)]
+    pub struct IconMenuItem {
+        pub(super) image: OnceCell<gtk::Image>,
+        pub(super) label: OnceCell<gtk::Label>,
+        pub(super) accelerator_label: OnceCell<gtk::Label>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for IconMenuItem {
+        const NAME: &'static str = "MudaIconMenuItem";
+        type Type = super::IconMenuItem;
+        type ParentType = gtk::Button;
+
+        fn class_init(klass: &mut Self::Class) {
+            klass.set_css_name("modelbutton");
+            klass.set_accessible_role(gtk::AccessibleRole::MenuItem);
+        }
+    }
+
+    impl ObjectImpl for IconMenuItem {}
+    impl WidgetImpl for IconMenuItem {}
+    impl ButtonImpl for IconMenuItem {}
+}
+
+glib::wrapper! {
+    pub struct IconMenuItem(ObjectSubclass<imp::IconMenuItem>)
+        @extends gtk::Button, gtk::Widget,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Actionable;
+}
+
+impl IconMenuItem {
+    pub(super) fn new(
+        text: &str,
+        detailed_action: &str,
+        icon: Option<&IconType>,
+        accelerator: Option<&MenuAccelerator>,
+    ) -> Self {
+        let item: Self = glib::Object::new();
+
+--- src/platform_impl/gtk4/icon.rs ---
+// Copyright 2014-2021 The winit contributors
+// Copyright 2021-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+
+use crate::icon::{BadIcon, RgbaIcon};
+
+/// An icon used for the window titlebar, taskbar, etc.
+#[derive(Debug, Clone)]
+pub struct PlatformIcon(gtk::gdk_pixbuf::Pixbuf);
+
+// Safety: `PlatformIcon` is used only on the same thread as the one created it
+unsafe impl Send for PlatformIcon {}
+unsafe impl Sync for PlatformIcon {}
+
+impl PlatformIcon {
+    /// Creates an `Icon` from 32bpp RGBA data.
+    ///
+    /// The length of `rgba` must be divisible by 4, and `width * height` must equal
+    /// `rgba.len() / 4`. Otherwise, this will return a `BadIcon` error.
+    pub fn from_rgba(rgba: Vec<u8>, width: u32, height: u32) -> Result<Self, BadIcon> {
+        let RgbaIcon {
+            rgba,
+            width,
+            height,
+        } = RgbaIcon::from_rgba(rgba, width, height)?;
+
+        let bytes = gtk::glib::Bytes::from_owned(rgba);
+        let pixbuf = gtk::gdk_pixbuf::Pixbuf::from_bytes(
+            &bytes,
+            gtk::gdk_pixbuf::Colorspace::Rgb,
+            true,
+            8,
+            width as i32,
+            height as i32,
+            (width * 4) as i32,
+        );
+
+        Ok(Self(pixbuf))
+    }
+
+    pub fn texture(&self) -> gtk::gdk::Texture {
+        gtk::gdk::Texture::for_pixbuf(&self.0)
+    }
+}
+
+
+--- src/platform_impl/gtk4/mnemonic.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+/// Converts from muda mnemonic to gtk mnemonic
+///
+/// gtk uses underline (_) for mnemonic
+/// and two underlines (__) to escape it into a single underline
+/// while we use (&) and (&&), so we have to do a few conversions
+pub fn to_gtk_mnemonic<S: AsRef<str>>(string: S) -> String {
+    let string = string.as_ref();
+    let mut converted = String::with_capacity(string.len());
+    let mut characters = string.chars().peekable();
+
+    while let Some(character) = characters.next() {
+        match character {
+            '_' => converted.push_str("__"),
+            '&' if characters.peek() == Some(&'&') => {
+                characters.next();
+                converted.push('&');
+            }
+            '&' => converted.push('_'),
+            _ => converted.push(character),
+        }
+    }
+
+    converted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_converts() {
+        assert_eq!(to_gtk_mnemonic("H&ello"), "H_ello");
+        assert_eq!(to_gtk_mnemonic("H&&ello"), "H&ello");
+        assert_eq!(to_gtk_mnemonic("H&&&ello"), "H&_ello");
+        assert_eq!(to_gtk_mnemonic("H_ello"), "H__ello");
+        assert_eq!(to_gtk_mnemonic("H__ello"), "H____ello");
+        assert_eq!(to_gtk_mnemonic("[~~]"), "[~~]");
+    }
+}
+
+
+--- src/platform_impl/gtk4/mod.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+mod icon;
+mod icon_menu_item;
+mod mnemonic;
+
+use std::{cell::Cell, collections::HashMap, rc::Rc};
+
+use dpi::Position;
+use gtk::{gdk::Rectangle, gio, glib, prelude::*};
+pub(crate) use icon::PlatformIcon;
+use icon_menu_item::IconMenuItem;
+use mnemonic::to_gtk_mnemonic;
+
+use crate::{
+    accelerator::MenuAccelerator,
+    items::IconType,
+    platform_impl::PlatformAttachArgs,
+    util::{AddOp, Counter},
+    AboutMetadata, MenuEvent, MenuItemAction, MenuItemKind, PredefinedMenuItemType,
+};
+
+static COUNTER: Counter = Counter::new();
+
+#[cfg(feature = "snapshot")]
+pub(crate) fn dispatch_on_main_thread<F>(f: F)
+where
+    F: FnOnce() + Send + 'static,
+{
+    glib::MainContext::default().invoke(f);
+}
+
+const DEFAULT_ACTION_GROUP: &str = "muda";
+const ACTION_GROUP_DATA_KEY: &str = "mudaActionGroup";
+const INTERNAL_ID_ATTRIBUTE: &str = "muda-internal-id";
+
+type GtkId = usize;
+
+struct GtkInsertContext<'a> {
+    app: &'a gtk::Application,
+    menu_id: GtkId,
+    parent_menu: &'a gio::Menu,
+    parent_widget: &'a gtk::Widget,
+}
+
+enum GtkMenuBar {
+    MenuBar {
+        widget: gtk::PopoverMenuBar,
+        menu: gio::Menu,
+        app: gtk::Application,
+        window: glib::WeakRef<gtk::Window>,
+    },
+    ContextMenu {
+
+--- src/platform_impl/macos/icon.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use objc2::{rc::Retained, AllocAnyThread};
+use objc2_app_kit::NSImage;
+use objc2_core_foundation::CGFloat;
+use objc2_foundation::{NSData, NSSize};
+
+use crate::icon::{BadIcon, RgbaIcon};
+use std::io::Cursor;
+
+#[derive(Debug, Clone)]
+pub struct PlatformIcon(RgbaIcon);
+
+impl PlatformIcon {
+    pub fn from_rgba(rgba: Vec<u8>, width: u32, height: u32) -> Result<Self, BadIcon> {
+        Ok(PlatformIcon(RgbaIcon::from_rgba(rgba, width, height)?))
+    }
+
+    pub fn get_size(&self) -> (u32, u32) {
+        (self.0.width, self.0.height)
+    }
+
+    pub fn to_png(&self) -> Vec<u8> {
+        let mut png = Vec::new();
+
+        {
+            let mut encoder =
+                png::Encoder::new(Cursor::new(&mut png), self.0.width as _, self.0.height as _);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&self.0.rgba).unwrap();
+        }
+
+        png
+    }
+
+    pub fn to_nsimage(&self, fixed_height: Option<f64>) -> Retained<NSImage> {
+        let (width, height) = self.get_size();
+        let icon = self.to_png();
+
+        let (icon_width, icon_height) = match fixed_height {
+            Some(fixed_height) => {
+                let icon_height: CGFloat = fixed_height as CGFloat;
+                let icon_width: CGFloat = (width as CGFloat) / (height as CGFloat / icon_height);
+
+                (icon_width, icon_height)
+            }
+
+            None => (width as CGFloat, height as CGFloat),
+        };
+
+
+--- src/platform_impl/macos/mod.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+mod icon;
+mod ns_menu_item;
+mod util;
+
+pub(crate) use icon::PlatformIcon;
+pub(crate) use util::app_name;
+
+use std::{cell::RefCell, collections::HashMap, ffi::c_void, rc::Rc};
+
+use objc2::{
+    define_class, msg_send,
+    rc::Retained,
+    runtime::{AnyObject, NSObjectProtocol, ProtocolObject, Sel},
+    sel, AnyThread, DeclaredClass, MainThreadOnly, Message,
+};
+use objc2_app_kit::{
+    NSAboutPanelOptionApplicationIcon, NSAboutPanelOptionApplicationName,
+    NSAboutPanelOptionApplicationVersion, NSAboutPanelOptionCredits, NSAboutPanelOptionVersion,
+    NSApplication, NSColor, NSControlStateValueOff, NSControlStateValueOn, NSEvent,
+    NSEventModifierFlags, NSFont, NSFontAttributeName, NSForegroundColorAttributeName, NSImage,
+    NSImageName, NSMenu, NSMenuDelegate, NSMenuItem, NSView, NSWindow,
+};
+use objc2_foundation::{
+    ns_string, MainThreadMarker, NSAttributedString, NSDictionary, NSInteger,
+    NSMutableAttributedString, NSObject, NSPoint, NSRange, NSRect, NSSize, NSString,
+};
+
+use self::{ns_menu_item::NsMenuItem, util::strip_mnemonic};
+use crate::{
+    accelerator::MenuAccelerator,
+    dpi::{LogicalPosition, Position},
+    icon::Icon,
+    items::*,
+    platform_impl::PlatformAttachArgs,
+    util::{AddOp, Counter},
+    MenuEvent, MenuItemAction, MenuItemKind, NativeIcon,
+};
+
+static COUNTER: Counter = Counter::new();
+
+#[cfg(feature = "snapshot")]
+pub(crate) fn dispatch_on_main_thread<F>(f: F)
+where
+    F: FnOnce() + Send + 'static,
+{
+    // TODO: Dispatch the callback to the macOS main thread instead of running it inline.
+    f();
+}
+
+/// https://developer.apple.com/documentation/appkit/nsapplication/1428479-orderfrontstandardaboutpanelwith#discussion
+#[allow(non_upper_case_globals)]
+
+--- src/platform_impl/macos/ns_menu_item.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
+
+use objc2::{
+    define_class, msg_send,
+    rc::Retained,
+    runtime::{AnyObject, Sel},
+    MainThreadOnly,
+};
+use objc2_app_kit::{NSEventModifierFlags, NSMenuItem};
+use objc2_foundation::{MainThreadMarker, NSString};
+
+use super::{util::strip_mnemonic, PlatformMenuItem};
+use crate::accelerator::MenuAccelerator;
+
+define_class!(
+    #[unsafe(super(NSMenuItem))]
+    #[name = "MudaMenuItem"]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = Cell<Option<Rc<RefCell<PlatformMenuItem>>>>]
+    pub(super) struct NsMenuItem;
+
+    impl NsMenuItem {
+        #[unsafe(method(customAction:))]
+        fn custom_action(&self, _sender: Option<&AnyObject>) {
+            self.action();
+        }
+
+        #[unsafe(method(customShowAboutPanel:))]
+        fn custom_show_about_panel(&self, _sender: Option<&AnyObject>) {
+            self.show_about_panel();
+        }
+    }
+);
+
+impl NsMenuItem {
+    fn new(
+        mtm: MainThreadMarker,
+        title: &NSString,
+        action: Option<Sel>,
+        key_equivalent: &NSString,
+    ) -> Retained<Self> {
+        let this = mtm.alloc().set_ivars(Cell::new(None));
+        unsafe {
+            msg_send![super(this), initWithTitle: title, action: action, keyEquivalent: key_equivalent]
+        }
+    }
+
+    pub(super) fn create(
+
+--- src/platform_impl/macos/util.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::str;
+
+use objc2_app_kit::NSRunningApplication;
+
+pub(crate) fn app_name() -> Option<String> {
+    NSRunningApplication::currentApplication()
+        .localizedName()
+        .map(|name| name.to_string())
+}
+
+/// Strips single `&` characters from the string.
+///
+/// `&` can be escaped as `&&` to prevent stripping, in which case a single `&` will be output.
+pub fn strip_mnemonic<S: AsRef<str>>(string: S) -> String {
+    let string = string.as_ref();
+    let mut stripped = String::with_capacity(string.len());
+    let mut characters = string.chars().peekable();
+
+    while let Some(character) = characters.next() {
+        match character {
+            '&' if characters.peek() == Some(&'&') => {
+                characters.next();
+                stripped.push('&');
+            }
+            '&' => {}
+            _ => stripped.push(character),
+        }
+    }
+
+    stripped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_mnemonic;
+
+    #[test]
+    fn strips_mnemonics() {
+        assert_eq!(strip_mnemonic("H&ello"), "Hello");
+        assert_eq!(strip_mnemonic("H&&ello"), "H&ello");
+        assert_eq!(strip_mnemonic("H&&&ello"), "H&ello");
+    }
+}
+
+
+--- src/platform_impl/mod.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+#![cfg_attr(
+    all(
+        any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd"
+        ),
+        not(any(feature = "gtk3", feature = "gtk4"))
+    ),
+    allow(dead_code)
+)]
+
+#[cfg(target_os = "windows")]
+#[path = "windows/mod.rs"]
+mod platform;
+#[cfg(all(
+    any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ),
+    feature = "gtk4"
+))]
+#[path = "gtk4/mod.rs"]
+mod platform;
+#[cfg(all(
+    any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ),
+    feature = "gtk3",
+    not(feature = "gtk4")
+))]
+#[path = "gtk/mod.rs"]
+mod platform;
+#[cfg(all(
+    any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ),
+    not(any(feature = "gtk3", feature = "gtk4"))
+
+--- src/platform_impl/noop/mod.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use crate::{
+    accelerator::MenuAccelerator,
+    icon::NoIcon,
+    items::{IconType, MenuItemAction},
+    util::AddOp,
+    MenuItemKind, TextStyle,
+};
+
+pub(crate) type PlatformIcon = NoIcon;
+
+#[cfg(feature = "snapshot")]
+pub(crate) fn dispatch_on_main_thread<F>(f: F)
+where
+    F: FnOnce() + Send + 'static,
+{
+    f();
+}
+
+pub(crate) struct PlatformMenu;
+
+impl PlatformMenu {
+    pub(crate) fn new() -> Self {
+        Self
+    }
+
+    pub(crate) fn attach(&mut self, _child: &MenuItemKind, _op: AddOp) -> crate::Result<()> {
+        Ok(())
+    }
+
+    pub(crate) fn remove_at(&mut self, _index: usize, _child: &MenuItemKind) {}
+}
+
+pub(crate) struct PlatformMenuItem;
+
+impl PlatformMenuItem {
+    pub(crate) fn new(_click: MenuItemAction) -> Self {
+        Self
+    }
+
+    pub(crate) fn new_submenu(_click: MenuItemAction) -> Self {
+        Self
+    }
+
+    pub(crate) fn text(&self) -> Option<String> {
+        None
+    }
+
+    pub(crate) fn set_text(&mut self, _text: &str, _accelerator: Option<&MenuAccelerator>) {}
+
+    pub(crate) fn set_styled_text(
+        &mut self,
+
+--- src/platform_impl/windows/dark_menu_bar.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+// this is a port of combination of https://github.com/hrydgard/ppsspp/blob/master/Windows/W32Util/UAHMenuBar.cpp and https://github.com/ysc3839/win32-darkmode/blob/master/win32-darkmode/DarkMode.h
+
+#![allow(non_snake_case, clippy::upper_case_acronyms)]
+
+use std::cell::Cell;
+
+use once_cell::sync::Lazy;
+use windows_sys::{
+    s,
+    Win32::{
+        Foundation::*,
+        Graphics::Gdi::*,
+        System::LibraryLoader::*,
+        UI::{Accessibility::*, Controls::*, WindowsAndMessaging::*},
+    },
+};
+
+pub const WM_UAHDRAWMENU: u32 = 0x0091;
+pub const WM_UAHDRAWMENUITEM: u32 = 0x0092;
+
+#[repr(C)]
+struct UAHMENUITEMMETRICS0 {
+    cx: u32,
+    cy: u32,
+}
+
+#[repr(C)]
+struct UAHMENUITEMMETRICS {
+    rgsizeBar: [UAHMENUITEMMETRICS0; 2],
+    rgsizePopup: [UAHMENUITEMMETRICS0; 4],
+}
+
+#[repr(C)]
+struct UAHMENUPOPUPMETRICS {
+    rgcx: [u32; 4],
+    fUpdateMaxWidths: u32,
+}
+
+#[repr(C)]
+struct UAHMENU {
+    hmenu: HMENU,
+    hdc: HDC,
+    dwFlags: u32,
+}
+#[repr(C)]
+struct UAHMENUITEM {
+    iPosition: u32,
+    umim: UAHMENUITEMMETRICS,
+    umpm: UAHMENUPOPUPMETRICS,
+}
+#[repr(C)]
+
+--- src/platform_impl/windows/icon.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+// taken from https://github.com/rust-windowing/winit/blob/92fdf5ba85f920262a61cee4590f4a11ad5738d1/src/platform_impl/windows/icon.rs
+
+use std::{fmt, io, mem, path::Path, sync::Arc};
+
+use windows_sys::{
+    core::PCWSTR,
+    Win32::{Foundation::RECT, Graphics::Gdi::*, UI::WindowsAndMessaging::*},
+};
+
+use crate::icon::*;
+
+use super::util;
+
+impl Pixel {
+    fn convert_to_bgra(&mut self) {
+        mem::swap(&mut self.r, &mut self.b);
+    }
+}
+
+impl RgbaIcon {
+    fn into_windows_icon(self) -> Result<WinIcon, BadIcon> {
+        let rgba = self.rgba;
+        let pixel_count = rgba.len() / PIXEL_SIZE;
+        let mut and_mask = Vec::with_capacity(pixel_count);
+        let pixels =
+            unsafe { std::slice::from_raw_parts_mut(rgba.as_ptr() as *mut Pixel, pixel_count) };
+        for pixel in pixels {
+            and_mask.push(pixel.a.wrapping_sub(u8::MAX)); // invert alpha channel
+            pixel.convert_to_bgra();
+        }
+        assert_eq!(and_mask.len(), pixel_count);
+        let handle = unsafe {
+            CreateIcon(
+                std::ptr::null_mut(),
+                self.width as i32,
+                self.height as i32,
+                1,
+                (PIXEL_SIZE * 8) as u8,
+                and_mask.as_ptr(),
+                rgba.as_ptr(),
+            )
+        };
+        if !handle.is_null() {
+            Ok(WinIcon::from_handle(handle))
+        } else {
+            Err(BadIcon::OsError(io::Error::last_os_error()))
+        }
+    }
+}
+
+#[derive(Debug)]
+
+--- src/platform_impl/windows/mod.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+mod dark_menu_bar;
+mod icon;
+mod util;
+
+pub(crate) use self::icon::WinIcon as PlatformIcon;
+use self::{
+    dark_menu_bar::{WM_UAHDRAWMENU, WM_UAHDRAWMENUITEM},
+    util::Owned,
+};
+
+use crate::{
+    accelerator::MenuAccelerator,
+    dpi::Position,
+    items::{IconType, MenuItemAction, PredefinedMenuItemType},
+    util::{AddOp, Counter},
+    AboutMetadata, MenuEvent, MenuTheme, NativeIcon,
+};
+
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
+use windows_sys::Win32::{
+    Foundation::{FALSE, HWND, LPARAM, LRESULT, POINT, WPARAM},
+    Graphics::Gdi::*,
+    UI::{
+        Input::KeyboardAndMouse::*,
+        Shell::{self as shell, *},
+        WindowsAndMessaging::*,
+    },
+};
+
+/// Type alias for a window handle (HWND) in Windows.
+type Hwnd = isize;
+
+/// Internal command ids. Used for the `WM_COMMAND` message to identify which menu item was clicked.
+static COUNTER: Counter = Counter::new_with_start(1000);
+
+#[cfg(feature = "snapshot")]
+pub(crate) fn dispatch_on_main_thread<F>(f: F)
+where
+    F: FnOnce() + Send + 'static,
+{
+    // TODO: Dispatch the callback to the Windows main thread instead of running it inline.
+    f();
+}
+
+/// The accelerator table for a menu, which is shared by all windows that have the menu attached.
+/// and also by all submenus and items of the menu so that they can add and remove their own accelerators.
+struct AcceleratorTable {
+
+--- src/platform_impl/windows/util.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use once_cell::sync::Lazy;
+use windows_sys::{
+    core::HRESULT,
+    Win32::{
+        Foundation::{FARPROC, HWND, S_OK},
+        Graphics::Gdi::{
+            DeleteObject, GetDC, GetDeviceCaps, MonitorFromWindow, HBITMAP, HMONITOR, LOGPIXELSX,
+            MONITOR_DEFAULTTONEAREST,
+        },
+        System::LibraryLoader::{GetProcAddress, LoadLibraryW},
+        UI::{
+            HiDpi::{MDT_EFFECTIVE_DPI, MONITOR_DPI_TYPE},
+            WindowsAndMessaging::IsProcessDPIAware,
+        },
+    },
+};
+
+// Copied from the `windows-core` crate. Remove this compatibility shim once `Owned` and `Free`
+// are available from the `windows_sys::core` module.
+/// A handle that knows how to release its owned native resource.
+pub(super) trait Free {
+    /// Releases the handle.
+    ///
+    /// # Safety
+    ///
+    /// The handle must be owned by the caller and valid to release.
+    unsafe fn free(&mut self);
+}
+
+/// An owned native handle that releases itself when dropped.
+#[repr(transparent)]
+pub(super) struct Owned<T: Free>(T);
+
+impl<T: Free> Owned<T> {
+    /// Takes ownership of a native handle.
+    ///
+    /// # Safety
+    ///
+    /// The handle must be uniquely owned and valid to release with its [`Free`] implementation.
+    pub(super) unsafe fn new(handle: T) -> Self {
+        Self(handle)
+    }
+}
+
+impl<T: Free> Drop for Owned<T> {
+    fn drop(&mut self) {
+        unsafe { self.0.free() };
+    }
+}
+
+impl<T: Free> std::ops::Deref for Owned<T> {
+
+--- src/sealed.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+pub trait Sealed {}
+
+
+--- src/state_cell.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::ops::{Deref, DerefMut};
+
+#[cfg(feature = "snapshot")]
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
+#[cfg(not(feature = "snapshot"))]
+use std::{
+    cell::{Ref, RefCell, RefMut},
+    rc::{Rc, Weak},
+};
+
+/// Shared interior-mutable state backed by `Rc<RefCell<T>>` normally and `Arc<Mutex<T>>` when the
+/// `snapshot` feature is enabled.
+pub(crate) struct StateCell<T> {
+    #[cfg(not(feature = "snapshot"))]
+    inner: Rc<RefCell<T>>,
+    #[cfg(feature = "snapshot")]
+    inner: Arc<Mutex<T>>,
+}
+
+/// A non-owning handle to a [`StateCell`].
+pub(crate) struct WeakStateCell<T> {
+    #[cfg(not(feature = "snapshot"))]
+    inner: Weak<RefCell<T>>,
+    #[cfg(feature = "snapshot")]
+    inner: Weak<Mutex<T>>,
+}
+
+pub(crate) struct StateRef<'a, T> {
+    #[cfg(not(feature = "snapshot"))]
+    inner: Ref<'a, T>,
+    #[cfg(feature = "snapshot")]
+    inner: MutexGuard<'a, T>,
+}
+
+pub(crate) struct StateRefMut<'a, T> {
+    #[cfg(not(feature = "snapshot"))]
+    inner: RefMut<'a, T>,
+    #[cfg(feature = "snapshot")]
+    inner: MutexGuard<'a, T>,
+}
+
+impl<T> Clone for StateCell<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<T> Clone for WeakStateCell<T> {
+    fn clone(&self) -> Self {
+
+--- src/util.rs ---
+// Copyright 2022-2022 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use std::sync::atomic::{AtomicU32, Ordering};
+
+use crate::MenuId;
+
+#[derive(Clone, Copy, Debug)]
+pub enum AddOp {
+    Append,
+    Insert(usize),
+}
+
+/// Ids for callers who did not supply one.
+static ID_COUNTER: Counter = Counter::new_with_start(0);
+
+/// `id`, or the next generated one.
+pub fn next_id(id: Option<MenuId>) -> MenuId {
+    id.unwrap_or_else(|| MenuId(ID_COUNTER.next().to_string()))
+}
+
+pub struct Counter(AtomicU32);
+
+impl Counter {
+    #[allow(unused)]
+    pub const fn new() -> Self {
+        Self(AtomicU32::new(1))
+    }
+
+    #[allow(unused)]
+    pub const fn new_with_start(start: u32) -> Self {
+        Self(AtomicU32::new(start))
+    }
+
+    pub fn next(&self) -> u32 {
+        self.0.fetch_add(1, Ordering::Relaxed)
+    }
+}

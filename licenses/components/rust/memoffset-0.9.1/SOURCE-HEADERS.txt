@@ -1,0 +1,227 @@
+--- src/lib.rs ---
+// Copyright (c) 2017 Gilad Naaman
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+//! A crate used for calculating offsets of struct members and their spans.
+//!
+//! This functionality currently can not be used in compile time code such as `const` or `const fn` definitions.
+//!
+//! ## Examples
+//! ```
+//! use memoffset::{offset_of, span_of};
+//!
+//! #[repr(C, packed)]
+//! struct HelpMeIAmTrappedInAStructFactory {
+//!     help_me_before_they_: [u8; 15],
+//!     a: u32
+//! }
+//!
+//! assert_eq!(offset_of!(HelpMeIAmTrappedInAStructFactory, a), 15);
+//! assert_eq!(span_of!(HelpMeIAmTrappedInAStructFactory, a), 15..19);
+//! assert_eq!(span_of!(HelpMeIAmTrappedInAStructFactory, help_me_before_they_ .. a), 0..15);
+//! ```
+//!
+//! This functionality can be useful, for example, for checksum calculations:
+//!
+//! ```ignore
+//! #[repr(C, packed)]
+//! struct Message {
+//!     header: MessageHeader,
+//!     fragment_index: u32,
+//!     fragment_count: u32,
+//!     payload: [u8; 1024],
+//!     checksum: u16
+//! }
+//!
+//! let checksum_range = &raw[span_of!(Message, header..checksum)];
+//! let checksum = crc16(checksum_range);
+//! ```
+
+
+--- src/offset_of.rs ---
+// Copyright (c) 2017 Gilad Naaman
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+/// Macro to create a local `base_ptr` raw pointer of the given type, avoiding UB as
+/// much as is possible currently.
+#[cfg(maybe_uninit)]
+#[macro_export]
+#[doc(hidden)]
+macro_rules! _memoffset__let_base_ptr {
+    ($name:ident, $type:ty) => {
+        // No UB here, and the pointer does not dangle, either.
+        // But we have to make sure that `uninit` lives long enough,
+        // so it has to be in the same scope as `$name`. That's why
+        // `let_base_ptr` declares a variable (several, actually)
+        // instead of returning one.
+        let uninit = $crate::__priv::mem::MaybeUninit::<$type>::uninit();
+        let $name: *const $type = uninit.as_ptr();
+    };
+}
+#[cfg(not(maybe_uninit))]
+#[macro_export]
+#[doc(hidden)]
+macro_rules! _memoffset__let_base_ptr {
+    ($name:ident, $type:ty) => {
+        // No UB right here, but we will later dereference this pointer to
+        // offset into a field, and that is UB because the pointer is dangling.
+        let $name = $crate::__priv::mem::align_of::<$type>() as *const $type;
+    };
+}
+
+/// Macro to compute the distance between two pointers.
+#[cfg(stable_const)]
+#[macro_export]
+#[doc(hidden)]
+macro_rules! _memoffset_offset_from_unsafe {
+    ($field:expr, $base:expr) => {{
+        let field = $field; // evaluate $field outside the `unsafe` block
+        let base = $base; // evaluate $base outside the `unsafe` block
+
+--- src/raw_field.rs ---
+// Copyright (c) 2020 Gilad Naaman, Ralf Jung
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+/// `addr_of!`, or just ref-then-cast when that is not available.
+#[cfg(raw_ref_macros)]
+#[macro_export]
+#[doc(hidden)]
+macro_rules! _memoffset__addr_of {
+    ($path:expr) => {{
+        $crate::__priv::ptr::addr_of!($path)
+    }};
+}
+#[cfg(not(raw_ref_macros))]
+#[macro_export]
+#[doc(hidden)]
+macro_rules! _memoffset__addr_of {
+    ($path:expr) => {{
+        // This is UB because we create an intermediate reference to uninitialized memory.
+        // Nothing we can do about that without `addr_of!` though.
+        &$path as *const _
+    }};
+}
+
+/// Deref-coercion protection macro.
+///
+/// Prevents compilation if the specified field name is not a part of the
+/// struct definition.
+///
+/// ```compile_fail
+/// use memoffset::_memoffset__field_check;
+///
+/// struct Foo {
+///     foo: i32,
+/// }
+///
+/// type BoxedFoo = Box<Foo>;
+///
+/// _memoffset__field_check!(BoxedFoo, foo);
+
+--- src/span_of.rs ---
+// Copyright (c) 2017 Gilad Naaman
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+/// Reexport for `local_inner_macros`; see
+/// <https://doc.rust-lang.org/edition-guide/rust-2018/macros/macro-changes.html#macros-using-local_inner_macros>.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! _memoffset__compile_error {
+    ($($inner:tt)*) => {
+        compile_error! { $($inner)* }
+    }
+}
+
+/// Produces a range instance representing the sub-slice containing the specified member.
+///
+/// This macro provides 2 forms of differing functionalities.
+///
+/// The first form is identical to the appearance of the `offset_of!` macro.
+///
+/// ```ignore
+/// span_of!(Struct, member)
+/// ```
+///
+/// The second form of `span_of!` returns a sub-slice which starts at one field, and ends at another.
+/// The general pattern of this form is:
+///
+/// ```ignore
+/// // Exclusive
+/// span_of!(Struct, member_a .. member_b)
+/// // Inclusive
+/// span_of!(Struct, member_a ..= member_b)
+///
+/// // Open-ended ranges
+/// span_of!(Struct, .. end)
+/// span_of!(Struct, start ..)
+/// ```
+///
+/// ### Note

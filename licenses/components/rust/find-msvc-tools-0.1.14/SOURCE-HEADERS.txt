@@ -1,0 +1,284 @@
+--- src/com.rs ---
+// Copyright © 2017 winapi-rs developers
+// Licensed under the Apache License, Version 2.0
+// <LICENSE-APACHE or https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your option.
+// All files in the project carrying such notice may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::{
+    winapi::{IUnknown, Interface},
+    windows_sys::{
+        CoInitializeEx, SysFreeString, SysStringLen, BSTR, COINIT_MULTITHREADED, HRESULT, S_FALSE,
+        S_OK,
+    },
+};
+use std::{
+    convert::TryInto,
+    ffi::OsString,
+    ops::Deref,
+    os::windows::ffi::OsStringExt,
+    ptr::{null, null_mut},
+    slice::from_raw_parts,
+};
+
+pub fn initialize() -> Result<(), HRESULT> {
+    let err = unsafe { CoInitializeEx(null(), COINIT_MULTITHREADED.try_into().unwrap()) };
+    if err != S_OK && err != S_FALSE {
+        // S_FALSE just means COM is already initialized
+        Err(err)
+    } else {
+        Ok(())
+    }
+}
+
+pub struct ComPtr<T>(*mut T)
+where
+    T: Interface;
+impl<T> ComPtr<T>
+where
+    T: Interface,
+{
+    /// Creates a `ComPtr` to wrap a raw pointer.
+    /// It takes ownership over the pointer which means it does __not__ call `AddRef`.
+    /// `T` __must__ be a COM interface that inherits from `IUnknown`.
+    pub unsafe fn from_raw(ptr: *mut T) -> ComPtr<T> {
+        assert!(!ptr.is_null());
+        ComPtr(ptr)
+    }
+    /// For internal use only.
+    fn as_unknown(&self) -> &IUnknown {
+        unsafe { &*self.0.cast() }
+    }
+    /// Performs `QueryInterface` fun.
+    pub fn cast<U>(&self) -> Result<ComPtr<U>, i32>
+    where
+        U: Interface,
+
+--- src/find_tools.rs ---
+// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! An internal use crate to looking for windows-specific tools:
+//! 1. On Windows host, probe the Windows Registry if needed;
+//! 2. On non-Windows host, check specified environment variables.
+
+#![allow(missing_docs)]
+#![allow(clippy::upper_case_acronyms)]
+
+use std::{
+    env,
+    ffi::{OsStr, OsString},
+    ops::Deref,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::Arc,
+};
+
+use crate::Tool;
+
+/// The target provided by the user.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum TargetArch {
+    X86,
+    X64,
+    Arm,
+    Arm64,
+    Arm64ec,
+}
+impl TargetArch {
+    /// Parse the `TargetArch` from a str. Returns `None` if the arch is unrecognized.
+    fn new(arch: &str) -> Option<Self> {
+        // NOTE: Keep up to date with docs in [`find`].
+        match arch {
+            "x64" | "x86_64" => Some(Self::X64),
+            "arm64" | "aarch64" => Some(Self::Arm64),
+            "arm64ec" => Some(Self::Arm64ec),
+            "x86" | "i686" | "i586" => Some(Self::X86),
+            "arm" | "thumbv7a" => Some(Self::Arm),
+            _ => None,
+        }
+    }
+
+    #[cfg(windows)]
+    /// Gets the Visual Studio name for the architecture.
+    fn as_vs_arch(&self) -> &'static str {
+        match self {
+
+--- src/registry.rs ---
+// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::windows_sys::{
+    RegCloseKey, RegEnumKeyExW, RegOpenKeyExW, RegQueryValueExW, ERROR_NO_MORE_ITEMS,
+    ERROR_SUCCESS, HKEY, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, REG_SZ,
+};
+use std::{
+    ffi::{OsStr, OsString},
+    io,
+    ops::RangeFrom,
+    os::windows::prelude::*,
+    ptr::null_mut,
+};
+
+/// Must never be `HKEY_PERFORMANCE_DATA`.
+pub(crate) struct RegistryKey(Repr);
+
+#[allow(clippy::upper_case_acronyms)]
+type DWORD = u32;
+
+struct OwnedKey(HKEY);
+
+/// Note: must not encode `HKEY_PERFORMANCE_DATA` or one of its subkeys.
+enum Repr {
+    /// `HKEY_LOCAL_MACHINE`.
+    LocalMachine,
+    /// A subkey of `HKEY_LOCAL_MACHINE`.
+    Owned(OwnedKey),
+}
+
+pub struct Iter<'a> {
+    idx: RangeFrom<DWORD>,
+    key: &'a RegistryKey,
+}
+
+unsafe impl Sync for Repr {}
+unsafe impl Send for Repr {}
+
+pub(crate) const LOCAL_MACHINE: RegistryKey = RegistryKey(Repr::LocalMachine);
+
+impl RegistryKey {
+    fn raw(&self) -> HKEY {
+        match self.0 {
+            Repr::LocalMachine => HKEY_LOCAL_MACHINE,
+            Repr::Owned(ref val) => val.0,
+        }
+    }
+
+--- src/setup_config.rs ---
+// Copyright © 2017 winapi-rs developers
+// Licensed under the Apache License, Version 2.0
+// <LICENSE-APACHE or https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your option.
+// All files in the project carrying such notice may not be copied, modified, or distributed
+// except according to those terms.
+
+#![allow(bad_style)]
+#![allow(unused)]
+
+use crate::{
+    com::{BStr, ComPtr},
+    winapi::{
+        IUnknown, IUnknownVtbl, Interface, LCID, LPCOLESTR, LPCWSTR, LPFILETIME, LPSAFEARRAY,
+        PULONGLONG, ULONG,
+    },
+    windows_sys::{CoCreateInstance, BSTR, CLSCTX_ALL, HRESULT, S_FALSE},
+};
+
+use std::{
+    ffi::OsString,
+    ptr::{null, null_mut},
+};
+
+// Bindings to the Setup.Configuration stuff
+pub type InstanceState = u32;
+
+pub const eNone: InstanceState = 0;
+pub const eLocal: InstanceState = 1;
+pub const eRegistered: InstanceState = 2;
+pub const eNoRebootRequired: InstanceState = 4;
+pub const eComplete: InstanceState = -1i32 as u32;
+
+RIDL! {#[uuid(0xb41463c3, 0x8866, 0x43b5, 0xbc, 0x33, 0x2b, 0x06, 0x76, 0xf7, 0xf4, 0x2e)]
+interface ISetupInstance(ISetupInstanceVtbl): IUnknown(IUnknownVtbl) {
+    fn GetInstanceId(
+        pbstrInstanceId: *mut BSTR,
+    ) -> HRESULT,
+    fn GetInstallDate(
+        pInstallDate: LPFILETIME,
+    ) -> HRESULT,
+    fn GetInstallationName(
+        pbstrInstallationName: *mut BSTR,
+    ) -> HRESULT,
+    fn GetInstallationPath(
+        pbstrInstallationPath: *mut BSTR,
+    ) -> HRESULT,
+    fn GetInstallationVersion(
+        pbstrInstallationVersion: *mut BSTR,
+    ) -> HRESULT,
+    fn GetDisplayName(
+        lcid: LCID,
+        pbstrDisplayName: *mut BSTR,
+    ) -> HRESULT,
+    fn GetDescription(
+
+--- src/winapi.rs ---
+// Copyright © 2015-2017 winapi-rs developers
+// Licensed under the Apache License, Version 2.0
+// <LICENSE-APACHE or https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your option.
+// All files in the project carrying such notice may not be copied, modified, or distributed
+// except according to those terms.
+
+#![allow(bad_style, clippy::upper_case_acronyms)]
+
+pub type wchar_t = u16;
+
+pub(crate) use crate::windows_sys::{FILETIME, GUID, HRESULT, SAFEARRAY};
+
+pub type REFIID = *const IID;
+pub type IID = GUID;
+pub type ULONG = core::ffi::c_ulong;
+pub type DWORD = u32;
+pub type LPFILETIME = *mut FILETIME;
+pub type OLECHAR = WCHAR;
+pub type WCHAR = wchar_t;
+pub type LPCOLESTR = *const OLECHAR;
+pub type LCID = DWORD;
+pub type LPCWSTR = *const WCHAR;
+pub type PULONGLONG = *mut ULONGLONG;
+pub type ULONGLONG = u64;
+
+pub trait Interface {
+    fn uuidof() -> GUID;
+}
+
+pub type LPSAFEARRAY = *mut SAFEARRAY;
+
+macro_rules! DEFINE_GUID {
+    (
+        $name:ident, $l:expr, $w1:expr, $w2:expr,
+        $b1:expr, $b2:expr, $b3:expr, $b4:expr, $b5:expr, $b6:expr, $b7:expr, $b8:expr
+    ) => {
+        pub const $name: $crate::winapi::GUID = $crate::winapi::GUID {
+            data1: $l,
+            data2: $w1,
+            data3: $w2,
+            data4: [$b1, $b2, $b3, $b4, $b5, $b6, $b7, $b8],
+        };
+    };
+}
+
+macro_rules! RIDL {
+    (#[uuid($($uuid:expr),+)]
+    interface $interface:ident ($vtbl:ident) {$(
+        fn $method:ident($($p:ident : $t:ty,)*) -> $rtr:ty,
+    )+}) => (
+        #[repr(C)]
+        pub struct $vtbl {
+            $(pub $method: unsafe extern "system" fn(
+                This: *mut $interface,

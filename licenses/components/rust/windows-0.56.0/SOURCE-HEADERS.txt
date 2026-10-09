@@ -1,0 +1,56 @@
+--- src/Windows/Win32/Media/MediaPlayer/impl.rs ---
+#[cfg(feature = "Win32_System_Com")]
+pub trait IFeed_Impl: Sized + super::super::System::Com::IDispatch_Impl {
+    fn Xml(&self, count: i32, sortproperty: FEEDS_XML_SORT_PROPERTY, sortorder: FEEDS_XML_SORT_ORDER, filterflags: FEEDS_XML_FILTER_FLAGS, includeflags: FEEDS_XML_INCLUDE_FLAGS) -> windows_core::Result<windows_core::BSTR>;
+    fn Name(&self) -> windows_core::Result<windows_core::BSTR>;
+    fn Rename(&self, name: &windows_core::BSTR) -> windows_core::Result<()>;
+    fn Url(&self) -> windows_core::Result<windows_core::BSTR>;
+    fn SetUrl(&self, feedurl: &windows_core::BSTR) -> windows_core::Result<()>;
+    fn LocalId(&self) -> windows_core::Result<windows_core::BSTR>;
+    fn Path(&self) -> windows_core::Result<windows_core::BSTR>;
+    fn Move(&self, newparentpath: &windows_core::BSTR) -> windows_core::Result<()>;
+    fn Parent(&self) -> windows_core::Result<super::super::System::Com::IDispatch>;
+    fn LastWriteTime(&self) -> windows_core::Result<f64>;
+    fn Delete(&self) -> windows_core::Result<()>;
+    fn Download(&self) -> windows_core::Result<()>;
+    fn AsyncDownload(&self) -> windows_core::Result<()>;
+    fn CancelAsyncDownload(&self) -> windows_core::Result<()>;
+    fn SyncSetting(&self) -> windows_core::Result<FEEDS_SYNC_SETTING>;
+    fn SetSyncSetting(&self, syncsetting: FEEDS_SYNC_SETTING) -> windows_core::Result<()>;
+    fn Interval(&self) -> windows_core::Result<i32>;
+    fn SetInterval(&self, minutes: i32) -> windows_core::Result<()>;
+    fn LastDownloadTime(&self) -> windows_core::Result<f64>;
+    fn LocalEnclosurePath(&self) -> windows_core::Result<windows_core::BSTR>;
+    fn Items(&self) -> windows_core::Result<super::super::System::Com::IDispatch>;
+    fn GetItem(&self, itemid: i32) -> windows_core::Result<super::super::System::Com::IDispatch>;
+    fn Title(&self) -> windows_core::Result<windows_core::BSTR>;
+    fn Description(&self) -> windows_core::Result<windows_core::BSTR>;
+    fn Link(&self) -> windows_core::Result<windows_core::BSTR>;
+    fn Image(&self) -> windows_core::Result<windows_core::BSTR>;
+    fn LastBuildDate(&self) -> windows_core::Result<f64>;
+    fn PubDate(&self) -> windows_core::Result<f64>;
+    fn Ttl(&self) -> windows_core::Result<i32>;
+    fn Language(&self) -> windows_core::Result<windows_core::BSTR>;
+    fn Copyright(&self) -> windows_core::Result<windows_core::BSTR>;
+    fn MaxItemCount(&self) -> windows_core::Result<i32>;
+    fn SetMaxItemCount(&self, count: i32) -> windows_core::Result<()>;
+    fn DownloadEnclosuresAutomatically(&self) -> windows_core::Result<super::super::Foundation::VARIANT_BOOL>;
+    fn SetDownloadEnclosuresAutomatically(&self, downloadenclosuresautomatically: super::super::Foundation::VARIANT_BOOL) -> windows_core::Result<()>;
+    fn DownloadStatus(&self) -> windows_core::Result<FEEDS_DOWNLOAD_STATUS>;
+    fn LastDownloadError(&self) -> windows_core::Result<FEEDS_DOWNLOAD_ERROR>;
+    fn Merge(&self, feedxml: &windows_core::BSTR, feedurl: &windows_core::BSTR) -> windows_core::Result<()>;
+    fn DownloadUrl(&self) -> windows_core::Result<windows_core::BSTR>;
+    fn IsList(&self) -> windows_core::Result<super::super::Foundation::VARIANT_BOOL>;
+    fn MarkAllItemsRead(&self) -> windows_core::Result<()>;
+    fn GetWatcher(&self, scope: FEEDS_EVENTS_SCOPE, mask: FEEDS_EVENTS_MASK) -> windows_core::Result<super::super::System::Com::IDispatch>;
+    fn UnreadItemCount(&self) -> windows_core::Result<i32>;
+    fn ItemCount(&self) -> windows_core::Result<i32>;
+}
+#[cfg(feature = "Win32_System_Com")]
+impl windows_core::RuntimeName for IFeed {}
+#[cfg(feature = "Win32_System_Com")]
+impl IFeed_Vtbl {
+    pub const fn new<Identity: windows_core::IUnknownImpl<Impl = Impl>, Impl: IFeed_Impl, const OFFSET: isize>() -> IFeed_Vtbl {
+        unsafe extern "system" fn Xml<Identity: windows_core::IUnknownImpl<Impl = Impl>, Impl: IFeed_Impl, const OFFSET: isize>(this: *mut core::ffi::c_void, count: i32, sortproperty: FEEDS_XML_SORT_PROPERTY, sortorder: FEEDS_XML_SORT_ORDER, filterflags: FEEDS_XML_FILTER_FLAGS, includeflags: FEEDS_XML_INCLUDE_FLAGS, xml: *mut std::mem::MaybeUninit<windows_core::BSTR>) -> windows_core::HRESULT {
+            let this = (this as *const *const ()).offset(OFFSET) as *const Identity;
+            let this = (*this).get_impl();

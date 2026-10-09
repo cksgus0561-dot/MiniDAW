@@ -1,0 +1,274 @@
+--- src/expr.rs ---
+// (C) Copyright 2016 Jethro G. Beekman
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+//! Evaluating C expressions from tokens.
+//!
+//! Numerical operators are supported. All numerical values are treated as
+//! `i64` or `f64`. Type casting is not supported. `i64` are converted to
+//! `f64` when used in conjunction with a `f64`. Right shifts are always
+//! arithmetic shifts.
+//!
+//! The `sizeof` operator is not supported.
+//!
+//! String concatenation is supported, but width prefixes are ignored; all
+//! strings are treated as narrow strings.
+//!
+//! Use the `IdentifierParser` to substitute identifiers found in expressions.
+
+use std::collections::HashMap;
+use std::num::Wrapping;
+use std::ops::{
+    AddAssign, BitAndAssign, BitOrAssign, BitXorAssign, DivAssign, MulAssign, RemAssign, ShlAssign,
+    ShrAssign, SubAssign,
+};
+
+use crate::literal::{self, CChar};
+use crate::token::{Kind as TokenKind, Token};
+use crate::ToCexprResult;
+use nom::branch::alt;
+use nom::combinator::{complete, map, map_opt};
+use nom::multi::{fold_many0, many0, separated_list0};
+use nom::sequence::{delimited, pair, preceded};
+use nom::*;
+
+/// Expression parser/evaluator that supports identifiers.
+#[derive(Debug)]
+pub struct IdentifierParser<'ident> {
+    identifiers: &'ident HashMap<Vec<u8>, EvalResult>,
+}
+#[derive(Copy, Clone)]
+struct PRef<'a>(&'a IdentifierParser<'a>);
+
+/// A shorthand for the type of cexpr expression evaluation results.
+pub type CResult<'a, R> = IResult<&'a [Token], R, crate::Error<&'a [Token]>>;
+
+/// The result of parsing a literal or evaluating an expression.
+#[derive(Debug, Clone, PartialEq)]
+#[allow(missing_docs)]
+pub enum EvalResult {
+    Int(Wrapping<i64>),
+    Float(f64),
+    Char(CChar),
+
+--- src/lib.rs ---
+// (C) Copyright 2016 Jethro G. Beekman
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+//! A C expression parser and evaluator.
+//!
+//! This crate provides methods for parsing and evaluating simple C expressions. In general, the
+//! crate can handle most arithmetic expressions that would appear in macros or the definition of
+//! constants, as well as string and character constants.
+//!
+//! The main entry point for is [`token::parse`], which parses a byte string and returns its
+//! evaluated value.
+#![warn(rust_2018_idioms)]
+#![warn(missing_docs)]
+#![allow(deprecated)]
+
+pub mod nom {
+    //! nom's result types, re-exported.
+    pub use nom::{error::ErrorKind, error::Error, Err, IResult, Needed};
+}
+pub mod expr;
+pub mod literal;
+pub mod token;
+
+/// Parsing errors specific to C parsing
+#[derive(Debug)]
+pub enum ErrorKind {
+    /// Expected the specified token
+    ExactToken(token::Kind, &'static [u8]),
+    /// Expected one of the specified tokens
+    ExactTokens(token::Kind, &'static [&'static str]),
+    /// Expected a token of the specified kind
+    TypedToken(token::Kind),
+    /// An unknown identifier was encountered
+    UnknownIdentifier,
+    /// An invalid literal was encountered.
+    ///
+    /// When encountered, this generally means a bug exists in the data that
+    /// was passed in or the parsing logic.
+    InvalidLiteral,
+    /// A full parse was requested, but data was left over after parsing finished.
+    Partial,
+    /// An error occurred in an underlying nom parser.
+    Parser(nom::ErrorKind),
+}
+
+impl From<nom::ErrorKind> for ErrorKind {
+    fn from(k: nom::ErrorKind) -> Self {
+        ErrorKind::Parser(k)
+    }
+}
+
+
+--- src/literal.rs ---
+// (C) Copyright 2016 Jethro G. Beekman
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+//! Parsing C literals from byte slices.
+//!
+//! This will parse a representation of a C literal into a Rust type.
+//!
+//! # characters
+//! Character literals are stored into the `CChar` type, which can hold values
+//! that are not valid Unicode code points. ASCII characters are represented as
+//! `char`, literal bytes with the high byte set are converted into the raw
+//! representation. Escape sequences are supported. If hex and octal escapes
+//! map to an ASCII character, that is used, otherwise, the raw encoding is
+//! used, including for values over 255. Unicode escapes are checked for
+//! validity and mapped to `char`. Character sequences are not supported. Width
+//! prefixes are ignored.
+//!
+//! # strings
+//! Strings are interpreted as byte vectors. Escape sequences are supported. If
+//! hex and octal escapes map onto multi-byte characters, they are truncated to
+//! one 8-bit character. Unicode escapes are converted into their UTF-8
+//! encoding. Width prefixes are ignored.
+//!
+//! # integers
+//! Integers are read into `i64`. Binary, octal, decimal and hexadecimal are
+//! all supported. If the literal value is between `i64::MAX` and `u64::MAX`,
+//! it is bit-cast to `i64`. Values over `u64::MAX` cannot be parsed. Width and
+//! sign suffixes are ignored. Sign prefixes are not supported.
+//!
+//! # real numbers
+//! Reals are read into `f64`. Width suffixes are ignored. Sign prefixes are
+//! not supported in the significand. Hexadecimal floating points are not
+//! supported.
+
+use std::char;
+use std::str::{self, FromStr};
+
+use nom::branch::alt;
+use nom::bytes::complete::is_not;
+use nom::bytes::complete::tag;
+use nom::character::complete::{char, one_of};
+use nom::combinator::{complete, map, map_opt, opt, recognize};
+use nom::multi::{fold_many0, many0, many1, many_m_n};
+use nom::sequence::{delimited, pair, preceded, terminated, tuple};
+use nom::*;
+
+use crate::expr::EvalResult;
+use crate::ToCexprResult;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+/// Representation of a C character
+
+--- src/token.rs ---
+// (C) Copyright 2016 Jethro G. Beekman
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+//! Representation of a C token
+//!
+//! This is designed to map onto a libclang CXToken.
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[allow(missing_docs)]
+pub enum Kind {
+    Punctuation,
+    Keyword,
+    Identifier,
+    Literal,
+    Comment,
+}
+
+/// A single token in a C expression.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Token {
+    /// The type of this token.
+    pub kind: Kind,
+    /// The bytes that make up the token.
+    pub raw: Box<[u8]>,
+}
+
+impl<'a> From<(Kind, &'a [u8])> for Token {
+    fn from((kind, value): (Kind, &'a [u8])) -> Token {
+        Token {
+            kind,
+            raw: value.to_owned().into_boxed_slice(),
+        }
+    }
+}
+
+/// Remove all comment tokens from a vector of tokens
+pub fn remove_comments(v: &mut Vec<Token>) -> &mut Vec<Token> {
+    v.retain(|t| t.kind != Kind::Comment);
+    v
+}
+
+
+--- tests/clang.rs ---
+// (C) Copyright 2016 Jethro G. Beekman
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+extern crate cexpr;
+extern crate clang_sys;
+
+use std::collections::HashMap;
+use std::io::Write;
+use std::str::{self, FromStr};
+use std::{char, ffi, mem, ptr, slice};
+
+use cexpr::assert_full_parse;
+use cexpr::expr::{fn_macro_declaration, EvalResult, IdentifierParser};
+use cexpr::literal::CChar;
+use cexpr::token::Token;
+use clang_sys::*;
+
+// main testing routine
+fn test_definition(
+    ident: Vec<u8>,
+    tokens: &[Token],
+    idents: &mut HashMap<Vec<u8>, EvalResult>,
+) -> bool {
+    fn bytes_to_int(value: &[u8]) -> Option<EvalResult> {
+        str::from_utf8(value)
+            .ok()
+            .map(|s| s.replace("n", "-"))
+            .map(|s| s.replace("_", ""))
+            .and_then(|v| i64::from_str(&v).ok())
+            .map(::std::num::Wrapping)
+            .map(Int)
+    }
+
+    use cexpr::expr::EvalResult::*;
+
+    let display_name = String::from_utf8_lossy(&ident).into_owned();
+
+    let functional;
+    let test = {
+        // Split name such as Str_test_string into (Str,test_string)
+        let pos = ident
+            .iter()
+            .position(|c| *c == b'_')
+            .expect(&format!("Invalid definition in testcase: {}", display_name));
+        let mut expected = &ident[..pos];
+        let mut value = &ident[(pos + 1)..];
+
+        functional = expected == b"Fn";
+
+        if functional {
+            let ident = value;

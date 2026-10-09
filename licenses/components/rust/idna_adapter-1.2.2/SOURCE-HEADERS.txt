@@ -1,0 +1,56 @@
+--- src/lib.rs ---
+// Copyright The rust-url developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! This crate abstracts over a Unicode back end for the [`idna`][1]
+//! crate.
+//!
+//! To work around the lack of [`global-features`][2] in Cargo, this
+//! crate allows the top level `Cargo.lock` to choose an alternative
+//! Unicode back end for the `idna` crate by pinning a version of this
+//! crate.
+//!
+//! See the [README of the latest version][3] for more details.
+//!
+//! [1]: https://docs.rs/crate/idna/latest
+//! [2]: https://internals.rust-lang.org/t/pre-rfc-mutually-excusive-global-features/19618
+//! [3]: https://docs.rs/crate/idna_adapter/latest
+
+#![no_std]
+
+use icu_normalizer::uts46::Uts46MapperBorrowed;
+use icu_properties::props::GeneralCategory;
+use icu_properties::CodePointMapDataBorrowed;
+
+/// Turns a joining type into a mask for comparing with multiple type at once.
+const fn joining_type_to_mask(jt: icu_properties::props::JoiningType) -> u32 {
+    1u32 << jt.to_icu4c_value()
+}
+
+/// Mask for checking for both left and dual joining.
+pub const LEFT_OR_DUAL_JOINING_MASK: JoiningTypeMask = JoiningTypeMask(
+    joining_type_to_mask(icu_properties::props::JoiningType::LeftJoining)
+        | joining_type_to_mask(icu_properties::props::JoiningType::DualJoining),
+);
+
+/// Mask for checking for both left and dual joining.
+pub const RIGHT_OR_DUAL_JOINING_MASK: JoiningTypeMask = JoiningTypeMask(
+    joining_type_to_mask(icu_properties::props::JoiningType::RightJoining)
+        | joining_type_to_mask(icu_properties::props::JoiningType::DualJoining),
+);
+
+/// Turns a bidi class into a mask for comparing with multiple classes at once.
+const fn bidi_class_to_mask(bc: icu_properties::props::BidiClass) -> u32 {
+    1u32 << bc.to_icu4c_value()
+}
+
+/// Mask for checking if the domain is a bidi domain.
+pub const RTL_MASK: BidiClassMask = BidiClassMask(
+    bidi_class_to_mask(icu_properties::props::BidiClass::RightToLeft)
+        | bidi_class_to_mask(icu_properties::props::BidiClass::ArabicLetter)
+        | bidi_class_to_mask(icu_properties::props::BidiClass::ArabicNumber),

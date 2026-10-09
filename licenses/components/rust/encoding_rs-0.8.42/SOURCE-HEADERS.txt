@@ -1,0 +1,1253 @@
+--- src/ascii.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+// `as` truncates, so works on 32-bit, too.
+// Safety invariant: `data & ASCII_MASK == 0` for valid ASCII
+#[allow(dead_code)]
+pub const ASCII_MASK: usize = 0x8080_8080_8080_8080u64 as usize;
+
+cfg_if! {
+    if #[cfg(all(feature = "simd-accel", target_endian = "little"))] {
+        pub(crate) use crate::simd_funcs::ascii_to_ascii_stride;
+        pub(crate) use crate::simd_funcs::ascii_to_basic_latin_stride;
+        pub(crate) use crate::simd_funcs::basic_latin_to_ascii_stride;
+        #[allow(unused_imports)]
+        pub(crate) use crate::simd_funcs::validate_ascii_stride;
+        #[allow(unused_imports)]
+        pub(crate) use crate::simd_funcs::ascii_to_ascii_double_stride;
+        #[allow(unused_imports)]
+        pub(crate) use crate::simd_funcs::ascii_to_basic_latin_double_stride;
+        pub(crate) use crate::simd_funcs::basic_latin_to_ascii_double_stride;
+        #[allow(unused_imports)]
+        pub(crate) use crate::simd_funcs::validate_ascii_double_stride;
+    } else {
+
+        // These are `inline(never)`, because the autovectorizer can vectorize the
+        // full-stride operations in isolation but not when combining the ASCII/Basic Latin
+        // check and the pack/unpack!
+
+        #[inline(never)]
+        pub(crate) fn is_ascii(s: &[u8; STRIDE]) -> bool {
+            s.iter().all(|b| *b < 0x80)
+        }
+
+        #[inline(never)]
+        pub(crate) fn is_basic_latin(s: &[u16; STRIDE]) -> bool {
+            s.iter().all(|b| *b < 0x80)
+        }
+
+        #[inline(never)]
+        pub(crate) fn is_utf16_latin1(s: &[u16; STRIDE]) -> bool {
+            s.iter().all(|b| *b < 0x100)
+        }
+
+        #[inline(never)]
+        pub(crate) fn copy_stride(src_stride: &[u8; STRIDE], dst_stride: &mut [u8; STRIDE]) {
+            *dst_stride = *src_stride;
+        }
+
+        #[inline(never)]
+
+--- src/big5.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use super::*;
+use crate::data::*;
+use crate::handles::*;
+use crate::variant::*;
+// Rust 1.14.0 requires the following despite the asterisk above.
+use super::in_inclusive_range32;
+
+pub struct Big5Decoder {
+    lead: Option<u8>,
+}
+
+impl Big5Decoder {
+    pub fn new() -> VariantDecoder {
+        VariantDecoder::Big5(Big5Decoder { lead: None })
+    }
+
+    pub fn in_neutral_state(&self) -> bool {
+        self.lead.is_none()
+    }
+
+    fn plus_one_if_lead(&self, byte_length: usize) -> Option<usize> {
+        byte_length.checked_add(match self.lead {
+            None => 0,
+            Some(_) => 1,
+        })
+    }
+
+    pub fn max_utf16_buffer_length(&self, byte_length: usize) -> Option<usize> {
+        // If there is a lead but the next byte isn't a valid trail, an
+        // error is generated for the lead (+1). Then another iteration checks
+        // space, which needs +1 to account for the possibility of astral
+        // output or combining pair.
+        checked_add(1, self.plus_one_if_lead(byte_length))
+    }
+
+    pub fn max_utf8_buffer_length_without_replacement(&self, byte_length: usize) -> Option<usize> {
+        // No need to account for REPLACEMENT CHARACTERS.
+        // Cases:
+        // ASCII: 1 to 1
+        // Valid pair: 2 to 2, 2 to 3 or 2 to 4, i.e. worst case 2 to 4
+        // lead set and first byte is trail: 1 to 4 worst case
+        //
+        // When checking for space for the last byte:
+        // no lead: the last byte must be ASCII (or fatal error): 1 to 1
+        // lead set: space for 4 bytes was already checked when reading the
+        // lead, hence the last lead and the last trail together are worst
+
+--- src/data.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+// The above license applies to code in this file. The data in this
+// file is generated from WHATWG's indexes.json, which came under
+// the following license:
+
+// Copyright © WHATWG (Apple, Google, Mozilla, Microsoft).
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+// BEGIN GENERATED CODE. PLEASE DO NOT EDIT.
+// Instead, please regenerate using generate-encoding-data.py
+
+#[repr(align(64))] // Align to cache lines
+pub struct SingleByteData {
+    pub ibm866: [u16; 128],
+    pub iso_8859_2: [u16; 128],
+    pub iso_8859_3: [u16; 128],
+    pub iso_8859_4: [u16; 128],
+    pub iso_8859_5: [u16; 128],
+    pub iso_8859_6: [u16; 128],
+    pub iso_8859_7: [u16; 128],
+    pub iso_8859_8: [u16; 128],
+    pub iso_8859_10: [u16; 128],
+    pub iso_8859_13: [u16; 128],
+
+--- src/euc_jp.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use super::*;
+use crate::data::*;
+use crate::handles::*;
+use crate::variant::*;
+// Rust 1.14.0 requires the following despite the asterisk above.
+use super::in_inclusive_range16;
+
+enum EucJpPending {
+    None,
+    Jis0208Lead(u8),
+    Jis0212Shift,
+    Jis0212Lead(u8),
+    HalfWidthKatakana,
+}
+
+impl EucJpPending {
+    fn is_none(&self) -> bool {
+        matches!(*self, EucJpPending::None)
+    }
+
+    fn count(&self) -> usize {
+        match *self {
+            EucJpPending::None => 0,
+            EucJpPending::Jis0208Lead(_)
+            | EucJpPending::Jis0212Shift
+            | EucJpPending::HalfWidthKatakana => 1,
+            EucJpPending::Jis0212Lead(_) => 2,
+        }
+    }
+}
+
+pub struct EucJpDecoder {
+    pending: EucJpPending,
+}
+
+impl EucJpDecoder {
+    pub fn new() -> VariantDecoder {
+        VariantDecoder::EucJp(EucJpDecoder {
+            pending: EucJpPending::None,
+        })
+    }
+
+    pub fn in_neutral_state(&self) -> bool {
+        self.pending.is_none()
+    }
+
+
+--- src/euc_kr.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use super::*;
+use crate::data::*;
+use crate::handles::*;
+use crate::variant::*;
+// Rust 1.14.0 requires the following despite the asterisk above.
+use super::in_inclusive_range16;
+use super::in_range16;
+
+pub struct EucKrDecoder {
+    lead: Option<u8>,
+}
+
+impl EucKrDecoder {
+    pub fn new() -> VariantDecoder {
+        VariantDecoder::EucKr(EucKrDecoder { lead: None })
+    }
+
+    pub fn in_neutral_state(&self) -> bool {
+        self.lead.is_none()
+    }
+
+    fn plus_one_if_lead(&self, byte_length: usize) -> Option<usize> {
+        byte_length.checked_add(match self.lead {
+            None => 0,
+            Some(_) => 1,
+        })
+    }
+
+    pub fn max_utf16_buffer_length(&self, byte_length: usize) -> Option<usize> {
+        self.plus_one_if_lead(byte_length)
+    }
+
+    pub fn max_utf8_buffer_length_without_replacement(&self, byte_length: usize) -> Option<usize> {
+        // worst case: 2 to 3
+        let len = self.plus_one_if_lead(byte_length);
+        checked_add(2, checked_add_opt(len, checked_div(checked_add(1, len), 2)))
+    }
+
+    pub fn max_utf8_buffer_length(&self, byte_length: usize) -> Option<usize> {
+        checked_mul(3, self.plus_one_if_lead(byte_length))
+    }
+
+    ascii_compatible_two_byte_decoder_functions!(
+        lead = {
+            // If lead is between 0x81 and 0xFE, inclusive,
+            // subtract offset 0x81.
+
+--- src/gb18030_2022.rs ---
+// Copyright © WHATWG (Apple, Google, Mozilla, Microsoft).
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+/// The PUA code points special-cased in the GB18030 encoder.
+pub(crate) static GB18030_2022_OVERRIDE_PUA: [u16; 18] = [
+    0xE78D, 0xE78E, 0xE78F, 0xE790, 0xE791, 0xE792, 0xE793, 0xE794, 0xE795, 0xE796, 0xE81E, 0xE826,
+    0xE82B, 0xE82C, 0xE832, 0xE843, 0xE854, 0xE864,
+];
+
+/// The bytes corresponding to the PUA code points special-cased in the GB18030 encoder.
+pub(crate) static GB18030_2022_OVERRIDE_BYTES: [[u8; 2]; 18] = [
+    [0xA6, 0xD9],
+    [0xA6, 0xDA],
+    [0xA6, 0xDB],
+    [0xA6, 0xDC],
+    [0xA6, 0xDD],
+    [0xA6, 0xDE],
+    [0xA6, 0xDF],
+    [0xA6, 0xEC],
+    [0xA6, 0xED],
+    [0xA6, 0xF3],
+    [0xFE, 0x59],
+    [0xFE, 0x61],
+    [0xFE, 0x66],
+    [0xFE, 0x67],
+    [0xFE, 0x6D],
+    [0xFE, 0x7E],
+    [0xFE, 0x90],
+    [0xFE, 0xA0],
+];
+
+
+--- src/gb18030.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use super::*;
+use crate::data::*;
+use crate::gb18030_2022::*;
+use crate::handles::*;
+use crate::variant::*;
+// Rust 1.14.0 requires the following despite the asterisk above.
+use super::in_inclusive_range16;
+use super::in_range16;
+
+enum Gb18030Pending {
+    None,
+    One(u8),
+    Two(u8, u8),
+    Three(u8, u8, u8),
+}
+
+impl Gb18030Pending {
+    fn is_none(&self) -> bool {
+        matches!(*self, Gb18030Pending::None)
+    }
+
+    fn count(&self) -> usize {
+        match *self {
+            Gb18030Pending::None => 0,
+            Gb18030Pending::One(_) => 1,
+            Gb18030Pending::Two(_, _) => 2,
+            Gb18030Pending::Three(_, _, _) => 3,
+        }
+    }
+}
+
+pub struct Gb18030Decoder {
+    first: Option<u8>,
+    second: Option<u8>,
+    third: Option<u8>,
+    pending: Gb18030Pending,
+    pending_ascii: Option<u8>,
+}
+
+impl Gb18030Decoder {
+    pub fn new() -> VariantDecoder {
+        VariantDecoder::Gb18030(Gb18030Decoder {
+            first: None,
+            second: None,
+            third: None,
+            pending: Gb18030Pending::None,
+
+--- src/handles.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! This module provides structs that use lifetimes to couple bounds checking
+//! and space availability checking and detaching those from actual slice
+//! reading/writing.
+//!
+//! At present, the internals of the implementation are safe code, so the
+//! bound checks currently also happen on read/write. Once this code works,
+//! the plan is to replace the internals with unsafe code that omits the
+//! bound check at the read/write time.
+
+#[cfg(all(feature = "simd-accel", target_endian = "little"))]
+use crate::simd_funcs::*;
+
+#[cfg(all(feature = "simd-accel", target_endian = "little"))]
+use core::simd::u16x8;
+
+use super::DecoderResult;
+use super::EncoderResult;
+use crate::ascii::*;
+use crate::utf_8::convert_utf8_to_utf16_up_to_invalid;
+use crate::utf_8::utf8_valid_up_to;
+
+#[cfg(all(feature = "simd-accel", target_endian = "little"))]
+const SIMD_STRIDE_SIZE: usize = crate::ascii::STRIDE;
+
+pub enum Space<T> {
+    Available(T),
+    Full(usize),
+}
+
+pub enum CopyAsciiResult<T, U> {
+    Stop(T),
+    GoOn(U),
+}
+
+pub enum NonAscii {
+    BmpExclAscii(u16),
+    Astral(char),
+}
+
+pub enum Unicode {
+    Ascii(u8),
+    NonAscii(NonAscii),
+}
+
+// Start UTF-16LE/BE fast path
+
+
+--- src/iso_2022_jp.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use super::*;
+use crate::data::*;
+use crate::handles::*;
+use crate::variant::*;
+// Rust 1.14.0 requires the following despite the asterisk above.
+use super::in_inclusive_range16;
+
+#[derive(Copy, Clone, PartialEq)]
+enum Iso2022JpDecoderState {
+    Ascii,
+    Roman,
+    Katakana,
+    LeadByte,
+    TrailByte,
+    EscapeStart,
+    Escape,
+}
+
+pub struct Iso2022JpDecoder {
+    decoder_state: Iso2022JpDecoderState,
+    output_state: Iso2022JpDecoderState, // only takes 1 of first 4 values
+    lead: u8,
+    output_flag: bool,
+    pending_prepended: bool,
+}
+
+impl Iso2022JpDecoder {
+    pub fn new() -> VariantDecoder {
+        VariantDecoder::Iso2022Jp(Iso2022JpDecoder {
+            decoder_state: Iso2022JpDecoderState::Ascii,
+            output_state: Iso2022JpDecoderState::Ascii,
+            lead: 0u8,
+            output_flag: false,
+            pending_prepended: false,
+        })
+    }
+
+    pub fn in_neutral_state(&self) -> bool {
+        self.decoder_state == Iso2022JpDecoderState::Ascii
+            && self.output_state == Iso2022JpDecoderState::Ascii
+            && self.lead == 0u8
+            && !self.output_flag
+            && !self.pending_prepended
+    }
+
+    fn extra_to_input_from_state(&self, byte_length: usize) -> Option<usize> {
+
+--- src/lib.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+// The above license applies to code in this file. The label data in
+// this file is generated from WHATWG's encodings.json, which came under
+// the following license:
+
+// Copyright © WHATWG (Apple, Google, Mozilla, Microsoft).
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+#![allow(
+    clippy::doc_markdown,
+    clippy::inline_always,
+    clippy::new_ret_no_self,
+    clippy::redundant_static_lifetimes
+)]
+
+//! encoding_rs is a Gecko-oriented Free Software / Open Source implementation
+//! of the [Encoding Standard](https://encoding.spec.whatwg.org/) in Rust.
+//! Gecko-oriented means that converting to and from UTF-16 is supported in
+//! addition to converting to and from UTF-8, that the performance and
+//! streamability goals are browser-oriented, and that FFI-friendliness is a
+//! goal.
+//!
+//! Additionally, the `mem` module provides functions that are useful for
+
+--- src/macros.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+macro_rules! decoder_function {
+    ($preamble:block,
+     $loop_preamble:block,
+     $eof:block,
+     $body:block,
+     $slf:ident,
+     $src_consumed:ident,
+     $dest:ident,
+     $source:ident,
+     $b:ident,
+     $destination_handle:ident,
+     $unread_handle:ident,
+     $destination_check:ident,
+     $name:ident,
+     $code_unit:ty,
+     $dest_struct:ident) => (
+    #[inline(always)]
+    pub fn $name(&mut $slf,
+                 src: &[u8],
+                 dst: &mut [$code_unit],
+                 last: bool)
+                 -> (DecoderResult, usize, usize) {
+        let mut $source = ByteSource::new(src);
+        let mut $dest = $dest_struct::new(dst);
+        loop { // TODO: remove this loop
+            {
+                // Start non-boilerplate
+                $preamble
+                // End non-boilerplate
+            }
+            loop {
+                {
+                    $loop_preamble
+                }
+                match $source.check_available() {
+                    Space::Full($src_consumed) => {
+                        if last {
+                            // Start non-boilerplate
+                            $eof
+                            // End non-boilerplate
+                        }
+                        return (DecoderResult::InputEmpty, $src_consumed, $dest.written());
+                    }
+                    Space::Available(source_handle) => {
+                        match $dest.$destination_check() {
+                            Space::Full(dst_written) => {
+
+--- src/mem.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+//! Functions for converting between different in-RAM representations of text
+//! and for quickly checking if the Unicode Bidirectional Algorithm can be
+//! avoided.
+//!
+//! By using slices for output, the functions here seek to enable by-register
+//! (ALU register or SIMD register as available) operations in order to
+//! outperform iterator-based conversions available in the Rust standard
+//! library.
+//!
+//! _Note:_ "Latin1" in this module refers to the Unicode range from U+0000 to
+//! U+00FF, inclusive, and does not refer to the windows-1252 range. This
+//! in-memory encoding is sometimes used as a storage optimization of text
+//! when UTF-16 indexing and length semantics are exposed.
+//!
+//! The FFI binding for this module are in the
+//! [encoding_c_mem crate](https://github.com/hsivonen/encoding_c_mem).
+
+#[cfg(feature = "alloc")]
+use alloc::borrow::Cow;
+#[cfg(feature = "alloc")]
+use alloc::string::String;
+#[cfg(feature = "alloc")]
+use alloc::vec::Vec;
+
+use super::DecoderResult;
+use super::in_inclusive_range8;
+use super::in_inclusive_range16;
+use super::in_inclusive_range32;
+use super::in_range16;
+use super::in_range32;
+use crate::ascii::*;
+use crate::utf_8::*;
+
+macro_rules! non_fuzz_debug_assert {
+    ($($arg:tt)*) => (if !cfg!(fuzzing) { debug_assert!($($arg)*); })
+}
+
+cfg_if! {
+    if #[cfg(feature = "simd-accel")] {
+        use ::core::intrinsics::likely;
+        use ::core::intrinsics::unlikely;
+    } else {
+        #[inline(always)]
+        fn likely(b: bool) -> bool {
+            b
+        }
+
+--- src/replacement.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use super::*;
+use crate::variant::*;
+
+pub struct ReplacementDecoder {
+    emitted: bool,
+}
+
+impl ReplacementDecoder {
+    pub fn new() -> VariantDecoder {
+        VariantDecoder::Replacement(ReplacementDecoder { emitted: false })
+    }
+
+    pub fn max_utf16_buffer_length(&self, _u16_length: usize) -> Option<usize> {
+        Some(1)
+    }
+
+    pub fn max_utf8_buffer_length_without_replacement(&self, _byte_length: usize) -> Option<usize> {
+        Some(3)
+    }
+
+    pub fn max_utf8_buffer_length(&self, _byte_length: usize) -> Option<usize> {
+        Some(3)
+    }
+
+    pub fn decode_to_utf16_raw(
+        &mut self,
+        src: &[u8],
+        dst: &mut [u16],
+        _last: bool,
+    ) -> (DecoderResult, usize, usize) {
+        // Don't err if the input stream is empty. See
+        // https://github.com/whatwg/encoding/issues/33
+        if self.emitted || src.is_empty() {
+            (DecoderResult::InputEmpty, src.len(), 0)
+        } else if dst.is_empty() {
+            // Make sure there's room for the replacement character.
+            (DecoderResult::OutputFull, 0, 0)
+        } else {
+            self.emitted = true;
+            (DecoderResult::Malformed(1, 0), 1, 0)
+        }
+    }
+
+    pub fn decode_to_utf8_raw(
+        &mut self,
+        src: &[u8],
+
+--- src/shift_jis.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use super::*;
+use crate::data::*;
+use crate::handles::*;
+use crate::variant::*;
+// Rust 1.14.0 requires the following despite the asterisk above.
+use super::in_inclusive_range;
+use super::in_inclusive_range16;
+
+pub struct ShiftJisDecoder {
+    lead: Option<u8>,
+}
+
+impl ShiftJisDecoder {
+    pub fn new() -> VariantDecoder {
+        VariantDecoder::ShiftJis(ShiftJisDecoder { lead: None })
+    }
+
+    pub fn in_neutral_state(&self) -> bool {
+        self.lead.is_none()
+    }
+
+    fn plus_one_if_lead(&self, byte_length: usize) -> Option<usize> {
+        byte_length.checked_add(match self.lead {
+            None => 0,
+            Some(_) => 1,
+        })
+    }
+
+    pub fn max_utf16_buffer_length(&self, byte_length: usize) -> Option<usize> {
+        self.plus_one_if_lead(byte_length)
+    }
+
+    pub fn max_utf8_buffer_length_without_replacement(&self, byte_length: usize) -> Option<usize> {
+        // worst case: 1 to 3 (half-width katakana)
+        self.max_utf8_buffer_length(byte_length)
+    }
+
+    pub fn max_utf8_buffer_length(&self, byte_length: usize) -> Option<usize> {
+        checked_mul(3, self.plus_one_if_lead(byte_length))
+    }
+
+    ascii_compatible_two_byte_decoder_functions!(
+        lead = {
+           // If lead is between 0x81 and 0x9F, inclusive,
+           // subtract offset 0x81. Else if lead is
+           // between 0xE0 and 0xFC, inclusive, subtract
+
+--- src/simd_funcs.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use core::simd::ToBytes;
+use core::simd::cmp::SimdPartialEq;
+use core::simd::cmp::SimdPartialOrd;
+#[allow(unused_imports)]
+use core::simd::mask16x8;
+use core::simd::num::SimdUint;
+use core::simd::simd_swizzle;
+use core::simd::u8x16;
+use core::simd::u8x32;
+use core::simd::u16x8;
+use core::simd::u16x16;
+
+// TODO: Remove the load/store functions as part of removing `unsafe` from
+// UTF-16BE|LE.
+
+/// Safety invariant: ptr must be valid for an unaligned read of 16 bytes
+#[inline(always)]
+pub unsafe fn load16_unaligned(ptr: *const u8) -> u8x16 {
+    let mut simd = ::core::mem::MaybeUninit::<u8x16>::uninit();
+    unsafe {
+        ::core::ptr::copy_nonoverlapping(ptr, simd.as_mut_ptr() as *mut u8, 16);
+        // Safety: copied 16 bytes of initialized memory into this, it is now initialized
+        simd.assume_init()
+    }
+}
+
+/// Safety invariant: ptr must be valid for an unaligned store of 16 bytes
+#[inline(always)]
+pub unsafe fn store16_unaligned(ptr: *mut u8, s: u8x16) {
+    unsafe {
+        ::core::ptr::copy_nonoverlapping(&s as *const u8x16 as *const u8, ptr, 16);
+    }
+}
+
+/// Safety invariant: ptr must be valid for an unaligned store of 16 bytes
+#[inline(always)]
+pub unsafe fn store8_unaligned(ptr: *mut u16, s: u16x8) {
+    unsafe {
+        ::core::ptr::copy_nonoverlapping(&s as *const u16x8 as *const u8, ptr as *mut u8, 16);
+    }
+}
+
+cfg_if! {
+    if #[cfg(all(target_feature = "sse2", target_arch = "x86_64"))] {
+        #[allow(unused)]
+        use core::arch::x86_64::__m128i;
+
+--- src/single_byte.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use super::*;
+use crate::ascii::*;
+use crate::data::position;
+use crate::handles::*;
+use crate::variant::*;
+
+pub struct SingleByteDecoder {
+    table: &'static [u16; 128],
+}
+
+impl SingleByteDecoder {
+    pub fn new(data: &'static [u16; 128]) -> VariantDecoder {
+        VariantDecoder::SingleByte(SingleByteDecoder { table: data })
+    }
+
+    pub fn max_utf16_buffer_length(&self, byte_length: usize) -> Option<usize> {
+        Some(byte_length)
+    }
+
+    pub fn max_utf8_buffer_length_without_replacement(&self, byte_length: usize) -> Option<usize> {
+        byte_length.checked_mul(3)
+    }
+
+    pub fn max_utf8_buffer_length(&self, byte_length: usize) -> Option<usize> {
+        byte_length.checked_mul(3)
+    }
+
+    pub fn decode_to_utf8_raw(
+        &mut self,
+        src: &[u8],
+        dst: &mut [u8],
+        _last: bool,
+    ) -> (DecoderResult, usize, usize) {
+        let mut source = ByteSource::new(src);
+        let mut dest = Utf8Destination::new(dst);
+        'outermost: loop {
+            match dest.copy_ascii_from_check_space_bmp(&mut source) {
+                CopyAsciiResult::Stop(ret) => return ret,
+                CopyAsciiResult::GoOn((mut non_ascii, mut handle)) => 'middle: loop {
+                    // Start non-boilerplate
+                    //
+                    // Since the non-ASCIIness of `non_ascii` is hidden from
+                    // the optimizer, it can't figure out that it's OK to
+                    // statically omit the bound check when accessing
+                    // `[u16; 128]` with an index
+                    // `non_ascii as usize - 0x80usize`.
+
+--- src/test_labels_names.rs ---
+// Any copyright to the test code below this comment is dedicated to the
+// Public Domain. http://creativecommons.org/publicdomain/zero/1.0/
+
+// THIS IS A GENERATED FILE. PLEASE DO NOT EDIT.
+// Instead, please regenerate using generate-encoding-data.py
+
+use super::*;
+
+#[test]
+fn test_all_labels() {
+    assert_eq!(Encoding::for_label(b"l1"), Some(WINDOWS_1252));
+    assert_eq!(Encoding::for_label(b"l2"), Some(ISO_8859_2));
+    assert_eq!(Encoding::for_label(b"l3"), Some(ISO_8859_3));
+    assert_eq!(Encoding::for_label(b"l4"), Some(ISO_8859_4));
+    assert_eq!(Encoding::for_label(b"l5"), Some(WINDOWS_1254));
+    assert_eq!(Encoding::for_label(b"l6"), Some(ISO_8859_10));
+    assert_eq!(Encoding::for_label(b"l9"), Some(ISO_8859_15));
+    assert_eq!(Encoding::for_label(b"866"), Some(IBM866));
+    assert_eq!(Encoding::for_label(b"mac"), Some(MACINTOSH));
+    assert_eq!(Encoding::for_label(b"koi"), Some(KOI8_R));
+    assert_eq!(Encoding::for_label(b"gbk"), Some(GBK));
+    assert_eq!(Encoding::for_label(b"big5"), Some(BIG5));
+    assert_eq!(Encoding::for_label(b"utf8"), Some(UTF_8));
+    assert_eq!(Encoding::for_label(b"koi8"), Some(KOI8_R));
+    assert_eq!(Encoding::for_label(b"sjis"), Some(SHIFT_JIS));
+    assert_eq!(Encoding::for_label(b"ucs-2"), Some(UTF_16LE));
+    assert_eq!(Encoding::for_label(b"ms932"), Some(SHIFT_JIS));
+    assert_eq!(Encoding::for_label(b"cp866"), Some(IBM866));
+    assert_eq!(Encoding::for_label(b"utf-8"), Some(UTF_8));
+    assert_eq!(Encoding::for_label(b"cp819"), Some(WINDOWS_1252));
+    assert_eq!(Encoding::for_label(b"ascii"), Some(WINDOWS_1252));
+    assert_eq!(Encoding::for_label(b"x-gbk"), Some(GBK));
+    assert_eq!(Encoding::for_label(b"greek"), Some(ISO_8859_7));
+    assert_eq!(Encoding::for_label(b"cp1250"), Some(WINDOWS_1250));
+    assert_eq!(Encoding::for_label(b"cp1251"), Some(WINDOWS_1251));
+    assert_eq!(Encoding::for_label(b"latin1"), Some(WINDOWS_1252));
+    assert_eq!(Encoding::for_label(b"gb2312"), Some(GBK));
+    assert_eq!(Encoding::for_label(b"cp1252"), Some(WINDOWS_1252));
+    assert_eq!(Encoding::for_label(b"latin2"), Some(ISO_8859_2));
+    assert_eq!(Encoding::for_label(b"cp1253"), Some(WINDOWS_1253));
+    assert_eq!(Encoding::for_label(b"latin3"), Some(ISO_8859_3));
+    assert_eq!(Encoding::for_label(b"cp1254"), Some(WINDOWS_1254));
+    assert_eq!(Encoding::for_label(b"latin4"), Some(ISO_8859_4));
+    assert_eq!(Encoding::for_label(b"cp1255"), Some(WINDOWS_1255));
+    assert_eq!(Encoding::for_label(b"csbig5"), Some(BIG5));
+    assert_eq!(Encoding::for_label(b"latin5"), Some(WINDOWS_1254));
+    assert_eq!(Encoding::for_label(b"utf-16"), Some(UTF_16LE));
+    assert_eq!(Encoding::for_label(b"cp1256"), Some(WINDOWS_1256));
+    assert_eq!(Encoding::for_label(b"ibm866"), Some(IBM866));
+    assert_eq!(Encoding::for_label(b"latin6"), Some(ISO_8859_10));
+    assert_eq!(Encoding::for_label(b"cp1257"), Some(WINDOWS_1257));
+    assert_eq!(Encoding::for_label(b"cp1258"), Some(WINDOWS_1258));
+    assert_eq!(Encoding::for_label(b"greek8"), Some(ISO_8859_7));
+    assert_eq!(Encoding::for_label(b"ibm819"), Some(WINDOWS_1252));
+    assert_eq!(Encoding::for_label(b"arabic"), Some(ISO_8859_6));
+
+--- src/testing.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use super::*;
+
+pub fn decode(encoding: &'static Encoding, bytes: &[u8], expect: &str) {
+    let mut vec = Vec::with_capacity(bytes.len() + 32);
+    let mut string = String::with_capacity(expect.len() + 32);
+    let range = if cfg!(miri) {
+        0usize..4usize
+    } else {
+        0usize..32usize
+    };
+    for i in range {
+        vec.clear();
+        string.clear();
+        for j in 0usize..i {
+            let c = 0x40u8 + (j as u8);
+            vec.push(c);
+            string.push(c as char);
+        }
+        vec.extend_from_slice(bytes);
+        string.push_str(expect);
+        decode_without_padding_impl(encoding, &vec[..], &string[..], i);
+    }
+}
+
+pub fn decode_without_padding(encoding: &'static Encoding, bytes: &[u8], expect: &str) {
+    decode_without_padding_impl(encoding, bytes, expect, 0);
+}
+
+fn decode_without_padding_impl(
+    encoding: &'static Encoding,
+    bytes: &[u8],
+    expect: &str,
+    padding: usize,
+) {
+    decode_to_utf8_impl(encoding, bytes, expect, padding);
+    decode_to_utf16_impl(encoding, bytes, &utf16_from_utf8(expect)[..], padding);
+    decode_to_string(encoding, bytes, expect);
+}
+
+pub fn encode(encoding: &'static Encoding, str: &str, expect: &[u8]) {
+    let mut vec = Vec::with_capacity(expect.len() + 32);
+    let mut string = String::with_capacity(str.len() + 32);
+    let range = if cfg!(miri) {
+        0usize..4usize
+    } else {
+        0usize..32usize
+
+--- src/utf_16.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use super::*;
+use crate::handles::*;
+use crate::variant::*;
+
+pub struct Utf16Decoder {
+    lead_surrogate: u16, // If non-zero and pending_bmp == false, a pending lead surrogate
+    lead_byte: Option<u8>,
+    be: bool,
+    pending_bmp: bool, // if true, lead_surrogate is actually pending BMP
+}
+
+impl Utf16Decoder {
+    pub fn new(big_endian: bool) -> VariantDecoder {
+        VariantDecoder::Utf16(Utf16Decoder {
+            lead_surrogate: 0,
+            lead_byte: None,
+            be: big_endian,
+            pending_bmp: false,
+        })
+    }
+
+    pub fn additional_from_state(&self) -> usize {
+        1 + if self.lead_byte.is_some() { 1 } else { 0 }
+            + if self.lead_surrogate == 0 { 0 } else { 2 }
+    }
+
+    pub fn max_utf16_buffer_length(&self, byte_length: usize) -> Option<usize> {
+        checked_add(
+            1,
+            checked_div(byte_length.checked_add(self.additional_from_state()), 2),
+        )
+    }
+
+    pub fn max_utf8_buffer_length_without_replacement(&self, byte_length: usize) -> Option<usize> {
+        checked_add(
+            1,
+            checked_mul(
+                3,
+                checked_div(byte_length.checked_add(self.additional_from_state()), 2),
+            ),
+        )
+    }
+
+    pub fn max_utf8_buffer_length(&self, byte_length: usize) -> Option<usize> {
+        checked_add(
+            1,
+
+--- src/utf_8.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use super::*;
+use crate::ascii::ascii_to_basic_latin;
+use crate::ascii::basic_latin_to_ascii;
+use crate::ascii::validate_ascii;
+use crate::handles::*;
+use crate::mem::convert_utf16_to_utf8_partial;
+use crate::variant::*;
+
+cfg_if! {
+    if #[cfg(feature = "simd-accel")] {
+        use ::core::intrinsics::unlikely;
+        use ::core::intrinsics::likely;
+    } else {
+        #[inline(always)]
+        fn unlikely(b: bool) -> bool {
+            b
+        }
+        #[inline(always)]
+        fn likely(b: bool) -> bool {
+            b
+        }
+    }
+}
+
+#[repr(align(64))] // Align to cache lines
+pub struct Utf8Data {
+    pub table: [u8; 384],
+}
+
+// BEGIN GENERATED CODE. PLEASE DO NOT EDIT.
+// Instead, please regenerate using generate-encoding-data.py
+
+pub static UTF8_DATA: Utf8Data = Utf8Data {
+    table: [
+        252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252,
+        252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252,
+        252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252,
+        252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252,
+        252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252,
+        252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252,
+        252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252,
+        252, 252, 84, 84, 84, 84, 84, 84, 84, 84, 84, 84, 84, 84, 84, 84, 84, 84, 148, 148, 148,
+        148, 148, 148, 148, 148, 148, 148, 148, 148, 148, 148, 148, 148, 164, 164, 164, 164, 164,
+        164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164,
+        164, 164, 164, 164, 164, 164, 164, 164, 164, 252, 252, 252, 252, 252, 252, 252, 252, 252,
+        252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252, 252,
+
+--- src/variant.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+// THIS IS A GENERATED FILE. PLEASE DO NOT EDIT.
+// Instead, please regenerate using generate-encoding-data.py
+
+//! This module provides enums that wrap the various decoders and encoders.
+//! The purpose is to make `Decoder` and `Encoder` `Sized` by writing the
+//! dispatch explicitly for a finite set of specialized decoders and encoders.
+//! Unfortunately, this means the compiler doesn't generate the dispatch code
+//! and it has to be written here instead.
+//!
+//! The purpose of making `Decoder` and `Encoder` `Sized` is to allow stack
+//! allocation in Rust code, including the convenience methods on `Encoding`.
+
+use super::*;
+use big5::*;
+use euc_jp::*;
+use euc_kr::*;
+use gb18030::*;
+use iso_2022_jp::*;
+use replacement::*;
+use shift_jis::*;
+use single_byte::*;
+use utf_8::*;
+use utf_16::*;
+use x_user_defined::*;
+
+pub enum VariantDecoder {
+    SingleByte(SingleByteDecoder),
+    Utf8(Utf8Decoder),
+    Gb18030(Gb18030Decoder),
+    Big5(Big5Decoder),
+    EucJp(EucJpDecoder),
+    Iso2022Jp(Iso2022JpDecoder),
+    ShiftJis(ShiftJisDecoder),
+    EucKr(EucKrDecoder),
+    Replacement(ReplacementDecoder),
+    UserDefined(UserDefinedDecoder),
+    Utf16(Utf16Decoder),
+}
+
+impl VariantDecoder {
+    pub fn max_utf16_buffer_length(&self, byte_length: usize) -> Option<usize> {
+        match *self {
+            VariantDecoder::SingleByte(ref v) => v.max_utf16_buffer_length(byte_length),
+            VariantDecoder::Utf8(ref v) => v.max_utf16_buffer_length(byte_length),
+            VariantDecoder::Gb18030(ref v) => v.max_utf16_buffer_length(byte_length),
+            VariantDecoder::Big5(ref v) => v.max_utf16_buffer_length(byte_length),
+
+--- src/x_user_defined.rs ---
+// Copyright Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use super::*;
+use crate::handles::*;
+use crate::variant::*;
+
+cfg_if! {
+    if #[cfg(all(
+        feature = "simd-accel",
+        target_endian = "little",
+    ))] {
+        use crate::ascii::STRIDE;
+        use simd_funcs::*;
+        use core::simd::u8x16;
+        use core::simd::u16x16;
+        use core::simd::cmp::SimdPartialOrd;
+        #[rustversion::since(1.95)]
+        use core::simd::Select;
+
+        #[inline(always)]
+        fn shift_upper(unpacked: u16x16) -> u16x16 {
+            let highest_ascii = u16x16::splat(0x7F);
+            unpacked + unpacked.simd_gt(highest_ascii).select(u16x16::splat(0xF700), u16x16::splat(0))        }
+    } else {
+    }
+}
+
+pub struct UserDefinedDecoder;
+
+impl UserDefinedDecoder {
+    pub fn new() -> VariantDecoder {
+        VariantDecoder::UserDefined(UserDefinedDecoder)
+    }
+
+    pub fn max_utf16_buffer_length(&self, byte_length: usize) -> Option<usize> {
+        Some(byte_length)
+    }
+
+    pub fn max_utf8_buffer_length_without_replacement(&self, byte_length: usize) -> Option<usize> {
+        byte_length.checked_mul(3)
+    }
+
+    pub fn max_utf8_buffer_length(&self, byte_length: usize) -> Option<usize> {
+        byte_length.checked_mul(3)
+    }
+
+    decoder_function!(
+        {},

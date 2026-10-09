@@ -1,0 +1,56 @@
+--- src/lib.rs ---
+//! Crate for changing case of Rust identifiers.
+//!
+//! # Features
+//! * Supports `snake_case`, `lowercase`, `camelCase`, 
+//!   `PascalCase`, `SCREAMING_SNAKE_CASE`, and `kebab-case`
+//! * Rename variants, and fields
+//! 
+//! # Examples
+//! ```rust
+//! use ident_case::RenameRule;
+//!
+//! assert_eq!("helloWorld", RenameRule::CamelCase.apply_to_field("hello_world"));
+//!
+//! assert_eq!("i_love_serde", RenameRule::SnakeCase.apply_to_variant("ILoveSerde"));
+//! ```
+
+// Copyright 2017 Serde Developers
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::ascii::AsciiExt;
+use std::str::FromStr;
+
+use self::RenameRule::*;
+
+/// A casing rule for renaming Rust identifiers.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum RenameRule {
+    /// No-op rename rule.
+    None,
+    /// Rename direct children to "lowercase" style.
+    LowerCase,
+    /// Rename direct children to "PascalCase" style, as typically used for enum variants.
+    PascalCase,
+    /// Rename direct children to "camelCase" style.
+    CamelCase,
+    /// Rename direct children to "snake_case" style, as commonly used for fields.
+    SnakeCase,
+    /// Rename direct children to "SCREAMING_SNAKE_CASE" style, as commonly used for constants.
+    ScreamingSnakeCase,
+    /// Rename direct children to "kebab-case" style.
+    KebabCase,
+}
+
+impl RenameRule {
+    /// Change case of a `PascalCase` variant.
+    pub fn apply_to_variant<S: AsRef<str>>(&self, variant: S) -> String {
+        
+        let variant = variant.as_ref();
+        match *self {
+            None | PascalCase => variant.to_owned(),

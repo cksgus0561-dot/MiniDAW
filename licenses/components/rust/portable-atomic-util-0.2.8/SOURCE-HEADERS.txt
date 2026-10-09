@@ -1,0 +1,341 @@
+--- build.rs ---
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
+// The rustc-cfg emitted by the build script are *not* public API.
+
+use std::env;
+
+use self::version::{Version, rustc_version};
+
+fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+
+    let target = &*env::var("TARGET").expect("TARGET not set");
+
+    let version = match rustc_version() {
+        Some(version) => version,
+        None => {
+            if env::var_os("PORTABLE_ATOMIC_DENY_WARNINGS").is_some() {
+                panic!("unable to determine rustc version")
+            }
+            println!(
+                "cargo:warning={}: unable to determine rustc version; assuming latest stable rustc (1.{})",
+                env!("CARGO_PKG_NAME"),
+                Version::LATEST.minor
+            );
+            Version::LATEST
+        }
+    };
+
+    if version.minor >= 80 {
+        // Custom cfgs set by build script. Not public API.
+        // grep -F 'cargo:rustc-cfg=' portable-atomic-util/build.rs | grep -Ev '^ *//' | sed -E 's/^.*cargo:rustc-cfg=//; s/(=\\)?".*$//' | LC_ALL=C sort -u | tr '\n' ',' | sed -E 's/,$/\n/'
+        println!(
+            "cargo:rustc-check-cfg=cfg(portable_atomic_no_core_unwind_safe,portable_atomic_no_error_in_core,portable_atomic_no_io_safety,portable_atomic_no_min_const_generics,portable_atomic_no_strict_provenance,portable_atomic_no_track_caller,portable_atomic_no_unsafe_op_in_unsafe_fn,portable_atomic_sanitize_thread)"
+        );
+    }
+
+    // Note that cfgs are `no_`*, not `has_*`. This allows treating as the latest
+    // stable rustc is used when the build script doesn't run. This is useful
+    // for non-cargo build systems that don't run the build script.
+
+    // track_caller stabilized in Rust 1.46 (nightly-2020-07-02): https://github.com/rust-lang/rust/pull/72445
+    if !version.probe(46, 2020, 7, 1) {
+        println!("cargo:rustc-cfg=portable_atomic_no_track_caller");
+    }
+    // min_const_generics stabilized in Rust 1.51 (nightly-2020-12-28): https://github.com/rust-lang/rust/pull/79135
+    if !version.probe(51, 2020, 12, 27) {
+        println!("cargo:rustc-cfg=portable_atomic_no_min_const_generics");
+    }
+    // unsafe_op_in_unsafe_fn stabilized in Rust 1.52 (nightly-2021-03-11): https://github.com/rust-lang/rust/pull/79208
+    if !version.probe(52, 2021, 3, 10) {
+        println!("cargo:rustc-cfg=portable_atomic_no_unsafe_op_in_unsafe_fn");
+    }
+    // https://github.com/rust-lang/rust/pull/84662 merged in Rust 1.56 (nightly-2021-08-02).
+    if !version.probe(56, 2021, 8, 1) {
+        println!("cargo:rustc-cfg=portable_atomic_no_core_unwind_safe");
+
+--- src/arc.rs ---
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
+// This module is based on alloc::sync::Arc.
+//
+// The code has been adjusted to work with stable Rust (and optionally support some unstable features).
+//
+// Source: https://github.com/rust-lang/rust/blob/1.93.0/library/alloc/src/sync.rs
+//
+// Copyright & License of the original code:
+// - https://github.com/rust-lang/rust/blob/1.93.0/COPYRIGHT
+// - https://github.com/rust-lang/rust/blob/1.93.0/LICENSE-APACHE
+// - https://github.com/rust-lang/rust/blob/1.93.0/LICENSE-MIT
+
+#![allow(clippy::must_use_candidate)] // align to alloc::sync::Arc
+#![allow(clippy::undocumented_unsafe_blocks)] // TODO: most of the unsafe codes were inherited from alloc::sync::Arc
+
+use alloc::{
+    alloc::handle_alloc_error,
+    borrow::{Cow, ToOwned},
+    boxed::Box,
+    string::String,
+    vec::Vec,
+};
+#[cfg(not(portable_atomic_no_min_const_generics))]
+use core::convert::TryFrom;
+use core::{
+    alloc::Layout,
+    any::Any,
+    borrow,
+    cmp::Ordering,
+    fmt,
+    hash::{Hash, Hasher},
+    iter::FromIterator,
+    marker::PhantomData,
+    mem::{self, ManuallyDrop},
+    ops::Deref,
+    pin::Pin,
+    ptr::{self, NonNull},
+    slice,
+};
+#[allow(deprecated)]
+use core::{isize, usize};
+#[cfg(portable_atomic_unstable_coerce_unsized)]
+use core::{marker::Unsize, ops::CoerceUnsized};
+
+use portable_atomic::{
+    self as atomic,
+    Ordering::{Acquire, Relaxed, Release},
+    hint,
+};
+
+use crate::utils::ptr as strict;
+#[cfg(portable_atomic_no_strict_provenance)]
+use crate::utils::ptr::PtrExt as _;
+
+
+--- src/lib.rs ---
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
+/*!
+<!-- Note: Document from sync-markdown-to-rustdoc:start through sync-markdown-to-rustdoc:end
+     is synchronized from README.md. Any changes to that range are not preserved. -->
+<!-- tidy:sync-markdown-to-rustdoc:start -->
+
+Synchronization primitives built with [portable-atomic].
+
+- Provide `Arc`. (optional, requires the `std` or `alloc` feature)
+- Provide `task::Wake`. (optional, requires the `std` or `alloc` feature)
+<!-- - Provide generic `Atomic<T>` type. (optional, requires the `generic` feature) -->
+
+See [portable-atomic#1] for other primitives being considered for addition to this crate.
+
+This crate was originally [part of the portable-atomic repository](https://github.com/taiki-e/portable-atomic/tree/cbbee0c0d202a5944f7d66aaafaac6ed76e6f599/portable-atomic-util) and was extracted into its own repository.
+
+## Optional features
+
+- **`std`**<br>
+  Use `std`.
+
+  Note:
+  - This implicitly enables the `alloc` feature.
+
+- **`alloc`**<br>
+  Use `alloc`.
+
+- **`serde`**<br>
+  Implement `serde::{Serialize, Deserialize}` for `Arc`.
+
+  Note:
+  - The MSRV when this feature is enabled is the one coming from serde, as of now it's Rust 1.56
+
+<!-- TODO: https://github.com/taiki-e/portable-atomic/issues/1
+- **`generic`**<br>
+  Provides generic `Atomic<T>` type.
+-->
+
+[portable-atomic]: https://github.com/taiki-e/portable-atomic
+[portable-atomic#1]: https://github.com/taiki-e/portable-atomic/issues/1
+
+## Optional cfg
+
+One of the ways to enable cfg is to set [rustflags in the cargo config](https://doc.rust-lang.org/cargo/reference/config.html#targettriplerustflags):
+
+```toml
+# .cargo/config.toml
+[target.<target>]
+rustflags = ["--cfg", "portable_atomic_unstable_coerce_unsized"]
+```
+
+Or set environment variable:
+
+```sh
+
+--- src/task.rs ---
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
+//! Types and Traits for working with asynchronous tasks.
+
+// This module is based on alloc::task::Wake.
+//
+// The code has been adjusted to work with stable Rust.
+//
+// Source: https://github.com/rust-lang/rust/blob/1.84.0/library/alloc/src/task.rs.
+//
+// Copyright & License of the original code:
+// - https://github.com/rust-lang/rust/blob/1.84.0/COPYRIGHT
+// - https://github.com/rust-lang/rust/blob/1.84.0/LICENSE-APACHE
+// - https://github.com/rust-lang/rust/blob/1.84.0/LICENSE-MIT
+
+use core::{
+    mem::ManuallyDrop,
+    task::{RawWaker, RawWakerVTable, Waker},
+};
+
+use crate::Arc;
+
+/// The implementation of waking a task on an executor.
+///
+/// This is an equivalent to [`std::task::Wake`], but using [`portable_atomic_util::Arc`](crate::Arc)
+/// as a reference-counted pointer. See the documentation for [`std::task::Wake`] for more details.
+///
+/// **Note:** Unlike `std::task::Wake`, all methods take `this:` instead of `self:`.
+/// This is because using `portable_atomic_util::Arc` as a receiver requires the
+/// [unstable `arbitrary_self_types` feature](https://github.com/rust-lang/rust/issues/44874).
+///
+/// # Examples
+///
+/// A basic `block_on` function that takes a future and runs it to completion on
+/// the current thread.
+///
+/// **Note:** This example trades correctness for simplicity. In order to prevent
+/// deadlocks, production-grade implementations will also need to handle
+/// intermediate calls to `thread::unpark` as well as nested invocations.
+///
+/// ```
+/// use std::{
+///     future::Future,
+///     task::{Context, Poll},
+///     thread::{self, Thread},
+/// };
+///
+/// use portable_atomic_util::{Arc, task::Wake};
+///
+/// /// A waker that wakes up the current thread when called.
+/// struct ThreadWaker(Thread);
+///
+/// impl Wake for ThreadWaker {
+///     fn wake(this: Arc<Self>) {
+///         this.0.unpark();
+
+--- src/utils.rs ---
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
+#![cfg_attr(not(feature = "alloc"), allow(dead_code, unused_macros, unused_imports))]
+
+// rustfmt-compatible cfg_select/cfg_if alternative
+// Note: This macro is cfg_sel!({ }), not cfg_sel! { }.
+// An extra brace is used in input to make contents rustfmt-able.
+macro_rules! cfg_sel {
+    ({#[cfg(else)] { $($output:tt)* }}) => {
+        $($output)*
+    };
+    ({
+        #[cfg($cfg:meta)]
+        { $($output:tt)* }
+        $($( $rest:tt )+)?
+    }) => {
+        #[cfg($cfg)]
+        cfg_sel! {{#[cfg(else)] { $($output)* }}}
+        $(
+            #[cfg(not($cfg))]
+            cfg_sel! {{ $($rest)+ }}
+        )?
+    };
+}
+
+// This module provides core::ptr strict_provenance/exposed_provenance polyfill for pre-1.84 rustc.
+pub(crate) mod ptr {
+    cfg_sel!({
+        #[cfg(not(portable_atomic_no_strict_provenance))]
+        {
+            pub(crate) use core::ptr::without_provenance_mut;
+        }
+        #[cfg(else)]
+        {
+            #[inline(always)]
+            #[must_use]
+            pub(crate) const fn without_provenance_mut<T>(addr: usize) -> *mut T {
+                // An int-to-pointer transmute currently has exactly the intended semantics: it creates a
+                // pointer without provenance. Note that this is *not* a stable guarantee about transmute
+                // semantics, it relies on sysroot crates having special status.
+                // SAFETY: every valid integer is also a valid pointer (as long as you don't dereference that
+                // pointer).
+                #[cfg(miri)]
+                unsafe {
+                    core::mem::transmute(addr)
+                }
+                // const transmute requires Rust 1.56.
+                // Using transmute doesn't work with CHERI: https://github.com/kent-weak-memory/rust/blob/0c0ca909de877f889629057e1ddf139527446d75/library/core/src/ptr/mod.rs#L607
+                #[cfg(not(miri))]
+                {
+                    addr as *mut T
+                }
+            }
+
+            pub(crate) trait PtrExt<T: ?Sized>: Copy {
+
+--- tests/arc.rs ---
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
+#![cfg(any(feature = "std", feature = "alloc"))]
+#![allow(clippy::undocumented_unsafe_blocks)]
+
+use std::{borrow::Cow, panic};
+
+use portable_atomic_util::{Arc, Weak};
+
+#[derive(Debug, PartialEq)]
+#[repr(align(128))]
+struct Aligned(u32);
+
+// https://github.com/taiki-e/portable-atomic/issues/37
+#[test]
+fn over_aligned() {
+    let value = Arc::new(Aligned(128));
+    let ptr = Arc::into_raw(value);
+    // SAFETY: `ptr` should always be a valid `Aligned`.
+    assert_eq!(unsafe { (*ptr).0 }, 128);
+    // SAFETY: `ptr` is a valid reference to an `Arc<Aligned>`.
+    let value = unsafe { Arc::from_raw(ptr) };
+    assert_eq!(value.0, 128);
+}
+
+#[test]
+fn default() {
+    let v = Arc::<[Aligned]>::default();
+    assert_eq!(v[..], []);
+    let v = Arc::<[()]>::default();
+    assert_eq!(v[..], []);
+    let v = Arc::<str>::default();
+    assert_eq!(&v[..], "");
+}
+
+#[test]
+fn cow_from() {
+    let o = Cow::Owned("abc".to_owned());
+    let b = Cow::Borrowed("def");
+    let o: Arc<str> = Arc::from(o);
+    let b: Arc<str> = Arc::from(b);
+    assert_eq!(&*o, "abc");
+    assert_eq!(&*b, "def");
+}
+
+#[test]
+fn make_mut_unsized() {
+    let mut v: Arc<[i32]> = Arc::from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    Arc::make_mut(&mut v)[0] += 10;
+    assert_eq!(&*v, [11, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    let v1 = Arc::clone(&v);
+    let v2 = Arc::make_mut(&mut v);
+    v2[1] += 10;
+    assert_eq!(&*v1, [11, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    assert_eq!(&*v2, [11, 12, 3, 4, 5, 6, 7, 8, 9, 10]);
