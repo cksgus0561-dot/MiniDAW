@@ -1,0 +1,3 @@
+# License evidence, lockfiles and vendor sources are audited by exact byte hash.
+# Preserve their original upstream line endings on every platform.
+* -text

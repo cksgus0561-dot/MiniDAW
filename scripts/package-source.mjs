@@ -14,7 +14,7 @@ const walk=d=>readdirSync(d,{withFileTypes:true}).flatMap(e=>e.isDirectory()?wal
 const omit=new Set(['node_modules','target','gen','local','generated','fixtures','review-candidate-notices']);
 function copy(from,to){cpSync(from,to,{recursive:true,filter:s=>!relative(from,s).split(/[\\/]/).some(x=>omit.has(x)||x==='review-candidate.json'||/\.(log|pdb|exe|dll|wav|mp3|flac|minidaw|zip|pdf)$/i.test(x))});}
 for(const p of ['src','scripts','public','.github','tests','licenses','packaging','src-tauri/src','src-tauri/tests','src-tauri/vendor','src-tauri/capabilities','src-tauri/icons'])copy(join(root,p),join(main,p));
-for(const p of ['README.md','BUILDING.md','LICENSE','SOURCE_CODE.md','THIRD_PARTY_NOTICES.md','.gitignore','.editorconfig','index.html','package.json','package-lock.json','tsconfig.json','vite.config.ts','src-tauri/Cargo.toml','src-tauri/Cargo.lock','src-tauri/build.rs','src-tauri/tauri.conf.json','docs/DISTRIBUTION.md']){mkdirSync(dirname(join(main,p)),{recursive:true});cpSync(join(root,p),join(main,p));}
+for(const p of ['README.md','BUILDING.md','LICENSE','SOURCE_CODE.md','THIRD_PARTY_NOTICES.md','.gitignore','.gitattributes','.editorconfig','index.html','package.json','package-lock.json','tsconfig.json','vite.config.ts','src-tauri/Cargo.toml','src-tauri/Cargo.lock','src-tauri/build.rs','src-tauri/tauri.conf.json','docs/DISTRIBUTION.md']){mkdirSync(dirname(join(main,p)),{recursive:true});cpSync(join(root,p),join(main,p));}
 cpSync(join(root,'docs/CLEAN-WINDOWS-TEST.md'),join(main,'docs/CLEAN-WINDOWS-TEST.md'));
 const a=JSON.parse(readFileSync(join(root,'licenses/reviewed-dependencies.json')));
 const copied=[];
