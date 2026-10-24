@@ -1,6 +1,6 @@
 [package]
 name = "minidaw"
-version = "0.1.0"
+version = "0.1.1"
 description = "개인용 데스크톱 DAW"
 edition = "2021"
 license = "GPL-3.0-only"

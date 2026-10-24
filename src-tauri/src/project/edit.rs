@@ -59,6 +59,8 @@ pub struct EditRequest {
     pub note_id: Option<String>,
     pub length_tick: Option<Signed>,
     pub pitch: Option<u8>,
+    pub key_signature: Option<i8>,
+    pub accidental: Option<super::notation::Accidental>,
     #[serde(default)]
     pub note_ids: Vec<String>,
     pub velocity: Option<u8>,

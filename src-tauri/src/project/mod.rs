@@ -14,6 +14,7 @@ pub mod spectrum;
 pub mod time;
 
 pub mod midi;
+pub mod notation;
 
 pub mod smf;
 pub mod tracks;

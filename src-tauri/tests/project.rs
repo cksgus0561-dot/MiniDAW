@@ -211,6 +211,7 @@ fn count_and_id_bounds_do_not_panic() {
     let mut p = Project::new();
     p.tracks = vec![
         Track {
+            key_signature: 0,
             synth: Default::default(),
             inserts: vec![],
             track_id: id(),

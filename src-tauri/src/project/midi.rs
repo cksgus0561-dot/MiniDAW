@@ -4,6 +4,8 @@ use crate::error::AppResult;
 use std::collections::HashSet;
 
 pub fn apply(p: &Project, r: &EditRequest) -> AppResult<Project> {
+    if matches!(r.command.as_str(), "midi.track.keySignature" | "midi.note.accidental") { return super::notation::apply(p, r); }
+    let key = p.tracks.iter().find(|t| t.clips.iter().any(|c| r.clip_ids.first().is_some_and(|id| id == c.id()))).map_or(0, |t| t.key_signature);
     let mut next = p.clone();
     // Piano Roll commands retain their Part-relative API, including trimmed Parts.
     if r.command.starts_with("midi.note.")
@@ -154,11 +156,13 @@ pub fn apply(p: &Project, r: &EditRequest) -> AppResult<Project> {
                 let length_tick = r.length_tick.ok_or_else(|| invalid("Note length tick"))?;
                 let pitch = r.pitch.ok_or_else(|| invalid("Note pitch"))?;
                 if r.command == "midi.note.add" {
+                    let (pitch, spelling) = super::notation::written(pitch, key)?;
                     valid_tick_range(start_tick.0, length_tick.0)?;
                     if start_tick.0 + length_tick.0 > c.length_tick.0 {
                         return Err(invalid("New Note outside Part"));
                     }
                     c.notes.push(MidiNote {
+                        spelling,
                         note_id: id(),
                         start_tick,
                         length_tick,
@@ -175,7 +179,7 @@ pub fn apply(p: &Project, r: &EditRequest) -> AppResult<Project> {
                         .ok_or_else(|| invalid("MIDI Note이 변경되었습니다."))?;
                     n.start_tick = start_tick;
                     n.length_tick = length_tick;
-                    n.pitch = pitch;
+                    super::notation::set_sounding(n, pitch, key);
                 }
             }
         }
@@ -250,7 +254,7 @@ pub fn apply(p: &Project, r: &EditRequest) -> AppResult<Project> {
                     if r.command == "midi.velocity" {
                         n.velocity = r.velocity.ok_or_else(|| invalid("Velocity"))?;
                     } else {
-                        n.pitch = (n.pitch as i32 + amount as i32) as u8;
+                        super::notation::set_sounding(n, (n.pitch as i32 + amount as i32) as u8, key);
                     }
                 }
             }

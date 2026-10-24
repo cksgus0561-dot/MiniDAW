@@ -415,6 +415,7 @@ fn midi_document() -> Project {
         length_tick: Signed(3840000),
         content_offset_tick: Signed(0),
         notes: vec![MidiNote {
+            spelling: None,
             note_id: id(),
             start_tick: Signed(0),
             length_tick: Signed(3840000),

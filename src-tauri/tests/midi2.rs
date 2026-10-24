@@ -16,6 +16,7 @@ use serde_json::json;
 fn fixture() -> Project {
     let mut p = Project::new();
     p.tracks.push(Track {
+        key_signature: 0,
         synth: Default::default(),
         inserts: vec![],
         track_id: id(),
@@ -32,6 +33,7 @@ fn fixture() -> Project {
             length_tick: Signed(3_840_000),
             notes: vec![
                 MidiNote {
+                    spelling: None,
                     note_id: id(),
                     start_tick: Signed(12345),
                     length_tick: Signed(234567),
@@ -41,6 +43,7 @@ fn fixture() -> Project {
                     channel: 2,
                 },
                 MidiNote {
+                    spelling: None,
                     note_id: id(),
                     start_tick: Signed(345678),
                     length_tick: Signed(456789),

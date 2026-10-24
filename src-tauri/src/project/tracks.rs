@@ -30,14 +30,19 @@ pub fn transfer(p: &mut Project, ids: &[String], target: &str) -> AppResult<()> 
     if found != selected.len() {
         return Err(invalid("이동할 Clip이 변경되었습니다."));
     }
+    let key = p.tracks[destination].key_signature;
     let mut moving = vec![];
     for (i, t) in p.tracks.iter_mut().enumerate() {
         if i == destination {
             continue;
         }
         let mut retained = Vec::with_capacity(t.clips.len());
-        for clip in std::mem::take(&mut t.clips) {
+        for mut clip in std::mem::take(&mut t.clips) {
             if selected.contains(clip.id()) {
+                if let Clip::Midi(c) = &mut clip { for n in &mut c.notes {
+                    if n.spelling.is_none() && key != t.key_signature { n.spelling = Some(super::notation::infer(n.pitch, t.key_signature)); }
+                    if let Some(spelling) = n.spelling { n.pitch = spelling.resolve(key)?; }
+                } }
                 moving.push(clip);
             } else {
                 retained.push(clip);
@@ -67,6 +72,7 @@ pub fn apply(p: &Project, r: &EditRequest) -> AppResult<Project> {
                 number += 1;
             }
             next.tracks.push(Track {
+                key_signature: 0,
                 synth: Default::default(),
                 inserts: vec![],
                 track_id: id(),

@@ -5,7 +5,7 @@ No warranty is provided. Third-party components retain the notices and licenses
 listed in `THIRD_PARTY_NOTICES.md` and `licenses/`.
 
 Every published Windows installer must be accompanied, on the **same download
-page and without an additional fee**, by `MiniDAW-0.1.0-corresponding-source.zip`
+page and without an additional fee**, by `MiniDAW-0.1.1-corresponding-source.zip`
 and `SHA256SUMS.txt`. This is the source distribution method under GPLv3 §6(d),
 not a promise to supply source later. Do not publish the installer alone.
 The GitHub-generated repository archive does not replace this complete source
@@ -31,8 +31,9 @@ alternative**. Windows host utility files retain their BSD-3-Clause licenses.
 The Steinberg proprietary agreement is not the license selected for this build.
 No TOPPING driver or external VST3/CLAP instrument/effect is distributed.
 
-This local packaging workspace has not been published. When publishing, upload
-the matching source asset alongside the installer and retain both for that release.
+Published installers and matching source assets are provided together at
+https://github.com/cksgus0561-dot/MiniDAW/releases. Use the source archive with
+the same version as the installer. Retain both assets for every release.
 
 한국어: 설치 파일을 공개할 때 같은 다운로드 페이지에 위 대응 소스 ZIP과
 SHA256SUMS.txt를 함께 제공해야 합니다. 저장소의 자동 생성 Source code ZIP만으로

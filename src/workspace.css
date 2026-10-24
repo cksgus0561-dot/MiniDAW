@@ -205,6 +205,11 @@
 .piano-tools, .piano-properties, .midi-lane-toolbar { display:flex; align-items:center; gap:.3rem; overflow-x:auto; scrollbar-width:thin; white-space:nowrap; }
 .piano-tools>*, .piano-properties>*, .midi-lane-toolbar>* { flex-shrink:0; }
 .piano-properties { margin-top:.2rem; }
+.notation-legend { font-size:.7rem; }
+.notation-legend span:first-child { color:#5edbd3; }
+.notation-legend span:last-child { color:#ffb86b; }
+#piano-key-signature { max-width:10rem; }
+.instrument-route-row .track-key-signature { width:3.7rem; min-width:3.7rem; padding:0 .1rem; font-size:.75rem; margin:.1rem .3rem .1rem 0; }
 #panel-piano button, #panel-piano input, #panel-piano select { font-size:.8rem; padding:.2rem .35rem; }
 #panel-piano .workspace-panel-heading button { font-size:1.2rem; padding:0 .45rem; }
 .piano-toolbar button[aria-pressed="true"] { background:#535967; color:#fff; }

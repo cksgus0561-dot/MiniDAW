@@ -2,6 +2,7 @@ import { uiText, uiAttr, tr } from './i18n';
 import { globalShortcut } from './keyboard';
 import { shortcutCommand } from './shortcuts';
 import { NoteInfo } from './note-info';
+import { inferSpelling, keyOptions, movedNote, noteMark, writtenNote } from './notation';
 import { MidiLane } from './midi-lane';
 import { MidiKeyboard } from './midi-input';
 import { element } from './dom';
@@ -11,7 +12,7 @@ import type { Waveform } from './waveform';
 import type { Panels } from './panels';
 
 interface View { document: { projectId: string; tracks: PianoTrack[] }; revision: number }
-interface Drag { pointer: number; kind: 'add' | 'move' | 'left' | 'right'; originTick: number; originPitch: number; original: MidiNote; preview: MidiNote; moved: boolean }
+interface Drag { pointer: number; kind: 'add' | 'move' | 'left' | 'right'; originTick: number; originPitch: number; writtenPitch?:number; original: MidiNote; preview: MidiNote; moved: boolean }
 const KEYS = 56, RULER = 28;
 const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
 
@@ -59,6 +60,9 @@ export class PianoRoll {
   constructor(private panels: Panels, private wave: Waveform, private edit: (r: unknown) => Promise<void>) {
     this.lane = new MidiLane({clip:()=>this.clip,selected:()=>this.selected,select:ids=>{this.selected=ids;this.draw();},x:tick=>this.x(tick),tick:x=>this.tickAt(x),snap:tick=>this.snap(tick),draw:()=>this.draw(),drawing:()=>this.tool==='draw',busy:()=>this.busy,edit:r=>this.commit(r)});
     this.noteInfo=new NoteInfo({clip:()=>this.clip,selected:()=>this.selected,clock:()=>this.wave.musical,busy:()=>this.busy||!!this.drag||!!this.box,edit:r=>this.commit(r)});
+    const keySelect=element<HTMLSelectElement>('piano-key-signature');keyOptions(keySelect);
+    keySelect.onchange=()=>{const part=this.parts.find(p=>p.clip.clipId===this.clipId);if(part){this.cancel();void this.commit({command:'midi.track.keySignature',trackIds:[part.trackId],keySignature:Number(keySelect.value)});}};
+    element<HTMLSelectElement>('piano-accidental').onchange=()=>void this.notesCommand('midi.note.accidental',{accidental:element<HTMLSelectElement>('piano-accidental').value});
     new MidiKeyboard(()=>panels.owns('piano'));
     element('piano-velocity-apply').onclick=()=>void this.notesCommand('midi.velocity',{velocity:Number(element<HTMLInputElement>('piano-velocity').value)});
     element('piano-quantize').onclick=()=>void this.notesCommand('midi.quantize',{grid:this.wave.grid});
@@ -174,6 +178,7 @@ export class PianoRoll {
   private row(): number { return parseFloat(getComputedStyle(document.documentElement).fontSize) * 1.45; }
   private width(): number { return Math.max(1, this.canvas.clientWidth - KEYS); }
   private clipStart(): number { return Number(this.clip?.startTick ?? 0); }
+  private keySignature():number {return this.parts.find(p=>p.clip.clipId===this.clipId)?.keySignature??0;}
   private origin():number {return this.absolute?0:this.clipStart();}
   private limits(): [number, number] { return this.absolute?partsBounds(this.parts):[0, Number(this.clip?.lengthTick ?? 1)]; }
   private fit(): void { const [a, b] = this.limits(); this.start = a; this.span = Math.max(1, b - a); this.draw(); }
@@ -214,9 +219,11 @@ export class PianoRoll {
       if (at.tick < this.clipStart() || at.tick >= this.clipStart() + Number(this.clip.lengthTick)) return;
       const start = clamp(this.snap(at.tick) - this.clipStart(), 0, Number(this.clip.lengthTick) - 1);
       note = { noteId: '', startTick: String(start), lengthTick: String(Math.max(1, Math.min(Number(this.clip.lengthTick) - start, Math.round(this.wave.musical.step(this.clipStart() + start, this.wave.grid))))), pitch: at.pitch, velocity:100,releaseVelocity:0,channel:0 };
+      note=writtenNote(note,this.keySignature());
+      if(note.pitch<0||note.pitch>127)return;
       kind = 'add'; this.selected.clear();
     } else { const before=e.shiftKey?new Set(this.selected):new Set<string>();this.selected=new Set(before);this.box={pointer:e.pointerId,x:at.x,y:at.y,endX:at.x,endY:at.y,before};this.canvas.setPointerCapture(e.pointerId);this.draw();return; }
-    this.drag = { pointer: e.pointerId, kind, originTick: at.tick, originPitch: at.pitch, original: note, preview: { ...note }, moved: false };
+    this.drag = { pointer: e.pointerId, kind, originTick: at.tick, originPitch: at.pitch, writtenPitch:kind==='add'?at.pitch:undefined, original: note, preview: { ...note }, moved: false };
     this.canvas.setPointerCapture(e.pointerId); this.draw(); this.readout(note);
   }
   private move(e: PointerEvent): void {
@@ -225,9 +232,10 @@ export class PianoRoll {
     if (!g) {
       const hit = this.hit(at.x, at.y), r = hit ? this.rect(hit) : null;
       const owner=this.parts.find(p=>p.clip.clipId===this.clipId&&!!hit)??this.parts.find(p=>p.clip.clipId!==this.clipId&&p.clip.notes.some(n=>{const r=this.rect(n,p.clip);return at.x>=r.x&&at.x<=r.x+r.w&&at.y>=r.y&&at.y<=r.y+r.h;}));
-      uiAttr(this.canvas,'title',owner?`${owner.trackName} / ${owner.clip.name} · ${tr(owner.clip.clipId===this.clipId?'활성 Part':'참고 Part · 상단에서 활성화 후 편집')}`:'',false);
+      const pointed=owner?.clip.notes.find(n=>{const r=this.rect(n,owner.clip);return at.x>=r.x&&at.x<=r.x+r.w&&at.y>=r.y&&at.y<=r.y+r.h;}),mark=pointed?noteMark(pointed):null;
+      uiAttr(this.canvas,'title',owner?`${owner.trackName} / ${owner.clip.name} · ${tr(owner.clip.clipId===this.clipId?'활성 Part':'참고 Part · 상단에서 활성화 후 편집')}${mark?' · '+mark.label+(mark.source?' · '+mark.source:''):''}`:'',false);
       this.canvas.style.cursor = r && (at.x - r.x < Math.min(7, r.w / 3) || r.x + r.w - at.x < Math.min(7, r.w / 3)) ? 'ew-resize' : hit ? 'move' : this.tool === 'draw' ? 'crosshair' : 'default';
-      if (this.clip) uiText(element('piano-position'), `${this.wave.musical.preciseLabel(Math.max(0, at.tick))} · ${noteName(at.pitch)}`);
+      if (this.clip) uiText(element('piano-position'), `${this.wave.musical.preciseLabel(Math.max(0, at.tick))} · ${mark?.label??noteName(at.pitch)}${mark?.source?' · '+mark.source:''}`,false);
       return;
     }
     if (g.pointer !== e.pointerId || !this.clip) return;
@@ -242,11 +250,13 @@ export class PianoRoll {
       const edge = g.kind === 'right' ? start + Number(g.original.lengthTick) : start;
       const target = this.snap(this.clipStart() + edge + delta) - this.clipStart();
       g.preview = notePreview(g.original, g.kind, target, at.pitch - g.originPitch, length);
+      if(g.preview.pitch!==g.original.pitch)g.preview={...g.preview,spelling:movedNote(g.original,g.preview.pitch,this.keySignature()).spelling};
     }
     this.readout(g.preview); this.draw();
   }
   private readout(n: MidiNote): void {
-    uiText(element('piano-position'), `${this.wave.musical.preciseLabel(this.clipStart() + Number(n.startTick))} · ${noteName(n.pitch)} · ${n.lengthTick} ticks · Vel ${n.velocity} · Ch ${n.channel+1}`);
+    const mark=noteMark(n);
+    uiText(element('piano-position'), `${this.wave.musical.preciseLabel(this.clipStart() + Number(n.startTick))} · ${mark.label}${mark.source?' · '+mark.source:''} · MIDI ${n.pitch} · ${n.lengthTick} ticks · Vel ${n.velocity} · Ch ${n.channel+1}`,false);
     element<HTMLInputElement>('piano-velocity').value=String(n.velocity);
   }
   private async up(e: PointerEvent): Promise<void> {
@@ -256,7 +266,7 @@ export class PianoRoll {
     if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
     if (g.kind === 'add' || g.moved) {
       const before = new Set(this.clip.notes.map(n => n.noteId)), n = g.preview;
-      await this.commit({ command: g.kind === 'add' ? 'midi.note.add' : 'midi.note.change', clipIds: [this.clip.clipId], noteId: n.noteId || null, targetTick: n.startTick, lengthTick: n.lengthTick, pitch: n.pitch });
+      await this.commit({ command: g.kind === 'add' ? 'midi.note.add' : 'midi.note.change', clipIds: [this.clip.clipId], noteId: n.noteId || null, targetTick: n.startTick, lengthTick: n.lengthTick, pitch: g.kind==='add'?g.writtenPitch:n.pitch });
       if (g.kind === 'add') this.selected = new Set(this.clip?.notes.filter(n=>!before.has(n.noteId)).map(n=>n.noteId));
       this.readout(n);
     }
@@ -296,6 +306,11 @@ export class PianoRoll {
     this.showParts();
     uiText(element('piano-grid-info'), `Snap ${this.wave.snapEnabled ? 'ON' : 'OFF'} · Grid ${this.wave.grid === 'beat' ? 'Beat' : this.wave.grid === 'bar' ? 'Bar' : '1/' + this.wave.grid}`);
     uiText(element('piano-selected-count'), `${this.selected.size}개 선택`);
+    const keySelect=element<HTMLSelectElement>('piano-key-signature');keySelect.value=String(active?.keySignature??0);keySelect.disabled=!active||this.busy||!!this.drag;
+    uiAttr(keySelect,'title',active?`${active.trackName} · ${tr('이 트랙의 모든 MIDI Part에 적용')}`:'MIDI Clip을 선택하세요',!active);
+    const accidental=element<HTMLSelectElement>('piano-accidental'),selected=this.clip?.notes.filter(n=>this.selected.has(n.noteId))??[];
+    const values=new Set(selected.map(n=>(n.spelling??inferSpelling(n.pitch,this.keySignature())).accidental));
+    accidental.value=values.size===1?[...values][0]:'';accidental.disabled=!selected.length||this.busy||!!this.drag;
     for(const id of ['piano-delete','piano-velocity-apply','piano-quantize','piano-transpose-up','piano-transpose-down'])element<HTMLButtonElement>(id).disabled = !this.selected.size || this.busy;
     this.lane.paint();
     this.noteInfo.render();
@@ -346,6 +361,8 @@ export class PianoRoll {
     ctx.fillStyle=color;ctx.fillRect(r.x,r.y,r.w,r.h);
     ctx.strokeStyle=active&&(this.selected.has(n.noteId)||n===this.drag?.preview)?'#ffe191':color;
     ctx.strokeRect(r.x+.5,r.y+.5,Math.max(0,r.w-1),r.h-1);
-    if(active&&r.w>38){ctx.fillStyle='#161921';ctx.fillText(noteName(n.pitch),Math.max(KEYS+2,r.x+5),r.y+r.h*.76);}
+    const mark=noteMark(n);
+    if(mark.color){ctx.fillStyle=mark.color;ctx.fillRect(r.x+1,r.y+1,Math.min(3,Math.max(0,r.w-2)),Math.max(0,r.h-2));}
+    if(active&&r.w>38){ctx.fillStyle='#161921';ctx.fillText(mark.label,Math.max(KEYS+2,r.x+6),r.y+r.h*.76);}
   }
 }

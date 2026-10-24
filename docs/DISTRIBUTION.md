@@ -1,6 +1,7 @@
 # Windows distribution and license review
 
-Release version: 0.1.0, Windows x64. Prepared locally; no GitHub upload is performed.
+Release version: 0.1.1, Windows x64, Beta. Releases and matching source archives:
+https://github.com/cksgus0561-dot/MiniDAW/releases.
 
 ## GPLv3 scope
 
@@ -82,9 +83,35 @@ Official references: [GPLv3](https://www.gnu.org/licenses/gpl-3.0.html),
 [NSIS license](https://nsis.sourceforge.io/License),
 [WebView2 Loader](https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.3800.47/License).
 
-## Validation
+## 0.1.1 Beta 1 update validation — 2026-10-25
 
-Local validation results are recorded under `output/package-validation/` and
+This update adds MIDI track key signatures and per-note accidentals. Playback
+uses the resolved MIDI pitches through the existing scheduler; no callback DSP
+or external dependency version changed. The version-only build/lock hashes were
+updated without changing the reviewed component or notice inventory.
+
+- License gate: 574 locked Rust/npm components, 183 vendored files and 1,015
+  notice/evidence files passed. RealFFT and all existing notices are retained.
+- Frontend type check/production build and ASIO x64 NSIS release build passed.
+- All 26 focused Rust tests passed (midi, midi2, midi_resize, note_time, notation).
+- Actual install, installed-app test and uninstall passed in a separate test
+  directory on the development PC. Existing installer settings were restored.
+- The installed executable matched the built executable by SHA-256. Its 1,017
+  installed files included 1,011 verified component notice hashes, with no
+  developer paths or excluded media, plugins, drivers or SDK payload.
+- Installed UI: track independence, sharp/flat/natural/reset, multi-note Undo,
+  colored Canvas marks, mouse and numeric edits, save/reopen, font scaling,
+  window resize and detached Piano Roll editing passed.
+- Short TOPPING ASIO playback check at 48 kHz / 64 frames produced non-silent
+  Synth output. Average callback 0.0058 ms, observed maximum 0.1298 ms; callback
+  overrun, device overrun, starvation and stream errors were zero. This is a
+  focused functional check, not a long stress test or acoustic quality audit.
+- The full 0.1.0 plugin/export audit below is historical and was not rerun for
+  this notation update. Clean Windows without WebView2 remains untested.
+
+## Initial 0.1.0 validation (historical baseline)
+
+The initial package validation results are recorded under `output/package-validation/` and
 summarized here after the installer smoke tests. Logs and screenshots are excluded
 from the public source tree.
 

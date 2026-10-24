@@ -341,6 +341,7 @@ fn midi_and_master_effects_do_not_change_sample_clock_or_output_when_bypassed() 
         length_tick: Signed(1920000),
         content_offset_tick: Signed(0),
         notes: vec![MidiNote {
+            spelling: None,
             note_id: id(),
             start_tick: Signed(12345),
             length_tick: Signed(960000),

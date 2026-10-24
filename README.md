@@ -7,6 +7,7 @@ MiniDAW는 Windows용 오픈소스 Audio/MIDI DAW입니다. Rust/Tauri 2 기반�
 
 - 여러 Audio/MIDI Track, 비파괴 Clip 편집, Undo/Redo, 프로젝트 저장/불러오기
 - Piano Roll, Velocity/CC/Pitch Bend/Sustain, MIDI 입력과 컴퓨터 키보드 연주
+- MIDI Track별 조표와 Note별 ♯/♭/♮ 임시표, Piano Roll 색상·음이름 표시
 - 내장 Synth, 외부 VST3/CLAP 악기·Insert 및 플러그인 지연 보상(PDC)
 - Mixer/Master, EQ·Compressor·Limiter·Reverb·Delay, Parameter Automation
 - BPM/박자, PPQ 960000, Grid/Snap, Loop/Cycle, 정밀 숫자 편집
@@ -19,8 +20,8 @@ MiniDAW는 Windows용 오픈소스 Audio/MIDI DAW입니다. Rust/Tauri 2 기반�
 
 ## 설치와 실행
 
-Windows 10/11 **x64**가 필요합니다. 공개 후 이 저장소의 Releases에서
-`MiniDAW_0.1.0_x64-setup.exe`를 내려받아 실행합니다. 현재 사용자의 계정에
+Windows 10/11 **x64**가 필요합니다. [GitHub Releases](https://github.com/cksgus0561-dot/MiniDAW/releases)에서
+`MiniDAW_0.1.1_x64-setup.exe`를 내려받아 실행합니다. 현재 사용자의 계정에
 설치되며 시작 메뉴에서 MiniDAW를 실행할 수 있습니다. 제거는 Windows 설정의
 설치된 앱 → MiniDAW → 제거를 사용합니다.
 
@@ -29,8 +30,9 @@ Rust, Node.js, Visual Studio, ASIO SDK 또는 LLVM을 일반 사용자 PC에 설
 다운로드하므로 인터넷 연결이 필요합니다. ASIO는 사용하는 장치 제조사의 드라이버가
 필요합니다. 드라이버나 플러그인을 MiniDAW 설치판에 동봉하지 않습니다.
 
-현재 패키지는 코드 서명 인증서가 적용되지 않았습니다. 공개 전 테스트 결과와 배포
-상태는 [배포 문서](docs/DISTRIBUTION.md)를 확인하세요. 저장소/Release는 자동 게시되지 않습니다.
+현재 Beta 패키지는 코드 서명 인증서가 적용되지 않았습니다. 테스트 결과와 배포
+제한은 [배포 문서](docs/DISTRIBUTION.md)를 확인하세요. WebView2가 없는 깨끗한
+Windows에서 자동 설치하는 검증은 아직 수행하지 못했습니다.
 
 ## 기본 사용
 
@@ -39,6 +41,12 @@ Rust, Node.js, Visual Studio, ASIO SDK 또는 LLVM을 일반 사용자 PC에 설
 3. MIDI Track에는 내장 Synth 또는 설치된 VST3/CLAP 악기를 지정합니다.
 4. Space로 재생/일시정지, Stop으로 처음으로 이동합니다. 단축키는 앱 설정에서 변경할 수 있습니다.
 5. 파일 메뉴에서 `.minidaw` 프로젝트를 저장하고 Export Audio Mixdown을 실행합니다.
+
+조표는 MIDI Track 또는 Piano Roll의 조표 선택에서 지정합니다. Piano Roll에서
+Note를 선택한 뒤 임시표를 조표 따름/♯/♭/♮로 바꿀 수 있습니다. 청록색 표시는
+조표에 의한 변화, 주황색 표시는 명시적인 임시표입니다. 임시표는 선택한 Note에만
+적용되며 같은 마디의 다른 Note로 자동 전파되지 않습니다. Piano Roll 행은 실제
+연주되는 음높이를 표시하고 음이름에는 기보상의 임시표를 함께 표시합니다.
 
 원본 오디오는 외부 파일로 참조하므로 프로젝트를 다른 PC로 옮길 때 원본도 함께
 옮겨야 합니다. 누락된 미디어는 다시 연결할 수 있습니다. 언어·단축키·오디오 장치·창

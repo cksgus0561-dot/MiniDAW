@@ -1,4 +1,5 @@
 import { uiAttr, uiText } from './i18n';
+import { keyLabel, keyOptions } from './notation';
 import { globalShortcut } from './keyboard';
 import { refreshShortcutLabels } from './shortcuts';
 import {choosePlugin,openPlugin,type PluginSelection} from './plugins';
@@ -61,6 +62,7 @@ interface View {
             name: string;
             kind: 'audio' | 'midi';
             instrument?: 'none' | 'basicSynth' | 'external';
+            keySignature?:number;
             extensions?:Record<string,unknown>;
             mix?: TrackMix;
             clips: Clip[];
@@ -436,6 +438,9 @@ export class Editing {
                 routing.onchange = () => {if(routing.value==='choose'){routing.value=track.instrument??'none';choosePlugin(row.id,'instrument');}else void this.edit({command:'midi.track.instrument', trackIds:[row.id], instrument:routing.value}); };
                 const routeRow=document.createElement('div');routeRow.className='instrument-route-row';routeRow.append(routing);if(track.instrument==='external'){const editor=document.createElement('button');uiText(editor, 'e');uiAttr(editor, 'title', 'Plugin Editor 열기');editor.onclick=()=>openPlugin(row.id);routeRow.append(editor);}header.append(routeRow);
                 const add = document.createElement('button'); add.className = 'midi-clip-add'; uiText(add, '＋ MIDI Clip'); uiAttr(add, 'title', '커서 위치에 4마디 MIDI Clip 생성');
+                const key=document.createElement('select');key.className='track-key-signature';keyOptions(key);key.value=String(track.keySignature??0);key.disabled=this.busy;
+                uiAttr(key,'aria-label',`${row.name} 조표`);uiAttr(key,'title',`${row.name} · ${keyLabel(track.keySignature??0)}`,false);
+                key.onchange=()=>void this.edit({command:'midi.track.keySignature',trackIds:[row.id],keySignature:Number(key.value)});routeRow.append(key);
                 add.onclick = () => { void this.addMidiClip(row.id); }; header.append(add);
             }
             header.append(this.resizeHandle(row)); list.append(header);

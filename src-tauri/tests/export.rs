@@ -172,6 +172,7 @@ fn fixture() -> (Project, Arc<AudioAsset>) {
         content_offset_tick: Signed(0),
         notes: vec![
             MidiNote {
+                spelling: None,
                 note_id: id(),
                 start_tick: Signed(12345),
                 length_tick: Signed(900000),
@@ -181,6 +182,7 @@ fn fixture() -> (Project, Arc<AudioAsset>) {
                 channel: 0,
             },
             MidiNote {
+                spelling: None,
                 note_id: id(),
                 start_tick: Signed(540000),
                 length_tick: Signed(1860000),

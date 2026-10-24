@@ -1,4 +1,6 @@
-export interface MidiNote { noteId: string; startTick: string; lengthTick: string; pitch: number; velocity: number; releaseVelocity: number; channel: number }
+export type Accidental = 'key' | 'sharp' | 'flat' | 'natural';
+export interface Spelling { naturalPitch:number; accidental:Accidental }
+export interface MidiNote { noteId: string; startTick: string; lengthTick: string; pitch: number; spelling?:Spelling; velocity: number; releaseVelocity: number; channel: number }
 export type MidiControlData = { kind: 'cc'; controller: number; value: number } | { kind: 'pitchBend'; value: number };
 export interface MidiControl { eventId: string; tick: string; channel: number; data: MidiControlData }
 export interface MidiClip { kind: 'midi'; clipId: string; name: string; startTick: string; lengthTick: string; contentOffsetTick?: string; notes: MidiNote[]; controls: MidiControl[] }

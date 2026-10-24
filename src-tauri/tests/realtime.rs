@@ -588,6 +588,7 @@ fn midi_sample_scheduler_and_plan_changes_are_realtime_safe() {
     };
     let mut p = Project::new();
     p.tracks.push(Track {
+        key_signature: 0,
         synth: Default::default(),
         inserts: vec![],
         track_id: id(),
@@ -620,6 +621,7 @@ fn midi_sample_scheduler_and_plan_changes_are_realtime_safe() {
                 },
             ],
             notes: vec![MidiNote {
+                spelling: None,
                 note_id: id(),
                 start_tick: Signed(0),
                 length_tick: Signed(480000),
@@ -781,6 +783,7 @@ fn multitrack_streaming_and_synth_mix_never_allocates_frees_or_reads_files_in_ca
             content_offset_tick: Signed(0),
             controls: vec![],
             notes: vec![MidiNote {
+                spelling: None,
                 note_id: id(),
                 start_tick: Signed(0),
                 length_tick: Signed(3000000),

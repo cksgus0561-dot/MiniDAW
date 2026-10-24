@@ -814,5 +814,17 @@
   "선택 구간 이전 DSP 준비": "Rendering prior DSP history",
   "프로젝트가 변경됐습니다. Export 창을 다시 열어 주세요.": "Project changed. Reopen the Export dialog.",
   "Export 대상과 시간 구간을 확인해 주세요.": "Check the export target and time range.",
-  "\nPCM 범위 초과 {0} samples · 출력 레벨을 낮추거나 32-bit float를 사용하세요.": "\n{0} samples exceed the PCM range · lower output level or use 32-bit float."
+  "\nPCM 범위 초과 {0} samples · 출력 레벨을 낮추거나 32-bit float를 사용하세요.": "\n{0} samples exceed the PCM range · lower output level or use 32-bit float.",
+  "조표": "Key signature",
+  "임시표": "Accidental",
+  "트랙 조표": "Track key signature",
+  "{0} 조표": "{0} key signature",
+  "선택 노트 임시표": "Selected note accidental",
+  "조표 따름": "Follow key",
+  "선택한 노트에만 적용 · 조표 따름으로 복원": "Apply only to selected notes · choose Follow key to reset",
+  "노트 왼쪽 표시: 청록은 조표, 주황은 임시표": "Note edge: teal for key signature, orange for accidental",
+  "이 트랙의 모든 MIDI Part에 적용": "Applies to all MIDI Parts on this track",
+  "조표 또는 음이름이 올바르지 않습니다.": "Invalid key signature or note spelling.",
+  "조표와 노트 음높이가 일치하지 않습니다.": "Note pitch does not match its key signature and spelling.",
+  "임시표를 선택해 주세요.": "Select an accidental."
 }

@@ -175,6 +175,8 @@ pub struct AudioClip {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MidiNote {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spelling: Option<super::notation::Spelling>,
     pub note_id: String,
     pub start_tick: Signed,
     pub length_tick: Signed,
@@ -189,6 +191,7 @@ pub struct MidiNote {
 pub fn default_velocity() -> u8 {
     100
 }
+fn is_zero_key(value: &i8) -> bool { *value == 0 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum MidiControlData {
@@ -339,6 +342,9 @@ impl TrackMix {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Track {
+    /// Number of sharps (positive) or flats (negative); zero has no alterations.
+    #[serde(default, skip_serializing_if = "is_zero_key")]
+    pub key_signature: i8,
     #[serde(
         default,
         skip_serializing_if = "super::automation::SynthSettings::is_default"
@@ -460,6 +466,7 @@ impl Project {
         self.primary_clip_id = Some(clip.clip_id.clone());
         if !self.tracks.iter().any(|t| t.kind == TrackKind::Audio) {
             self.tracks.push(Track {
+                key_signature: 0,
                 synth: Default::default(),
                 inserts: vec![],
                 track_id: id(),
@@ -540,6 +547,9 @@ impl Project {
             }
         }
         for track in &self.tracks {
+            if !(-7..=7).contains(&track.key_signature) || (track.kind != TrackKind::Midi && track.key_signature != 0) {
+                return Err(invalid("조표 또는 음이름이 올바르지 않습니다."));
+            }
             check_id(&track.track_id)?;
             name(&track.name)?;
             if !track.mix.volume_db.is_finite()
@@ -571,6 +581,9 @@ impl Project {
                         return Err(invalid("MIDI content offset"));
                     }
                     for note in &c.notes {
+                        if let Some(spelling) = note.spelling {
+                            if spelling.resolve(track.key_signature)? != note.pitch { return Err(invalid("조표와 노트 음높이가 일치하지 않습니다.")); }
+                        }
                         check_id(&note.note_id)?;
                         let start = i128::from(note.start_tick.0);
                         let end = start + i128::from(note.length_tick.0);

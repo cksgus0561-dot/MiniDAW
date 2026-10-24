@@ -18,6 +18,7 @@ use std::{sync::Arc, time::Instant};
 fn project(count: usize) -> Project {
     let mut p = Project::new();
     p.tracks.push(Track {
+        key_signature: 0,
         synth: Default::default(),
         inserts: vec![],
         track_id: id(),
@@ -35,6 +36,7 @@ fn project(count: usize) -> Project {
             controls: vec![],
             notes: (0..count)
                 .map(|i| MidiNote {
+                    spelling: None,
                     note_id: id(),
                     start_tick: Signed(0),
                     length_tick: Signed(1_920_000),

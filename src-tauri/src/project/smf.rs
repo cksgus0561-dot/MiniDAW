@@ -132,6 +132,7 @@ pub fn decode(bytes: &[u8]) -> AppResult<Imported> {
                                 .and_then(VecDeque::pop_front)
                             {
                                 notes.push(MidiNote {
+                                    spelling: None,
                                     note_id: id(),
                                     start_tick: Signed(start),
                                     length_tick: Signed((tick - start).max(1)),
@@ -185,6 +186,7 @@ pub fn decode(bytes: &[u8]) -> AppResult<Imported> {
             for (start, velocity) in queue {
                 skipped += 1;
                 notes.push(MidiNote {
+                    spelling: None,
                     note_id: id(),
                     start_tick: Signed(start),
                     length_tick: Signed((end - start).max(1)),
@@ -201,6 +203,7 @@ pub fn decode(bytes: &[u8]) -> AppResult<Imported> {
                 end = end.max(n.start_tick.0 + n.length_tick.0);
             }
             tracks.push(Track {
+                key_signature: 0,
                 synth: Default::default(),
                 inserts: vec![],
                 track_id: id(),

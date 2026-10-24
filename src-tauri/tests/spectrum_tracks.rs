@@ -226,6 +226,7 @@ fn actual_synth_capture_resolves_midi_bus_ids_after_audio_tracks() {
     let mut p = (*audio.document).clone();
     for pitch in [69, 76] {
         p.tracks.push(Track {
+            key_signature: 0,
             synth: Default::default(),
             inserts: vec![],
             track_id: id(),
@@ -242,6 +243,7 @@ fn actual_synth_capture_resolves_midi_bus_ids_after_audio_tracks() {
                 content_offset_tick: Signed(0),
                 controls: vec![],
                 notes: vec![MidiNote {
+                    spelling: None,
                     note_id: id(),
                     start_tick: Signed(0),
                     length_tick: Signed(3840000),

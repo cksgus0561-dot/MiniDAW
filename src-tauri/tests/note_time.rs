@@ -8,6 +8,7 @@ use serde_json::json;
 fn fixture() -> Project {
     let mut p = Project::new();
     p.tracks.push(Track {
+        key_signature: 0,
         synth: Default::default(),
         inserts: vec![],
         track_id: id(),
@@ -29,6 +30,7 @@ fn fixture() -> Project {
             ]
             .into_iter()
             .map(|(start, length, pitch)| MidiNote {
+                spelling: None,
                 note_id: id(),
                 start_tick: Signed(start),
                 length_tick: Signed(length),
