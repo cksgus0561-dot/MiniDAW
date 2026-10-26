@@ -17,6 +17,8 @@ export class ComputerMidi {
   private enabled=false;
   private root=60;
   private trackId:string|null=null;
+  // Piano Roll step input plays its active Part's Track while ON.
+  private stepTrack:string|null=null;
   private tracks:Track[]=[];
   private project='';
   private targetSignature='';
@@ -58,11 +60,17 @@ export class ComputerMidi {
       if(this.project!==doc.projectId){this.release();this.trackId=null;this.project=doc.projectId;}
       this.tracks=doc.tracks;this.targetChanged();
     });
+    document.addEventListener('piano-step-target',e=>{
+      const id=(e as CustomEvent<{trackId:string|null}>).detail.trackId;
+      if(id!==this.stepTrack){this.release();this.stepTrack=id;}
+      this.targetChanged();
+    });
+    document.addEventListener('computer-midi-request',e=>{if((e as CustomEvent<{enabled:boolean}>).detail.enabled!==this.enabled)this.setEnabled(!this.enabled);});
     document.addEventListener('language-changed',()=>this.render());
     document.addEventListener('shortcuts-changed',()=>this.render());
     this.render();
   }
-  private target():Track|undefined { return this.tracks.find(t=>t.trackId===this.trackId&&t.kind==='midi'); }
+  private target():Track|undefined { const id=this.stepTrack??this.trackId;return this.tracks.find(t=>t.trackId===id&&t.kind==='midi'); }
   private targetChanged():void {
     const t=this.target(),signature=t?`${t.trackId}:${t.instrument}:${JSON.stringify((t.extensions?.['minidaw.plugin.v1'] as {descriptor?:unknown}|undefined)?.descriptor)}`:'';
     if(signature!==this.targetSignature){this.release();this.targetSignature=signature;}
@@ -84,6 +92,7 @@ export class ComputerMidi {
     });
   }
   private release():void {
+    document.dispatchEvent(new Event('computer-midi-release'));
     if(this.held.size){this.held.clear();this.send(null,[]);this.render();}
     // Keep consumed key codes until keyup: a focus/mode change must not turn an
     // already-held piano key's auto-repeat into a DAW command or button click.
@@ -94,6 +103,8 @@ export class ComputerMidi {
     if(!this.enabled||offset===undefined||e.ctrlKey||e.altKey||e.metaKey||e.shiftKey||keyboardBlocked(e))return;
     e.preventDefault();e.stopImmediatePropagation();this.swallowed.add(e.code);
     if(e.repeat)return;
+    // Step input writes notes even when the Track has no instrument (silent).
+    document.dispatchEvent(new CustomEvent('computer-midi-key',{detail:{code:e.code,pitch:this.root+offset,on:true}}));
     const t=this.target();if(!t||!t.instrument||t.instrument==='none')return;
     this.held.set(e.code,this.root+offset);
     this.send(t.trackId,[...new Set(this.held.values())]);this.render();
@@ -101,6 +112,7 @@ export class ComputerMidi {
   private up(e:KeyboardEvent):void {
     if(!this.swallowed.delete(e.code))return;
     e.preventDefault();e.stopImmediatePropagation();
+    document.dispatchEvent(new CustomEvent('computer-midi-key',{detail:{code:e.code,pitch:0,on:false}}));
     if(this.held.delete(e.code)){this.send(this.target()?.trackId??null,[...new Set(this.held.values())]);this.render();}
   }
   private render():void {

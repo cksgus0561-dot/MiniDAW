@@ -183,6 +183,18 @@ pub fn apply(p: &Project, r: &EditRequest) -> AppResult<Project> {
                 }
             }
         }
+        "midi.note.step" => {
+            let c = next
+                .tracks
+                .iter_mut()
+                .flat_map(|t| &mut t.clips)
+                .find_map(|c| match c {
+                    Clip::Midi(c) if r.clip_ids.first() == Some(&c.clip_id) => Some(c),
+                    _ => None,
+                })
+                .ok_or_else(|| invalid("MIDI Clip을 선택해 주세요."))?;
+            step_chord(c, r, key)?;
+        }
         "midi.velocity" | "midi.quantize" | "midi.transpose" => {
             let c = next
                 .tracks
@@ -289,6 +301,58 @@ pub fn apply(p: &Project, r: &EditRequest) -> AppResult<Project> {
     }
     next.validate()?;
     Ok(next)
+}
+
+/// Step input writes the played (sounding) pitches; unlike mouse drawing, the
+/// key signature only infers spelling. Entering past the Part end extends it
+/// to the right, so continuous entry never stops at the boundary. Re-entering
+/// an existing start/pitch overwrites its length/velocity instead of stacking.
+fn step_chord(c: &mut MidiClip, r: &EditRequest, key: i8) -> AppResult<()> {
+    let start = r.target_tick.ok_or_else(|| invalid("Note start tick"))?;
+    let length = r.length_tick.ok_or_else(|| invalid("Note length tick"))?;
+    valid_tick_range(start.0, length.0)?;
+    let unique: HashSet<u8> = r.pitches.iter().copied().collect();
+    if r.pitches.is_empty()
+        || r.pitches.len() > 128
+        || unique.len() != r.pitches.len()
+        || r.pitches.iter().any(|p| *p > 127)
+    {
+        return Err(invalid("Step 입력 음높이"));
+    }
+    if !r.velocities.is_empty()
+        && (r.velocities.len() != r.pitches.len()
+            || r.velocities.iter().any(|v| !(1..=127).contains(v)))
+    {
+        return Err(invalid("Velocity"));
+    }
+    let end = start
+        .0
+        .checked_add(length.0)
+        .ok_or_else(|| invalid("MIDI tick range"))?;
+    c.length_tick.0 = c.length_tick.0.max(end);
+    for (i, &pitch) in r.pitches.iter().enumerate() {
+        let velocity = r.velocities.get(i).copied().unwrap_or(100);
+        if let Some(n) = c
+            .notes
+            .iter_mut()
+            .find(|n| n.start_tick == start && n.pitch == pitch)
+        {
+            n.length_tick = length;
+            n.velocity = velocity;
+            continue;
+        }
+        c.notes.push(MidiNote {
+            spelling: (key != 0).then(|| super::notation::infer(pitch, key)),
+            note_id: id(),
+            start_tick: start,
+            length_tick: length,
+            pitch,
+            velocity,
+            release_velocity: 0,
+            channel: 0,
+        });
+    }
+    Ok(())
 }
 
 // One atomic document edit; no seconds/sample conversion and no Snap rounding.

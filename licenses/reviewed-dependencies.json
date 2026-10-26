@@ -3,8 +3,8 @@
   "reviewDate": "2026-10-09",
   "projectLicense": "GPL-3.0-only",
   "lockHashes": {
-    "package-lock.json": "4e934c436634430a2efd3664b0e2ff5d861a690cb82a2d754d7d74216665cc00",
-    "src-tauri/Cargo.lock": "782cc11c7b478df41c8a4356af94877293f41c6b10958fcccbd2d4725cc39be9"
+    "package-lock.json": "5dfc3c27009e8f8d89c40bf1227b1886bd55ff77165244187fdfee3f665c4436",
+    "src-tauri/Cargo.lock": "996584717046fb66cece978174537de8ce989e0e79d8a01ba48246a7dfea3381"
   },
   "packages": [
     {
@@ -8455,10 +8455,10 @@
     "licenses/packaging-tools.json": "8ef3f3dbce1019157195304ab2b5fa2d6ad31a56f934e7eea16ae06c79b35d41"
   },
   "buildInputHashes": {
-    "package.json": "3a0e9a8178af60d5d5949fd6527ff0ed279495e6f9f19b375d1be363bc24280a",
-    "src-tauri/Cargo.toml": "99f2ef0ce922541b9142bf6194a25f49b5fd84bc076dbf1b7d30b51098b0e6cc",
+    "package.json": "c03583a61652f31fc328c2da522de2facdb2d794ad88df0fcb0f130941e6bd4a",
+    "src-tauri/Cargo.toml": "55fccd1e26936f8c2b8f38c63ddef318752b0382e1dab0293f2c5821f8b5a9b0",
     "src-tauri/build.rs": "cc0e0fd03f11b77fe048faed6d6f38fb6e1c72b08c7b8abe4ad8691c4bc0638a",
-    "src-tauri/tauri.conf.json": "657e852433acb27aaef9654df2950e839116fb272d36e21facae151e1f356bc4",
+    "src-tauri/tauri.conf.json": "5877c78188dbe7808b9334cd1a41ab7ebeda5ca8c69855b8a470ed2471e2d697",
     "scripts/package-windows.ps1": "eda7cbec00bbfd081770e2e5d37141044cb20489d7f80dc59f97a70060f920e9",
     "scripts/prepare-asio-sdk.mjs": "435f74a501aacca906c2cd850e7c9d10ff60bcd2543f94b623094d94940cc565",
     "scripts/build-nsis-helper.mjs": "a9cb3398af5b2003f13ba1d575bbc61e3469c24a931f7ba23d12785d06d95b16",

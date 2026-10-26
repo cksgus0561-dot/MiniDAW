@@ -6,7 +6,7 @@ MiniDAW는 Windows용 오픈소스 Audio/MIDI DAW입니다. Rust/Tauri 2 기반�
 ## 주요 기능
 
 - 여러 Audio/MIDI Track, 비파괴 Clip 편집, Undo/Redo, 프로젝트 저장/불러오기
-- Piano Roll, Velocity/CC/Pitch Bend/Sustain, MIDI 입력과 컴퓨터 키보드 연주
+- Piano Roll, Velocity/CC/Pitch Bend/Sustain, MIDI 입력과 컴퓨터 키보드 연주, 스텝 입력
 - MIDI Track별 조표와 Note별 ♯/♭/♮ 임시표, Piano Roll 색상·음이름 표시
 - 내장 Synth, 외부 VST3/CLAP 악기·Insert 및 플러그인 지연 보상(PDC)
 - Mixer/Master, EQ·Compressor·Limiter·Reverb·Delay, Parameter Automation
@@ -21,7 +21,7 @@ MiniDAW는 Windows용 오픈소스 Audio/MIDI DAW입니다. Rust/Tauri 2 기반�
 ## 설치와 실행
 
 Windows 10/11 **x64**가 필요합니다. [GitHub Releases](https://github.com/cksgus0561-dot/MiniDAW/releases)에서
-`MiniDAW_0.1.1_x64-setup.exe`를 내려받아 실행합니다. 현재 사용자의 계정에
+`MiniDAW_0.1.2_x64-setup.exe`를 내려받아 실행합니다. 현재 사용자의 계정에
 설치되며 시작 메뉴에서 MiniDAW를 실행할 수 있습니다. 제거는 Windows 설정의
 설치된 앱 → MiniDAW → 제거를 사용합니다.
 
@@ -47,6 +47,12 @@ Note를 선택한 뒤 임시표를 조표 따름/♯/♭/♮로 바꿀 수 있�
 조표에 의한 변화, 주황색 표시는 명시적인 임시표입니다. 임시표는 선택한 Note에만
 적용되며 같은 마디의 다른 Note로 자동 전파되지 않습니다. Piano Roll 행은 실제
 연주되는 음높이를 표시하고 음이름에는 기보상의 임시표를 함께 표시합니다.
+
+스텝 입력은 MIDI Part를 Piano Roll에서 연 뒤 **스텝 입력** 버튼으로 켭니다.
+컴퓨터 키보드로 음을 누르면 현재 Grid 길이의 Note를 입력하고, 함께 누른 음은
+하나의 화음으로 입력합니다. ←/→로 입력 커서를 이동하고, Backspace로 마지막
+입력을 취소하며, Esc로 스텝 입력을 종료합니다. 눈금자를 클릭해 입력 위치를
+지정할 수 있고, 입력한 Note/화음은 기존 Undo/Redo로 되돌릴 수 있습니다.
 
 원본 오디오는 외부 파일로 참조하므로 프로젝트를 다른 PC로 옮길 때 원본도 함께
 옮겨야 합니다. 누락된 미디어는 다시 연결할 수 있습니다. 언어·단축키·오디오 장치·창

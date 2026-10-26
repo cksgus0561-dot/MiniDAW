@@ -418,6 +418,11 @@ pub async fn midi_input_status(
 }
 
 #[tauri::command]
+pub fn midi_input_step(enabled: bool, service: State<'_, Arc<AudioService>>) -> Vec<[u8; 3]> {
+    service.midi_input.step_notes(enabled)
+}
+
+#[tauri::command]
 pub fn computer_midi_notes(track_id: Option<String>, notes: Vec<u8>, service: State<'_, Arc<AudioService>>) -> AppResult<()> {
     service.midi_input.computer_notes(track_id.as_deref(), &notes)
 }

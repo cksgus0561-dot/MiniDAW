@@ -5,7 +5,7 @@ No warranty is provided. Third-party components retain the notices and licenses
 listed in `THIRD_PARTY_NOTICES.md` and `licenses/`.
 
 Every published Windows installer must be accompanied, on the **same download
-page and without an additional fee**, by `MiniDAW-0.1.1-corresponding-source.zip`
+page and without an additional fee**, by `MiniDAW-0.1.2-corresponding-source.zip`
 and `SHA256SUMS.txt`. This is the source distribution method under GPLv3 §6(d),
 not a promise to supply source later. Do not publish the installer alone.
 The GitHub-generated repository archive does not replace this complete source

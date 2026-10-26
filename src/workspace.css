@@ -214,6 +214,8 @@
 #panel-piano .workspace-panel-heading button { font-size:1.2rem; padding:0 .45rem; }
 .piano-toolbar button[aria-pressed="true"] { background:#535967; color:#fff; }
 #piano-grid-info, #piano-selected-count { font-size:.75rem; color:var(--text-secondary); }
+.piano-toolbar #piano-step[aria-pressed="true"] { background:#2f5a57; color:#fff; box-shadow:inset 0 -2px #5edbd3; }
+#piano-step-info { font-size:.75rem; color:#8fe6df; font-variant-numeric:tabular-nums; }
 .piano-toolbar label, .midi-lane-toolbar label { display:flex; align-items:center; gap:.25rem; font-size:.8rem; }
 .piano-toolbar input, .midi-lane-toolbar input { width:4rem; min-width:0; }
 .piano-note-strip { flex-shrink:0; padding:.2rem .35rem; border-bottom:1px solid var(--border); }

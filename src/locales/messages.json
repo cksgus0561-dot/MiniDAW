@@ -826,5 +826,13 @@
   "이 트랙의 모든 MIDI Part에 적용": "Applies to all MIDI Parts on this track",
   "조표 또는 음이름이 올바르지 않습니다.": "Invalid key signature or note spelling.",
   "조표와 노트 음높이가 일치하지 않습니다.": "Note pitch does not match its key signature and spelling.",
-  "임시표를 선택해 주세요.": "Select an accidental."
+  "임시표를 선택해 주세요.": "Select an accidental.",
+  "스텝 입력": "Step Input",
+  "스텝 입력 켜기/끄기": "Toggle Step Input",
+  "건반을 누르면 커서 위치에 Grid 길이로 입력 · 동시에 누르면 화음 · ←/→ 커서 이동 · Backspace 마지막 입력 취소 · Esc 종료 · 눈금자 클릭으로 커서 지정": "Play keys to enter Grid-length notes at the cursor · keys held together form a chord · ←/→ move the cursor · Backspace removes the last step · Esc exits · click the ruler to place the cursor",
+  "컴퓨터 건반 또는 MIDI Keyboard로 커서 위치에 입력 · ←/→ 이동 · Backspace 취소 · Esc 종료": "Enter notes at the cursor from Computer Keys or a MIDI Keyboard · ←/→ move · Backspace undo step · Esc exit",
+  "스텝 입력: 컴퓨터 건반 또는 MIDI Keyboard로 커서 위치에 입력 · ←/→ 이동 · Backspace 취소 · Esc 종료": "Step Input: enter notes at the cursor from Computer Keys or a MIDI Keyboard · ←/→ move · Backspace undo step · Esc exit",
+  "커서": "Cursor",
+  "길이": "Length",
+  "Step 입력 음높이": "Invalid Step Input pitches"
 }

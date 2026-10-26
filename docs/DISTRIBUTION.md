@@ -1,6 +1,6 @@
 # Windows distribution and license review
 
-Release version: 0.1.1, Windows x64, Beta. Releases and matching source archives:
+Release version: 0.1.2, Windows x64, Beta. Releases and matching source archives:
 https://github.com/cksgus0561-dot/MiniDAW/releases.
 
 ## GPLv3 scope
@@ -82,6 +82,27 @@ Official references: [GPLv3](https://www.gnu.org/licenses/gpl-3.0.html),
 [Tauri Windows installer](https://v2.tauri.app/distribute/windows-installer/),
 [NSIS license](https://nsis.sourceforge.io/License),
 [WebView2 Loader](https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.3800.47/License).
+
+## 0.1.2 Beta 1 update validation — 2026-10-27
+
+This update publishes Piano Roll step input through computer keys and the existing
+MIDI input path. External dependency versions and original license notices are
+unchanged; only MiniDAW's version metadata and corresponding audit hashes changed.
+
+- Frontend type/production build, license gate and ASIO x64 NSIS build passed.
+- All 24 focused Rust tests passed (step_input, midi, midi2, notation).
+- Actual isolated install, installed payload/notice checks and uninstall passed.
+  The installed executable matched the build by SHA-256; no developer paths,
+  test media, plugins, drivers or SDK tools were included in the installed payload.
+- Installed step-input UI test passed: Grid-length notes, chords as one history
+  transaction, cursor/rest navigation, Backspace, Part expansion, Undo, mode exit
+  and text/number focus protection.
+- Installed notation UI test passed, including save/reopen, editing and detached
+  Piano Roll. Its short TOPPING ASIO Synth playback check reported zero stream
+  errors or callback overruns. No full audio/plugin stress audit was repeated.
+- Hardware MIDI step capture was covered by automated Rust tests, not a physical
+  MIDI keyboard session. Clean Windows without WebView2 remains untested; the
+  installer is unsigned. Historical wider checks below were not rerun in full.
 
 ## 0.1.1 Beta 1 update validation — 2026-10-25
 

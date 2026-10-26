@@ -63,6 +63,11 @@ pub struct EditRequest {
     pub accidental: Option<super::notation::Accidental>,
     #[serde(default)]
     pub note_ids: Vec<String>,
+    // Step input: one chord (same start/length) per transaction.
+    #[serde(default)]
+    pub pitches: Vec<u8>,
+    #[serde(default)]
+    pub velocities: Vec<u8>,
     pub velocity: Option<u8>,
     pub semitones: Option<i16>,
     pub grid: Option<String>,

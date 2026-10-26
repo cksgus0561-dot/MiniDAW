@@ -5,6 +5,7 @@ import { NoteInfo } from './note-info';
 import { inferSpelling, keyOptions, movedNote, noteMark, writtenNote } from './notation';
 import { MidiLane } from './midi-lane';
 import { MidiKeyboard } from './midi-input';
+import { StepInput } from './step-input';
 import { element } from './dom';
 import { noteName, type MidiClip, type MidiNote } from './midi';
 import { collectParts, noteTick, partsBounds, type PianoPart, type PianoTrack } from './piano-parts';
@@ -42,6 +43,7 @@ export class PianoRoll {
   private selected = new Set<string>();
   private lane: MidiLane;
   private noteInfo: NoteInfo;
+  private step: StepInput;
   private box: {pointer:number;x:number;y:number;endX:number;endY:number;before:Set<string>} | null = null;
   private tool: 'select' | 'draw' = 'select';
   private drag: Drag | null = null;
@@ -64,6 +66,16 @@ export class PianoRoll {
     keySelect.onchange=()=>{const part=this.parts.find(p=>p.clip.clipId===this.clipId);if(part){this.cancel();void this.commit({command:'midi.track.keySignature',trackIds:[part.trackId],keySignature:Number(keySelect.value)});}};
     element<HTMLSelectElement>('piano-accidental').onchange=()=>void this.notesCommand('midi.note.accidental',{accidental:element<HTMLSelectElement>('piano-accidental').value});
     new MidiKeyboard(()=>panels.owns('piano'));
+    this.step=new StepInput({
+      clip:()=>this.clip,trackId:()=>this.parts.find(p=>p.clip.clipId===this.clipId)?.trackId??null,
+      open:()=>panels.isOpen('piano'),owns:()=>panels.owns('piano'),
+      playhead:()=>this.wave.musical.ticks(this.position),snap:tick=>this.snap(tick),
+      step:tick=>this.wave.musical.step(tick,this.wave.grid),grid:()=>this.wave.grid,
+      label:tick=>this.wave.musical.preciseLabel(tick),
+      // Step commits are serialized by StepInput; wait out a pointer commit.
+      commit:async r=>{while(this.busy)await new Promise(f=>setTimeout(f,10));await this.commit(r);},
+      select:ids=>{this.selected=ids;this.draw();},draw:()=>{this.followStep();this.draw();},
+    });
     element('piano-velocity-apply').onclick=()=>void this.notesCommand('midi.velocity',{velocity:Number(element<HTMLInputElement>('piano-velocity').value)});
     element('piano-quantize').onclick=()=>void this.notesCommand('midi.quantize',{grid:this.wave.grid});
     element('piano-transpose-up').onclick=()=>void this.notesCommand('midi.transpose',{semitones:1});
@@ -157,6 +169,7 @@ export class PianoRoll {
     this.showParts();
     const part=parts.find(p=>p.clip.clipId===this.clipId),route=`${part?.trackId??''}:${this.clipId??''}`;
     if(route!==this.activeRoute){this.activeRoute=route;document.dispatchEvent(new CustomEvent('piano-active-part',{detail:{clipId:this.clipId,trackId:part?.trackId??null}}));}
+    this.step?.clipChanged();
     this.draw();
   }
   private activate(id:string):void {
@@ -181,6 +194,14 @@ export class PianoRoll {
   private keySignature():number {return this.parts.find(p=>p.clip.clipId===this.clipId)?.keySignature??0;}
   private origin():number {return this.absolute?0:this.clipStart();}
   private limits(): [number, number] { return this.absolute?partsBounds(this.parts):[0, Number(this.clip?.lengthTick ?? 1)]; }
+  // Keep the step cursor and the step being entered in view while typing.
+  private followStep(): void {
+    const s=this.step.overlay();if(!s)return;
+    const a=s.cursor-this.origin(),b=a+s.length;
+    if(a<this.start||b>this.start+this.span)this.start=Math.max(0,a-this.span*.25);
+    const visible=this.canvas.clientHeight-RULER,y=s.pitches.length?(127-s.pitches[s.pitches.length-1])*this.row():null;
+    if(y!==null&&visible>0&&(y<this.vscroll.scrollTop||y+this.row()>this.vscroll.scrollTop+visible))this.vscroll.scrollTop=Math.max(0,y-visible/2);
+  }
   private fit(): void { const [a, b] = this.limits(); this.start = a; this.span = Math.max(1, b - a); this.draw(); }
   private zoom(factor: number, anchor: number): void {
     if (!this.clip || this.drag) return;
@@ -205,7 +226,9 @@ export class PianoRoll {
   }
   private down(e: PointerEvent): void {
     if (e.button !== 0 || !this.clip || this.busy || this.drag) return;
-    const at = this.at(e); if (at.x < KEYS || at.y < RULER) return;
+    const at = this.at(e);
+    if (at.x >= KEYS && at.y < RULER && this.step.active()) { e.preventDefault(); this.canvas.focus(); this.step.place(at.tick); return; }
+    if (at.x < KEYS || at.y < RULER) return;
     e.preventDefault(); this.canvas.focus();
     const hit = this.hit(at.x, at.y);
     let kind: Drag['kind'] = 'move', note: MidiNote;
@@ -354,7 +377,18 @@ export class PianoRoll {
     if (this.drag?.kind === 'add') notes.push(this.drag.preview);
     for (const n of notes)this.paintNote(ctx,n,this.clip,active!.color,true);
     if(this.box){const b=this.box;ctx.fillStyle='#e8ca6b22';ctx.strokeStyle='#e8ca6b';ctx.fillRect(b.x,b.y,b.endX-b.x,b.endY-b.y);ctx.strokeRect(b.x,b.y,b.endX-b.x,b.endY-b.y);}
-    ctx.restore(); this.setPosition(this.position);
+    const step=this.step.overlay();
+    if(step){
+      const x=this.x(step.cursor),sw=Math.max(2,this.x(step.cursor+step.length)-x);
+      ctx.fillStyle='#5edbd31c';ctx.fillRect(x,RULER,sw,h-RULER);
+      ctx.strokeStyle='#5edbd3';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x,RULER);ctx.lineTo(x,h);ctx.stroke();ctx.lineWidth=1;
+      // Keys still held: the chord that will be written when all are released.
+      for(const p of step.pitches){const y=RULER+(127-p)*this.row()-this.vscroll.scrollTop+1;ctx.fillStyle='#5edbd366';ctx.fillRect(x,y,sw,this.row()-2);ctx.strokeRect(x+.5,y+.5,sw-1,this.row()-3);}
+    }
+    ctx.restore();
+    if(step){const x=this.x(step.cursor);if(x>=KEYS){ctx.fillStyle='#5edbd3';ctx.beginPath();ctx.moveTo(x-5,RULER-9);ctx.lineTo(x+5,RULER-9);ctx.lineTo(x,RULER-1);ctx.fill();}}
+    this.step.render();
+    this.setPosition(this.position);
   }
   private paintNote(ctx:CanvasRenderingContext2D,n:MidiNote,clip:MidiClip,color:string,active:boolean):void {
     const r=this.rect(n,clip);if(r.x+r.w<KEYS||r.x>this.canvas.clientWidth||r.y+r.h<RULER||r.y>this.canvas.clientHeight)return;

@@ -10,7 +10,7 @@ use midir::{MidiInput, MidiInputConnection};
 use serde::Serialize;
 use std::sync::{
     atomic::{
-        AtomicU64,
+        AtomicBool, AtomicU64,
         Ordering::{Acquire, Relaxed, Release, SeqCst},
     },
     Arc, Mutex,
@@ -98,6 +98,45 @@ impl LiveMidi {
             self.dropped.fetch_add(1, Relaxed);
             self.panic.fetch_add(1, Release);
         }
+    }
+}
+/// Piano Roll step input copies USB Note On/Off for the UI. It is armed only
+/// while step mode polls; same nonblocking, allocation-free native ingress.
+pub struct StepCapture {
+    enabled: AtomicBool,
+    queue: ArrayQueue<[u8; 3]>,
+}
+impl Default for StepCapture {
+    fn default() -> Self {
+        Self {
+            enabled: AtomicBool::new(false),
+            queue: ArrayQueue::new(256),
+        }
+    }
+}
+impl StepCapture {
+    pub fn capture(&self, bytes: &[u8]) {
+        if !self.enabled.load(Acquire)
+            || bytes.len() != 3
+            || !matches!(bytes[0] & 0xf0, 0x80 | 0x90)
+            || bytes[1] > 127
+            || bytes[2] > 127
+        {
+            return;
+        }
+        // A full queue drops input; the UI drains it every few milliseconds.
+        let _ = self.queue.push([bytes[0], bytes[1], bytes[2]]);
+    }
+    /// Control thread: arm/disarm and drain. Disarming discards stale input.
+    pub fn take(&self, enabled: bool) -> Vec<[u8; 3]> {
+        self.enabled.store(enabled, Release);
+        let mut out = Vec::new();
+        while let Some(m) = self.queue.pop() {
+            if enabled {
+                out.push(m);
+            }
+        }
+        out
     }
 }
 #[derive(Default)]
@@ -284,6 +323,7 @@ struct Connection {
 pub struct MidiInputService {
     pub hub: Arc<LiveMidi>,
     pub computer: Arc<LiveMidi>,
+    pub step: Arc<StepCapture>,
     typing: Mutex<TypingState>,
     connection: Mutex<Connection>,
 }
@@ -296,6 +336,7 @@ impl Default for MidiInputService {
         Self {
             hub: Arc::new(LiveMidi::default()),
             computer: Arc::new(LiveMidi::default()),
+            step: Arc::new(StepCapture::default()),
             typing: Mutex::new(TypingState { route: None, notes: [false;128] }),
             connection: Mutex::new(Connection {
                 input: None,
@@ -328,6 +369,9 @@ impl MidiInputService {
         }
         state.notes = next;
         Ok(())
+    }
+    pub fn step_notes(&self, enabled: bool) -> Vec<[u8; 3]> {
+        self.step.take(enabled)
     }
     pub fn computer_status(&self) -> Status {
         self.snapshot(&self.computer, None)
@@ -364,12 +408,16 @@ impl MidiInputService {
                 return Err(invalid("MIDI 장치가 변경되었습니다. 다시 선택해 주세요."));
             }
             let hub = self.hub.clone();
+            let step = self.step.clone();
             c.input = Some(
                 input
                     .connect(
                         p,
                         "MiniDAW keyboard",
-                        move |_, bytes, _| hub.receive(bytes),
+                        move |_, bytes, _| {
+                            hub.receive(bytes);
+                            step.capture(bytes);
+                        },
                         (),
                     )
                     .map_err(|e| {

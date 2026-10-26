@@ -21,7 +21,7 @@ const extra = [
   ['project.save','저장','Ctrl+S'], ['project.saveAs','다른 이름으로 저장…','Ctrl+Shift+S'], ['file.importAudio','오디오 가져오기','Ctrl+O'],
   ['view.zoomIn','수평 확대','='], ['view.zoomOut','수평 축소','-'],
   ['midi.selectAll','모든 노트 선택','Ctrl+A'], ['midi.quantize','Quantize','Q'],
-  ['midi.transposeUp','반음 올리기','ArrowUp'], ['midi.transposeDown','반음 내리기','ArrowDown'], ['midi.draw','노트 그리기','8'],
+  ['midi.transposeUp','반음 올리기','ArrowUp'], ['midi.transposeDown','반음 내리기','ArrowDown'], ['midi.draw','노트 그리기','8'], ['midi.stepInput','스텝 입력 켜기/끄기',''],
   ['view.media','미디어 패널',''], ['view.arrangement','Arrangement 패널',''], ['view.piano','Piano Roll 패널',''],
   ['view.spectrum','Spectrum 패널',''], ['view.performance','Performance 패널',''], ['view.mixer','Mixer 패널','']
 ] as const;
@@ -116,7 +116,7 @@ export function refreshShortcutLabels(): void {
   const pianoSelect=document.getElementById('piano-select');if(pianoSelect)uiText(pianoSelect,`${shortcutLabel('tool.objectSelection')} ${tr('선택')}`,false);
   const pianoDraw=document.getElementById('piano-draw');if(pianoDraw)uiText(pianoDraw,`${shortcutLabel('midi.draw')} ${tr('그리기')}`,false);
   const help=document.querySelector('.piano-help .piano-popup');
-  if(help)uiText(help,[tr('여러 Part 보기: Arrangement에서 Ctrl/Shift+클릭 후 Piano Roll 열기 · 상단에서 활성 Part 선택'),tr('다중 선택: Shift/Ctrl+클릭 또는 빈 곳 드래그'),`${shortcutLabel('midi.quantize')||'—'}: ${tr('Quantize')} · ${shortcutLabel('midi.transposeUp')||'—'} / ${shortcutLabel('midi.transposeDown')||'—'}: ${tr('Pitch')}`,tr('그리기: 빈 곳 클릭/드래그 · 선택: 노트 이동/양끝 길이 조절'),`${shortcutLabel('edit.delete')||'—'}: ${tr('삭제')} · ${tr('Ctrl+Wheel 확대 · Shift+Wheel 가로 이동')}`,tr('음이름 C3 = MIDI 60 · Track에서 MiniDAW Synth를 선택하면 소리가 출력됩니다.')].join('\n'),false);
+  if(help)uiText(help,[tr('여러 Part 보기: Arrangement에서 Ctrl/Shift+클릭 후 Piano Roll 열기 · 상단에서 활성 Part 선택'),tr('다중 선택: Shift/Ctrl+클릭 또는 빈 곳 드래그'),`${shortcutLabel('midi.quantize')||'—'}: ${tr('Quantize')} · ${shortcutLabel('midi.transposeUp')||'—'} / ${shortcutLabel('midi.transposeDown')||'—'}: ${tr('Pitch')}`,tr('그리기: 빈 곳 클릭/드래그 · 선택: 노트 이동/양끝 길이 조절'),`${tr('스텝 입력')}${shortcutLabel('midi.stepInput')?' ('+shortcutLabel('midi.stepInput')+')':''}: ${tr('컴퓨터 건반 또는 MIDI Keyboard로 커서 위치에 입력 · ←/→ 이동 · Backspace 취소 · Esc 종료')}`,`${shortcutLabel('edit.delete')||'—'}: ${tr('삭제')} · ${tr('Ctrl+Wheel 확대 · Shift+Wheel 가로 이동')}`,tr('음이름 C3 = MIDI 60 · Track에서 MiniDAW Synth를 선택하면 소리가 출력됩니다.')].join('\n'),false);
   for(const hint of document.querySelectorAll('[data-shortcut-delete-help]'))uiText(hint,`더블 클릭 추가 · 끌기 이동 · ${shortcutLabel('edit.delete')||'—'}: 삭제`);
 }
 document.addEventListener('shortcuts-changed',refreshShortcutLabels);
