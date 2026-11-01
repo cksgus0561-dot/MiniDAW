@@ -20,6 +20,8 @@ pub mod waveform;
 pub mod midi;
 
 pub mod midi_input;
+pub mod sampler;
+pub mod sfz;
 pub mod synth;
 
 pub mod effect_runtime;

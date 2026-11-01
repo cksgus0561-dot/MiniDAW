@@ -218,6 +218,7 @@ fn count_and_id_bounds_do_not_panic() {
             name: "Audio".into(),
             kind: TrackKind::Audio,
             instrument: Instrument::None,
+            sfz: None,
             mix: TrackMix::default(),
             clips: vec![],
             extensions: Extensions::new()

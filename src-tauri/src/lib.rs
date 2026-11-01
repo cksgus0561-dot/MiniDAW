@@ -48,6 +48,7 @@ pub fn run() -> tauri::Result<()> {
             ipc::midi_input_route,
             ipc::midi_input_status,
             ipc::midi_input_step,
+            ipc::sfz_status,
             ipc::computer_midi_notes,
             ipc::computer_midi_status,
             ipc::spectrum_configure,

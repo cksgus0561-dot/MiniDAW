@@ -81,6 +81,8 @@ pub struct BasicSynth {
     count: usize,
     serial: u64,
     epoch: u64,
+    // SFZ Tracks share the per-Track routing/gain path with the Synth.
+    sampler: super::sampler::Sampler,
 }
 impl BasicSynth {
     pub fn new(rate: u32) -> Self {
@@ -113,6 +115,7 @@ impl BasicSynth {
             count: 0,
             serial: 0,
             epoch: 1,
+            sampler: super::sampler::Sampler::new(rate),
         }
     }
     pub fn automate(
@@ -130,6 +133,7 @@ impl BasicSynth {
     }
     pub fn configure(&mut self, plan: Option<&MidiPlan>) {
         self.reset();
+        self.sampler.configure(plan);
         self.routes.fill(false);
         self.external.fill(false);
         if let Some(p) = plan {
@@ -155,6 +159,7 @@ impl BasicSynth {
         self.count = 0;
         self.external_count = 0;
         self.epoch = self.epoch.wrapping_add(1);
+        self.sampler.reset();
     }
     pub fn external_events(&self) -> &[ExternalMidi] {
         &self.external_events[..self.external_count]
@@ -176,21 +181,26 @@ impl BasicSynth {
         true
     }
     pub fn active(&self) -> bool {
-        self.count != 0 || self.external_count != 0
+        self.count != 0 || self.external_count != 0 || self.sampler.active()
     }
     pub fn voice_count(&self) -> usize {
-        self.count
+        self.count + self.sampler.voice_count()
     }
     /// Actual last rendered instrument bus, after Track gain/balance and before Master.
     /// Call only immediately after sample(); untouched Tracks are silent.
     pub fn track_output(&self, track: usize) -> [f32; 2] {
-        if self.stamps.get(track).copied() != Some(self.sample_epoch) {
+        let sampled = self.sampler.output(track);
+        let synth = self.stamps.get(track).copied() == Some(self.sample_epoch);
+        if !synth && sampled == [0.0; 2] {
             return [0.0; 2];
         }
         std::array::from_fn(|ch| {
-            (self.buses[track][ch] / self.bounds[track].max(1.0)
-                * self.track_gains[track][ch]
-                * self.parameters[track][0]) as f32
+            let synth = if synth {
+                self.buses[track][ch] / self.bounds[track].max(1.0) * self.parameters[track][0]
+            } else {
+                0.0
+            };
+            ((synth + sampled[ch]) * self.track_gains[track][ch]) as f32
         })
     }
     fn channel(&mut self, track: u16, channel: u8) -> Option<usize> {
@@ -283,6 +293,16 @@ impl BasicSynth {
                     * self.parameters[track][0];
             }
         }
+        // SFZ samples carry their own levels: no Synth headroom normalization.
+        if self.sampler.active() {
+            self.sampler.render();
+            for &track in self.sampler.touched() {
+                let bus = self.sampler.output(track as usize);
+                for (ch, out) in output.iter_mut().enumerate() {
+                    *out += bus[ch] * self.track_gains[track as usize][ch];
+                }
+            }
+        }
         output
     }
 }
@@ -297,7 +317,8 @@ impl MidiSink for BasicSynth {
             a: e.pitch,
             b: e.velocity,
             voice: e.voice,
-        }) {
+        }) || self.sampler.event(e)
+        {
             return;
         }
         let Some(key) = self.channel(e.track, e.channel) else {
@@ -368,7 +389,8 @@ impl MidiSink for BasicSynth {
             a,
             b,
             voice: 0,
-        }) {
+        }) || self.sampler.control(e)
+        {
             return;
         }
         let Some(key) = self.channel(e.track, e.channel) else {

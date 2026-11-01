@@ -418,6 +418,11 @@ pub async fn midi_input_status(
 }
 
 #[tauri::command]
+pub fn sfz_status(path: String) -> crate::audio::sfz::Status {
+    crate::audio::sfz::status(&path)
+}
+
+#[tauri::command]
 pub fn midi_input_step(enabled: bool, service: State<'_, Arc<AudioService>>) -> Vec<[u8; 3]> {
     service.midi_input.step_notes(enabled)
 }

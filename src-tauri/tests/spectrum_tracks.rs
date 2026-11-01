@@ -233,6 +233,7 @@ fn actual_synth_capture_resolves_midi_bus_ids_after_audio_tracks() {
             name: format!("Synth {pitch}"),
             kind: TrackKind::Midi,
             instrument: Instrument::BasicSynth,
+            sfz: None,
             mix: TrackMix::default(),
             extensions: Extensions::new(),
             clips: vec![Clip::Midi(MidiClip {

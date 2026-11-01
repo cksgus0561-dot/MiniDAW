@@ -834,5 +834,16 @@
   "스텝 입력: 컴퓨터 건반 또는 MIDI Keyboard로 커서 위치에 입력 · ←/→ 이동 · Backspace 취소 · Esc 종료": "Step Input: enter notes at the cursor from Computer Keys or a MIDI Keyboard · ←/→ move · Backspace undo step · Esc exit",
   "커서": "Cursor",
   "길이": "Length",
-  "Step 입력 음높이": "Invalid Step Input pitches"
+  "Step 입력 음높이": "Invalid Step Input pitches",
+  "SFZ 파일…": "SFZ File…",
+  "SFZ 악기 선택": "Choose SFZ Instrument",
+  "누락된 샘플": "Missing samples",
+  "지원하지 않는 SFZ 항목": "Unsupported SFZ opcodes",
+  "SFZ 파일 경로": "Invalid SFZ file path",
+  "SFZ 파일(.sfz)을 선택해 주세요.": "Choose an SFZ file (.sfz).",
+  "SFZ 파일을 읽을 수 없습니다.": "Cannot read the SFZ file.",
+  "재생할 수 있는 SFZ Region이 없습니다.": "The SFZ file has no playable Regions.",
+  "SFZ 샘플이 너무 큽니다 (8 GB 초과).": "SFZ samples are too large (over 8 GB).",
+  "SFZ Region이 너무 많습니다.": "The SFZ file has too many Regions.",
+  "SFZ #include가 너무 깊습니다.": "SFZ #include nesting is too deep."
 }

@@ -79,6 +79,7 @@ pub fn apply(p: &Project, r: &EditRequest) -> AppResult<Project> {
                 name: format!("{label} {number}"),
                 kind,
                 instrument: Instrument::None,
+                sfz: None,
                 mix: TrackMix::default(),
                 clips: vec![],
                 extensions: Extensions::new(),

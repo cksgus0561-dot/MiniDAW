@@ -34,6 +34,13 @@ pub fn apply(p: &Project, r: &EditRequest) -> AppResult<Project> {
                 .find(|t| t.kind == TrackKind::Midi && r.track_ids.first() == Some(&t.track_id))
                 .ok_or_else(|| invalid("MIDI Track을 선택해 주세요."))?;
             track.instrument = r.instrument.ok_or_else(|| invalid("Instrument"))?;
+            if track.instrument == Instrument::Sfz {
+                if let Some(path) = &r.path {
+                    // A newly chosen file is read again (e.g. after a failed load).
+                    crate::audio::sfz::forget(path);
+                    track.sfz = Some(path.clone());
+                }
+            }
         }
         "midi.clip.resize" => {
             if r.clip_ids.len() != 1 {

@@ -1,4 +1,5 @@
-import { uiAttr, uiText } from './i18n';
+import { uiAttr, uiText, tr } from './i18n';
+import { open } from '@tauri-apps/plugin-dialog';
 import { keyLabel, keyOptions } from './notation';
 import { globalShortcut } from './keyboard';
 import { refreshShortcutLabels } from './shortcuts';
@@ -53,6 +54,7 @@ interface Asset {
         sourceFrames: string;
     };
 }
+interface SfzStatus { path: string; name: string; loaded: boolean; regions: number; samples: number; bytes: number; unsupported: [string, number][]; missing: string[]; error: { code: string; message: string; detail?: string } | null }
 interface View {
     document: {
         projectId: string;
@@ -61,7 +63,8 @@ interface View {
             trackId: string;
             name: string;
             kind: 'audio' | 'midi';
-            instrument?: 'none' | 'basicSynth' | 'external';
+            instrument?: 'none' | 'basicSynth' | 'external' | 'sfz';
+            sfz?: string;
             keySignature?:number;
             extensions?:Record<string,unknown>;
             mix?: TrackMix;
@@ -336,6 +339,39 @@ export class Editing {
         if(this.busy)return;const before=new Set(this.view?.document.tracks.map(t=>t.trackId));
         await this.commitGesture('track.add',{trackKind:kind});this.selectedTrackId=this.view?.document.tracks.find(t=>!before.has(t.trackId))?.trackId??null;this.selected.clear();this.selection();
     }
+    // Built-in SFZ sampler: choose the .sfz; the backend decodes its samples
+    // while the edit is busy, then reports what it could not play.
+    private async chooseSfz(trackId: string): Promise<void> {
+        try {
+            const path = await open({ title: tr('SFZ 악기 선택'), multiple: false, directory: false, filters: [{ name: 'SFZ', extensions: ['sfz'] }] });
+            if (typeof path !== 'string') return;
+            this.sfz.delete(path);
+            await this.edit({ command: 'midi.track.instrument', trackIds: [trackId], instrument: 'sfz', path });
+            const s = await this.sfzStatus(path);
+            if (s.error) this.error(s.error);
+        } catch (e) { this.error(e); }
+    }
+    private sfz = new Map<string, Promise<SfzStatus>>();
+    private sfzStatus(path: string): Promise<SfzStatus> {
+        let s = this.sfz.get(path);
+        if (!s) { s = invoke<SfzStatus>('sfz_status', { path }); this.sfz.set(path, s); s.then(v => { if (!v.loaded) this.sfz.delete(path); }, () => this.sfz.delete(path)); }
+        return s;
+    }
+    private async showSfz(path: string, routing: HTMLSelectElement, warn: HTMLElement): Promise<void> {
+        const s = await this.sfzStatus(path).catch(() => null);
+        if (!s || !routing.isConnected) return;
+        const size = `${(s.bytes / 1048576).toFixed(0)} MB`;
+        uiAttr(routing, 'title', s.loaded ? `${path}\n${s.regions} Regions · ${s.samples} Samples · ${size}` : `${path}\n${s.error?.message ?? ''}`, false);
+        const problems = [
+            ...(s.error ? [s.error.message + (s.error.detail ? ` (${s.error.detail})` : '')] : []),
+            ...(s.missing.length ? [`${tr('누락된 샘플')} ${s.missing.length}: ${s.missing.slice(0, 5).join(', ')}${s.missing.length > 5 ? ' …' : ''}`] : []),
+            ...(s.unsupported.length ? [`${tr('지원하지 않는 SFZ 항목')}: ${s.unsupported.map(([k, n]) => `${k} ×${n}`).join(', ')}`] : []),
+        ];
+        warn.hidden = !problems.length;
+        uiText(warn, s.error ? '⚠ SFZ' : '⚠', false);
+        uiAttr(warn, 'title', problems.join('\n'), false);
+        warn.classList.toggle('sfz-error', !!s.error);
+    }
     private async addMidiClip(trackId: string): Promise<void> {
         if (this.busy) return;
         const before = new Set(this.items.map(i => i.clip.clipId)), tick = this.wave.editTick(this.cursor);
@@ -431,12 +467,19 @@ export class Editing {
                 uiAttr(routing, 'aria-label', `${row.name} 악기 출력`);
                 uiAttr(routing, 'title', 'MIDI Track Instrument → Mixer → Master');
                 const external=track.extensions?.['minidaw.plugin.v1'] as PluginSelection|undefined;
-                for (const [value, text] of [['none', '악기 없음'], ['basicSynth', 'MiniDAW Synth'],...(track.instrument==='external'?[['external',external?.descriptor.name??'External Instrument']]:[]),['choose','VST3 / CLAP 선택…']]) {
-                    const option = document.createElement('option'); option.value = value; uiText(option, text); routing.append(option);
+                const sfzName=track.sfz?.split(/[\\/]/).pop()?.replace(/\.sfz$/i,'');
+                for (const [value, text, translate] of [['none', '악기 없음', true], ['basicSynth', 'MiniDAW Synth', true],...(track.sfz?[['sfz',`SFZ · ${sfzName}`,false]]:[]),...(track.instrument==='external'?[['external',external?.descriptor.name??'External Instrument',false]]:[]),['chooseSfz','SFZ 파일…',true],['choose','VST3 / CLAP 선택…',true]] as [string,string,boolean][]) {
+                    const option = document.createElement('option'); option.value = value; uiText(option, text, translate); routing.append(option);
                 }
                 routing.value = track.instrument ?? 'none'; routing.disabled = this.busy;
-                routing.onchange = () => {if(routing.value==='choose'){routing.value=track.instrument??'none';choosePlugin(row.id,'instrument');}else void this.edit({command:'midi.track.instrument', trackIds:[row.id], instrument:routing.value}); };
-                const routeRow=document.createElement('div');routeRow.className='instrument-route-row';routeRow.append(routing);if(track.instrument==='external'){const editor=document.createElement('button');uiText(editor, 'e');uiAttr(editor, 'title', 'Plugin Editor 열기');editor.onclick=()=>openPlugin(row.id);routeRow.append(editor);}header.append(routeRow);
+                routing.onchange = () => {
+                    if(routing.value==='choose'){routing.value=track.instrument??'none';choosePlugin(row.id,'instrument');}
+                    else if(routing.value==='chooseSfz'){routing.value=track.instrument??'none';void this.chooseSfz(row.id);}
+                    else void this.edit({command:'midi.track.instrument', trackIds:[row.id], instrument:routing.value});
+                };
+                const routeRow=document.createElement('div');routeRow.className='instrument-route-row';routeRow.append(routing);if(track.instrument==='external'){const editor=document.createElement('button');uiText(editor, 'e');uiAttr(editor, 'title', 'Plugin Editor 열기');editor.onclick=()=>openPlugin(row.id);routeRow.append(editor);}
+                if(track.instrument==='sfz'&&track.sfz){const warn=document.createElement('span');warn.className='sfz-warning';warn.hidden=true;routeRow.append(warn);void this.showSfz(track.sfz,routing,warn);}
+                header.append(routeRow);
                 const add = document.createElement('button'); add.className = 'midi-clip-add'; uiText(add, '＋ MIDI Clip'); uiAttr(add, 'title', '커서 위치에 4마디 MIDI Clip 생성');
                 const key=document.createElement('select');key.className='track-key-signature';keyOptions(key);key.value=String(track.keySignature??0);key.disabled=this.busy;
                 uiAttr(key,'aria-label',`${row.name} 조표`);uiAttr(key,'title',`${row.name} · ${keyLabel(track.keySignature??0)}`,false);

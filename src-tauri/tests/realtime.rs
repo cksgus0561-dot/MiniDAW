@@ -595,6 +595,7 @@ fn midi_sample_scheduler_and_plan_changes_are_realtime_safe() {
         name: "MIDI".into(),
         kind: TrackKind::Midi,
         instrument: Instrument::BasicSynth,
+        sfz: None,
         mix: TrackMix::default(),
         extensions: Extensions::new(),
         clips: vec![Clip::Midi(MidiClip {

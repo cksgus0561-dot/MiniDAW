@@ -54,6 +54,8 @@ pub struct MidiPlan {
     pub instruments: Vec<Instrument>,
     pub track_gains: Vec<[f64; 2]>,
     pub synth_settings: Vec<crate::project::automation::SynthSettings>,
+    // Loaded SFZ Banks per MIDI Track (None: other instrument or failed load).
+    pub samplers: Vec<Option<std::sync::Arc<super::sfz::Bank>>>,
     events: Vec<Boundary>,
     chase: Vec<Chase>,
     controls: Vec<MidiControlEvent>,
@@ -87,6 +89,7 @@ impl MidiPlan {
             instruments: vec![],
             track_gains: vec![],
             synth_settings: vec![],
+            samplers: vec![],
             events: vec![],
             chase: vec![],
             controls: vec![],
@@ -100,6 +103,12 @@ impl MidiPlan {
             plan.instruments.push(track.instrument);
             plan.track_gains.push(track.mix.gains(any_solo));
             plan.synth_settings.push(track.synth.clone());
+            // First use decodes the samples (control thread); later plans reuse the cache.
+            plan.samplers.push(
+                (track.instrument == Instrument::Sfz)
+                    .then(|| track.sfz.as_deref().and_then(super::sfz::bank))
+                    .flatten(),
+            );
             plan.track_keys.push(
                 *uuid::Uuid::parse_str(&track.track_id)
                     .map_err(invalid)?
@@ -267,6 +276,13 @@ impl MidiPlan {
                 voices: active.iter().copied().collect(),
             });
         }
+        let used: Vec<&str> = p
+            .tracks
+            .iter()
+            .filter(|t| t.instrument == Instrument::Sfz)
+            .filter_map(|t| t.sfz.as_deref())
+            .collect();
+        super::sfz::release_unused(&used);
         Ok(plan)
     }
     pub fn is_empty(&self) -> bool {

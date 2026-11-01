@@ -8,7 +8,7 @@ MiniDAW는 Windows용 오픈소스 Audio/MIDI DAW입니다. Rust/Tauri 2 기반�
 - 여러 Audio/MIDI Track, 비파괴 Clip 편집, Undo/Redo, 프로젝트 저장/불러오기
 - Piano Roll, Velocity/CC/Pitch Bend/Sustain, MIDI 입력과 컴퓨터 키보드 연주, 스텝 입력
 - MIDI Track별 조표와 Note별 ♯/♭/♮ 임시표, Piano Roll 색상·음이름 표시
-- 내장 Synth, 외부 VST3/CLAP 악기·Insert 및 플러그인 지연 보상(PDC)
+- 내장 Synth, 내장 SFZ 샘플러, 외부 VST3/CLAP 악기·Insert 및 플러그인 지연 보상(PDC)
 - Mixer/Master, EQ·Compressor·Limiter·Reverb·Delay, Parameter Automation
 - BPM/박자, PPQ 960000, Grid/Snap, Loop/Cycle, 정밀 숫자 편집
 - Pitch 유지 Time Stretch, Pitch Shift, Tempo Sync, Glue/Bounce

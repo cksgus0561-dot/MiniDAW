@@ -210,6 +210,7 @@ pub fn decode(bytes: &[u8]) -> AppResult<Imported> {
                 name: name.clone(),
                 kind: TrackKind::Midi,
                 instrument: Instrument::None,
+                sfz: None,
                 mix: TrackMix::default(),
                 extensions: Extensions::new(),
                 clips: vec![Clip::Midi(MidiClip {

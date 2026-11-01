@@ -309,6 +309,8 @@ pub enum Instrument {
     None,
     BasicSynth,
     External,
+    /// Built-in SFZ sampler; the instrument file is `Track::sfz`.
+    Sfz,
 }
 impl Instrument {
     pub fn is_none(&self) -> bool {
@@ -357,6 +359,9 @@ pub struct Track {
     pub kind: TrackKind,
     #[serde(default, skip_serializing_if = "Instrument::is_none")]
     pub instrument: Instrument,
+    /// Absolute path of the SFZ instrument (kept when switching instruments).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sfz: Option<String>,
     #[serde(default, skip_serializing_if = "TrackMix::is_default")]
     pub mix: TrackMix,
     pub clips: Vec<Clip>,
@@ -473,6 +478,7 @@ impl Project {
                 name: "Audio 1".into(),
                 kind: TrackKind::Audio,
                 instrument: Instrument::None,
+                sfz: None,
                 mix: TrackMix::default(),
                 clips: vec![],
                 extensions: Extensions::new(),
@@ -561,6 +567,19 @@ impl Project {
             }
             if track.kind != TrackKind::Midi && !track.instrument.is_none() {
                 return Err(invalid("Instrument routing requires a MIDI Track"));
+            }
+            if let Some(path) = &track.sfz {
+                if track.kind != TrackKind::Midi
+                    || path.is_empty()
+                    || path.len() > 4096
+                    || path.contains('\0')
+                    || !path.to_ascii_lowercase().ends_with(".sfz")
+                {
+                    return Err(invalid("SFZ 파일 경로"));
+                }
+            }
+            if track.instrument == Instrument::Sfz && track.sfz.is_none() {
+                return Err(invalid("SFZ 파일 경로"));
             }
             if track.instrument == Instrument::External {
                 let plugin=crate::plugins::instrument(track).ok_or_else(||invalid("External Instrument 설정 없음"))?;plugin.validate()?;if !plugin.descriptor.instrument{return Err(invalid("External Instrument 종류 오류"));}

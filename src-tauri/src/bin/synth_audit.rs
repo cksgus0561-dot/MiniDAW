@@ -25,6 +25,7 @@ fn project(count: usize) -> Project {
         name: "Synth audit".into(),
         kind: TrackKind::Midi,
         instrument: Instrument::BasicSynth,
+        sfz: None,
         mix: TrackMix::default(),
         extensions: Extensions::new(),
         clips: vec![Clip::Midi(MidiClip {

@@ -23,6 +23,7 @@ fn fixture() -> Project {
         name: "Keys".into(),
         kind: TrackKind::Midi,
         instrument: Instrument::None,
+        sfz: None,
         mix: TrackMix::default(),
         extensions: Extensions::new(),
         clips: vec![Clip::Midi(MidiClip {
